@@ -212,6 +212,7 @@ class CompletenessCheckNode:
             조항 매칭 결과
         """
         article_no = user_article.get('number')
+        article_id = user_article.get('article_id')  # user_article_001 형식
         article_title = user_article.get('title', '')
 
         logger.info(f"  완전성 검증 제{article_no}조({article_title})")
@@ -219,9 +220,10 @@ class CompletenessCheckNode:
         # 기본 결과 객체
         result = {
             "user_article_no": article_no,
+            "user_article_id": article_id,  # 추가
             "user_article_title": article_title,
             "matched": False,
-            "matched_articles": [],
+            "matched_articles": [],  # global_id 리스트로 저장될 예정
             "verification_details": []
         }
 
@@ -253,13 +255,74 @@ class CompletenessCheckNode:
             )
 
             if verification_result['matched']:
+                # ArticleMatcher 결과에서 상세 정보 추출
+                selected_parent_ids = verification_result['selected_articles']
+                selected_global_ids = []
+                matched_details = []
+
+                # 캐시 기반 변환 및 상세 정보 수집
+                for parent_id in selected_parent_ids:
+                    # ArticleMatcher의 matched_articles에서 찾기
+                    found = False
+                    for matched in candidate_articles:
+                        if matched.get('parent_id') == parent_id:
+                            base_global_id = matched.get('base_global_id')
+                            if base_global_id:
+                                selected_global_ids.append(base_global_id)
+
+                                # 상세 점수 정보 수집
+                                matched_chunks = matched.get('matched_chunks', [])
+
+                                # 조 단위 평균 점수 계산
+                                avg_dense = sum(c.get('dense_score', 0.0) for c in matched_chunks) / len(matched_chunks) if matched_chunks else 0.0
+                                avg_sparse = sum(c.get('sparse_score', 0.0) for c in matched_chunks) / len(matched_chunks) if matched_chunks else 0.0
+                                avg_dense_raw = sum(c.get('dense_score_raw', 0.0) for c in matched_chunks) / len(matched_chunks) if matched_chunks else 0.0
+                                avg_sparse_raw = sum(c.get('sparse_score_raw', 0.0) for c in matched_chunks) / len(matched_chunks) if matched_chunks else 0.0
+
+                                # 하위항목별 점수 정보
+                                sub_items_scores = []
+                                for chunk in matched_chunks:
+                                    chunk_info = chunk.get('chunk', {})
+                                    sub_items_scores.append({
+                                        'chunk_id': chunk_info.get('id', ''),
+                                        'global_id': chunk_info.get('global_id', ''),
+                                        'text': chunk_info.get('text_raw', ''),
+                                        'dense_score': chunk.get('dense_score', 0.0),
+                                        'dense_score_raw': chunk.get('dense_score_raw', 0.0),
+                                        'sparse_score': chunk.get('sparse_score', 0.0),
+                                        'sparse_score_raw': chunk.get('sparse_score_raw', 0.0),
+                                        'combined_score': chunk.get('score', 0.0)
+                                    })
+
+                                detail = {
+                                    'parent_id': parent_id,
+                                    'global_id': base_global_id,
+                                    'title': matched.get('title', ''),
+                                    'combined_score': matched.get('score', 0.0),  # 조 전체 종합 점수
+                                    'num_sub_items': matched.get('num_sub_items', 0),
+                                    'matched_sub_items': matched.get('matched_sub_items', []),
+                                    'avg_dense_score': avg_dense,
+                                    'avg_dense_score_raw': avg_dense_raw,
+                                    'avg_sparse_score': avg_sparse,
+                                    'avg_sparse_score_raw': avg_sparse_raw,
+                                    'sub_items_scores': sub_items_scores  # 하위항목별 상세 점수
+                                }
+                                matched_details.append(detail)
+                                found = True
+                                break
+
+                    if not found:
+                        logger.warning(f"    base_global_id를 찾을 수 없음: {parent_id}")
+
                 result['matched'] = True
-                result['matched_articles'] = verification_result['selected_articles']
+                result['matched_articles'] = selected_parent_ids  # parent_id 리스트로 저장 (A3/프론트 호환)
+                result['matched_articles_global_ids'] = selected_global_ids  # global_id 별도 저장
+                result['matched_articles_details'] = matched_details  # 상세 점수 정보
                 result['verification_details'] = verification_result.get('verification_details', [])
 
                 logger.info(f"    매칭 성공: {len(result['matched_articles'])}개 조문")
-                for std_id in result['matched_articles']:
-                    logger.info(f"      - {std_id}")
+                for i, (parent_id, global_id) in enumerate(zip(selected_parent_ids, selected_global_ids)):
+                    logger.info(f"      - {parent_id} → {global_id}")
             else:
                 logger.warning(f"    매칭 실패: LLM 검증 통과 못함")
 
@@ -312,6 +375,44 @@ class CompletenessCheckNode:
         if match:
             return int(match.group())
         return 999999
+
+    def _extract_global_id_from_article(
+        self,
+        article: Dict[str, Any],
+        contract_type: str
+    ) -> str:
+        """
+        표준 조항 딕셔너리에서 base global_id 추출
+
+        Args:
+            article: 표준 조항 딕셔너리 (parent_id, title, chunks 포함)
+            contract_type: 계약 유형
+
+        Returns:
+            base global_id (예: "urn:std:provide:art:001")
+        """
+        import re
+
+        # 1. chunks에서 직접 추출 시도
+        chunks = article.get('chunks', [])
+        if chunks and len(chunks) > 0:
+            first_chunk = chunks[0]
+            global_id = first_chunk.get('global_id', '')
+            if global_id:
+                # :att, :sub, :cla 제거
+                base_global_id = ':'.join(global_id.split(':')[:5])
+                return base_global_id
+
+        # 2. parent_id에서 직접 생성 시도
+        parent_id = article.get('parent_id', '')
+        match = re.search(r'제(\d+)조', parent_id)
+        if match:
+            article_num = int(match.group(1))
+            return f"urn:std:{contract_type}:art:{article_num:03d}"
+
+        # 3. 최종 fallback
+        logger.warning(f"    global_id 생성 실패: {parent_id}")
+        return parent_id
 
     def _verify_missing_articles(
         self,
@@ -397,10 +498,13 @@ class CompletenessCheckNode:
                     user_candidates=user_candidates,
                     contract_type=contract_type
                 )
-                
+
+                # missing_article의 chunks에서 global_id 추출 (캐시 기반)
+                global_id = self._extract_global_id_from_article(missing_article, contract_type)
+
                 # 결과 저장
                 analysis_results.append({
-                    "standard_article_id": parent_id,
+                    "standard_article_id": global_id,  # global_id로 저장
                     "standard_article_title": title,
                     "is_truly_missing": verification_result['is_truly_missing'],
                     "confidence": verification_result['confidence'],
@@ -422,9 +526,11 @@ class CompletenessCheckNode:
                 
             except Exception as e:
                 logger.error(f"    재검증 실패: {e}")
+                # missing_article의 chunks에서 global_id 추출
+                global_id = self._extract_global_id_from_article(missing_article, contract_type)
                 # 실패 시 기본 결과
                 analysis_results.append({
-                    "standard_article_id": parent_id,
+                    "standard_article_id": global_id,  # global_id로 저장
                     "standard_article_title": title,
                     "is_truly_missing": True,
                     "confidence": 0.5,

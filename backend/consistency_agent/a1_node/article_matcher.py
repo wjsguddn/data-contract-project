@@ -527,13 +527,17 @@ class ArticleMatcher:
                         all_chunks.append(chunk)
                         seen_chunk_ids.add(chunk_id)
 
+            # base_global_id 추출 (첫 번째 청크에서)
+            base_global_id = self._extract_base_global_id(all_chunks[0]) if all_chunks else None
+
             article_scores.append({
                 'parent_id': article_id,
                 'title': title,
                 'score': avg_score,
                 'matched_sub_items': matched_sub_items,
                 'num_sub_items': len(results),
-                'matched_chunks': all_chunks
+                'matched_chunks': all_chunks,
+                'base_global_id': base_global_id  # 추가
             })
 
         # 정렬: 1. 하위항목 개수 (내림차순) → 2. 유사도 (내림차순) → 3. 조 번호 (오름차순)
@@ -574,10 +578,33 @@ class ArticleMatcher:
             return int(match.group())
         return 999999  # 숫자 추출 실패 시 뒤로 보냄
     
+    def _extract_base_global_id(self, chunk_data: Dict) -> Optional[str]:
+        """
+        청크 데이터에서 base global_id 추출
+
+        Args:
+            chunk_data: 청크 데이터 (matched_chunks의 항목)
+
+        Returns:
+            base global_id (예: "urn:std:provide:art:001")
+            찾을 수 없으면 None
+        """
+        try:
+            # chunk_data 구조: {'chunk': {'global_id': '...', ...}, ...}
+            global_id = chunk_data.get('chunk', {}).get('global_id', '')
+            if global_id:
+                # "urn:std:provide:art:001:att" → "urn:std:provide:art:001"
+                base_global_id = ':'.join(global_id.split(':')[:5])
+                return base_global_id
+            return None
+        except Exception as e:
+            logger.warning(f"    base_global_id 추출 실패: {e}")
+            return None
+
     def _build_article_chunk_count_map(self, contract_type: str):
         """
         각 조별 하위항목 개수를 미리 계산하여 캐싱
-        
+
         구조: {contract_type: {parent_id: count}}
         예: {'provide': {'제1조': 1, '제2조': 6, '제3조': 4, ...}}
         """

@@ -192,32 +192,50 @@ class ContentAnalysisNode:
             analysis.is_special = False
 
             # A1 매칭 정보
-            matched_article_ids = a1_matching_result.get('matched_articles', [])
+            matched_article_ids = a1_matching_result.get('matched_articles_global_ids', [])
+            matched_details = a1_matching_result.get('matched_articles_details', [])
+
+            # fallback: global_id가 없으면 parent_id 사용
+            if not matched_article_ids:
+                matched_article_ids = a1_matching_result.get('matched_articles', [])
 
             if not analysis.matched or not matched_article_ids:
                 logger.info(f"    매칭 실패: A1에서 매칭되지 않음")
                 analysis.reasoning = "A1 매칭 검증 통과 못함"
                 return analysis
 
+            # A1 상세 정보에서 점수 매핑 생성
+            score_map = {}
+            for detail in matched_details:
+                parent_id = detail.get('parent_id')
+                global_id = detail.get('global_id')
+                score_map[parent_id] = detail
+                score_map[global_id] = detail
+
             # 매칭된 조항 정보 구성 (A1 결과 기반)
-            # A1의 matched_articles는 조항 ID 리스트 (예: ["제5조", "제7조"])
+            # A1의 matched_articles_global_ids는 global_id 리스트 (예: ["urn:std:provide:art:005"])
             # A3는 상세 정보가 필요하므로 표준계약서 청크 로드
             analysis.matched_articles = []
 
             for std_article_id in matched_article_ids:
-                # 해당 조의 청크 로드
+                # 해당 조의 청크 로드 (global_id 지원)
                 chunks = self.article_matcher.load_full_article_chunks(
                     std_article_id,
                     contract_type
                 )
 
                 if chunks:
+                    # A1 상세 정보에서 점수 가져오기
+                    detail_info = score_map.get(std_article_id, {})
+
                     # 조 정보 추가
                     article_info = {
-                        'parent_id': std_article_id,
+                        'parent_id': detail_info.get('parent_id', std_article_id),
+                        'global_id': std_article_id,  # global_id 추가
                         'title': chunks[0].get('title', ''),
-                        'score': 0.0,  # A1에서는 유사도를 조 단위로 제공하지 않음
-                        'num_sub_items': 0,  # A1에서는 하위항목 개수 정보 없음
+                        'score': detail_info.get('combined_score', 0.0),  # A1의 점수 사용
+                        'num_sub_items': detail_info.get('num_sub_items', 0),  # A1의 하위항목 개수
+                        'matched_sub_items': detail_info.get('matched_sub_items', []),  # A1의 매칭된 하위항목 인덱스
                         'matched_chunks': chunks
                     }
                     analysis.matched_articles.append(article_info)

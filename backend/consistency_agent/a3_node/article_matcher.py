@@ -606,36 +606,54 @@ class ArticleMatcher:
     
     def load_full_article_chunks(
         self,
-        parent_id: str,
+        article_identifier: str,
         contract_type: str
     ) -> List[Dict]:
         """
         표준계약서 조의 모든 청크 로드
-        
-        해당 조에 속한 모든 하위항목 청크 반환 (조 본문 포함)
+
+        parent_id 또는 global_id (base 형식)를 지원
+
+        Args:
+            article_identifier: parent_id (예: "제1조") 또는 global_id (예: "urn:std:provide:art:001")
+            contract_type: 계약 유형
+
+        Returns:
+            해당 조에 속한 모든 하위항목 청크 리스트 (조 본문 포함)
         """
-        logger.debug(f"  조 청크 로드: {parent_id}")
-        
+        logger.debug(f"  조 청크 로드: {article_identifier}")
+
         try:
             # KnowledgeBaseLoader를 통해 chunks 로드
             chunks = self.kb_loader.load_chunks(contract_type)
-            
+
             if not chunks:
                 logger.warning(f"    청크 데이터 로드 실패: {contract_type}")
                 return []
-            
-            # 해당 parent_id의 청크만 필터링
-            article_chunks = [
-                chunk for chunk in chunks
-                if chunk.get('parent_id') == parent_id
-            ]
-            
+
+            # parent_id인지 global_id인지 판단
+            if article_identifier.startswith('urn:'):
+                # global_id인 경우: base global_id로 필터링
+                # 예: "urn:std:provide:art:001"로 시작하는 모든 청크
+                article_chunks = [
+                    chunk for chunk in chunks
+                    if chunk.get('global_id', '').startswith(article_identifier)
+                ]
+                logger.debug(f"    global_id 기반 필터링: {article_identifier}")
+            else:
+                # parent_id인 경우 (기존 로직)
+                article_chunks = [
+                    chunk for chunk in chunks
+                    if chunk.get('parent_id') == article_identifier
+                ]
+                logger.debug(f"    parent_id 기반 필터링: {article_identifier}")
+
             # order_index로 정렬 (있는 경우)
             article_chunks.sort(key=lambda x: x.get('order_index', 0))
-            
+
             logger.debug(f"    로드 완료: {len(article_chunks)}개 청크")
             return article_chunks
-            
+
         except Exception as e:
             logger.error(f"    조 청크 로드 실패: {e}")
             return []

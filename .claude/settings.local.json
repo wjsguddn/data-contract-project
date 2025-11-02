@@ -13,7 +13,9 @@
       "Bash(git checkout:*)",
       "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\__init__.py\")",
       "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\matching_verifier.py\")",
-      "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\a1_node.py\")"
+      "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\a1_node.py\")",
+      "Bash(git fetch:*)",
+      "Bash(git rev-parse:*)"
     ],
     "deny": [],
     "ask": []
