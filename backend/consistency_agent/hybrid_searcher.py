@@ -108,7 +108,7 @@ class HybridSearcher:
     
     def embed_query(self, query: str, contract_id: str = None) -> np.ndarray:
         """
-        쿼리를 임베딩 벡터로 변환
+        쿼리를 임베딩 벡터로 변환 (EmbeddingService 사용)
 
         Args:
             query: 검색 쿼리
@@ -117,41 +117,14 @@ class HybridSearcher:
         Returns:
             임베딩 벡터 (numpy array)
         """
-        try:
-            response = self.client.embeddings.create(
-                model=self.embedding_model,
-                input=query
-            )
+        from backend.shared.services import get_embedding_service
 
-            # 토큰 사용량 로깅
-            usage = getattr(response, "usage", None)
-            if usage:
-                if contract_id:
-                    self._log_token_usage(
-                        contract_id=contract_id,
-                        api_type="embedding",
-                        model=self.embedding_model,
-                        prompt_tokens=usage.prompt_tokens,
-                        completion_tokens=0,
-                        total_tokens=usage.total_tokens,
-                        extra_info={"purpose": "article_matching_query"}
-                    )
-                preview = query[:50].replace("\n", " ").strip()
-                logger.info(
-                    "Embedding 생성 완료 (contract=%s, prompt_tokens=%d, total_tokens=%d, query=\"%s%s\")",
-                    contract_id or "N/A",
-                    usage.prompt_tokens,
-                    usage.total_tokens,
-                    preview,
-                    "..." if len(query) > 50 else ""
-                )
-
-            embedding = response.data[0].embedding
-            return np.array([embedding], dtype=np.float32)
-
-        except Exception as e:
-            logger.error(f"쿼리 임베딩 실패: {e}")
-            raise
+        embedding = get_embedding_service().get_embedding(
+            text=query,
+            contract_id=contract_id,
+            component="consistency_agent"
+        )
+        return np.array([embedding], dtype=np.float32)
     
     def dense_search(
         self,

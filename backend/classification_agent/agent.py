@@ -425,29 +425,14 @@ class ClassificationAgent:
             return predicted_type, confidence, reasoning
 
     def _get_embedding(self, text: str, contract_id: str = None) -> List[float]:
-        """텍스트 임베딩 생성"""
-        try:
-            response = self.client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
+        """텍스트 임베딩 생성 (EmbeddingService 사용)"""
+        from backend.shared.services import get_embedding_service
 
-            # 토큰 사용량 로깅
-            if hasattr(response, 'usage') and response.usage and contract_id:
-                self._log_token_usage(
-                    contract_id=contract_id,
-                    api_type="embedding",
-                    model=self.embedding_model,
-                    prompt_tokens=response.usage.prompt_tokens,
-                    completion_tokens=0,
-                    total_tokens=response.usage.total_tokens,
-                    extra_info={"purpose": "similarity_calculation"}
-                )
-
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"임베딩 생성 실패: {e}")
-            raise
+        return get_embedding_service().get_embedding(
+            text=text,
+            contract_id=contract_id,
+            component="classification_agent"
+        )
 
     def _log_token_usage(
         self,
@@ -459,26 +444,62 @@ class ClassificationAgent:
         total_tokens: int,
         extra_info: dict = None
     ):
-        """토큰 사용량을 DB에 저장"""
-        try:
-            db = SessionLocal()
-            token_usage = TokenUsage(
-                contract_id=contract_id,
-                component="classification_agent",
-                api_type=api_type,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                extra_info=extra_info
-            )
-            db.add(token_usage)
-            db.commit()
-            logger.info(f"토큰 사용량 로깅: {api_type} - {total_tokens} tokens")
-        except Exception as e:
-            logger.error(f"토큰 사용량 로깅 실패: {e}")
-        finally:
-            db.close()
+        """토큰 사용량을 DB에 저장 (재시도 로직 포함)"""
+        import time
+        from sqlalchemy.exc import OperationalError
+
+        max_retries = 3
+        retry_delay = 0.1  # 100ms
+
+        for attempt in range(max_retries):
+            db = None
+            try:
+                db = SessionLocal()
+                token_usage = TokenUsage(
+                    contract_id=contract_id,
+                    component="classification_agent",
+                    api_type=api_type,
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    extra_info=extra_info
+                )
+                db.add(token_usage)
+                db.commit()
+                logger.info(f"토큰 사용량 로깅: {api_type} - {total_tokens} tokens")
+                return  # 성공 시 즉시 반환
+            except OperationalError as exc:
+                if "database is locked" in str(exc) and attempt < max_retries - 1:
+                    logger.warning(
+                        f"[ClassificationAgent] DB 잠금 감지, 재시도 {attempt + 1}/{max_retries} "
+                        f"(contract_id={contract_id})"
+                    )
+                    time.sleep(retry_delay * (attempt + 1))  # 지수 백오프
+                    if db:
+                        try:
+                            db.rollback()
+                        except:
+                            pass
+                else:
+                    logger.error(f"토큰 사용량 로깅 실패 (최종): {exc}")
+                    if db:
+                        try:
+                            db.rollback()
+                        except:
+                            pass
+                    raise
+            except Exception as e:
+                logger.error(f"토큰 사용량 로깅 실패: {e}")
+                if db:
+                    try:
+                        db.rollback()
+                    except:
+                        pass
+                break
+            finally:
+                if db:
+                    db.close()
 
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """코사인 유사도 계산"""
