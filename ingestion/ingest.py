@@ -4,6 +4,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 import logging
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,12 +35,16 @@ Commands:
     
     def __init__(self):
         super().__init__()
-        # 경로 설정
-        self.base_path = Path("/app/data")
-        self.source_path = self.base_path / "source_documents"
+        # 경로 설정 (Docker와 로컬 모두 지원)
+        if os.path.exists("/app/data"):
+            self.base_path = Path("/app/data")
+            self.index_path = Path("/app/search_indexes")
+        else:
+            self.base_path = Path("./data")
+            self.index_path = Path("./data/search_indexes")
+        
         self.extracted_path = self.base_path / "extracted_documents"
         self.chunked_path = self.base_path / "chunked_documents"
-        self.index_path = Path("/app/search_indexes")
     
     def do_run(self, arg):
         """
