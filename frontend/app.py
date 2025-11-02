@@ -639,6 +639,11 @@ def display_validation_result(validation_data: dict):
         processing_time = content_analysis.get('processing_time', 0.0)
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
     
+    # 체크리스트 검증 결과 표시
+    checklist_validation = validation_result.get('checklist_validation', {})
+    if checklist_validation:
+        display_checklist_results(checklist_validation)
+    
     # 누락 조문 분석 결과 표시
     completeness_check = validation_result.get('completeness_check', {})
     missing_article_analysis = completeness_check.get('missing_article_analysis', [])
@@ -738,6 +743,112 @@ def display_validation_result(validation_data: dict):
                         st.markdown("")  # 여백
             
             st.markdown("---")
+
+
+def display_checklist_results(checklist_validation: dict):
+    """
+    체크리스트 검증 결과 표시
+    
+    Args:
+        checklist_validation: 체크리스트 검증 결과 딕셔너리
+    """
+    if not checklist_validation:
+        return
+    
+    st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+    
+    # 토글 상태 관리
+    if 'show_checklist' not in st.session_state:
+        st.session_state.show_checklist = False
+    
+    # 토글 버튼
+    button_label = f"{'▼' if st.session_state.show_checklist else '▶'} 체크리스트 검증 결과 보기"
+    if st.button(button_label, key="toggle_checklist", use_container_width=False):
+        st.session_state.show_checklist = not st.session_state.show_checklist
+        st.rerun()
+    
+    # 토글이 열려있을 때만 내용 표시
+    if st.session_state.show_checklist:
+        st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
+        
+        # 통계 표시
+        total_items = checklist_validation.get('total_checklist_items', 0)
+        verified_items = checklist_validation.get('verified_items', 0)
+        passed_items = checklist_validation.get('passed_items', 0)
+        failed_items = checklist_validation.get('failed_items', 0)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("전체 항목", f"{total_items}개")
+        with col2:
+            st.metric("통과", f"{passed_items}개")
+        with col3:
+            st.metric("미충족", f"{failed_items}개")
+        
+        st.markdown("---")
+        
+        # 조항별 체크리스트 결과 표시
+        user_article_results = checklist_validation.get('user_article_results', [])
+        
+        if not user_article_results:
+            st.info("체크리스트 검증이 수행되지 않았습니다")
+            return
+        
+        for article_result in user_article_results:
+            user_article_no = article_result.get('user_article_no', 'N/A')
+            user_article_title = article_result.get('user_article_title', '')
+            checklist_results = article_result.get('checklist_results', [])
+            
+            if not checklist_results:
+                continue
+            
+            # 조항 헤더
+            st.markdown(f"<h4>제{user_article_no}조 {user_article_title}</h4>", unsafe_allow_html=True)
+            
+            # 각 체크리스트 항목 표시
+            for item in checklist_results:
+                check_text = item.get('check_text', '')
+                reference = item.get('reference', '')
+                result = item.get('result', '')
+                evidence = item.get('evidence', '')
+                confidence = item.get('confidence', 0.0)
+                requires_manual_review = item.get('requires_manual_review', False)
+                
+                # 결과에 따라 다른 스타일 적용
+                if result == 'YES':
+                    # 녹색 체크 아이콘
+                    st.success(f"✅ {check_text}")
+                    if evidence:
+                        st.caption(f"근거: {evidence}")
+                    if reference:
+                        st.caption(f"참조: {reference}")
+                
+                elif result == 'NO':
+                    # 빨간색 X 아이콘
+                    st.error(f"❌ {check_text}")
+                    st.caption("해당 내용이 계약서에 명시되지 않았습니다")
+                    if reference:
+                        st.caption(f"참조: {reference}")
+                
+                elif result == 'UNCLEAR':
+                    # 노란색 물음표 아이콘
+                    st.warning(f"❓ {check_text}")
+                    st.caption(f"판단이 불명확합니다 (신뢰도: {confidence:.1%})")
+                    if requires_manual_review:
+                        st.caption("⚠️ 수동 검토가 필요합니다")
+                    if reference:
+                        st.caption(f"참조: {reference}")
+                
+                st.markdown("")  # 여백
+            
+            st.markdown("---")
+        
+        # 처리 시간 표시
+        processing_time = checklist_validation.get('processing_time', 0.0)
+        verification_date = checklist_validation.get('verification_date', '')
+        
+        if processing_time > 0:
+            st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
