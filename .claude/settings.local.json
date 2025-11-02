@@ -15,7 +15,9 @@
       "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\matching_verifier.py\")",
       "Bash(\"c:\\Python Projects\\data-contract-project\\backend\\consistency_agent\\a1_node\\a1_node.py\")",
       "Bash(git fetch:*)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "Bash(/tmp/classification_a1.py)",
+      "Bash(/tmp/embedding_service.py)"
     ],
     "deny": [],
     "ask": []
