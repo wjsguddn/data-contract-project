@@ -1,19 +1,22 @@
-# PDF 파싱
+# PDF parsing
 pymupdf==1.23.14
 
-# DOCX 파싱
+# DOCX parsing
 python-docx==1.1.0
 
-# 검색 및 임베딩
+# Search and embedding
 whoosh==2.7.4
-faiss-cpu==1.7.4
-sentence-transformers==2.2.2
+faiss-cpu>=1.8.0
+sentence-transformers>=2.2.2
 openai>=1.30.0
-tiktoken==0.5.2
-numpy==1.24.3
+tiktoken>=0.5.2
+numpy>=1.24.3
 httpx>=0.24.0
 
-# 한국어 형태소 분석
+# Korean morphological analysis
 konlpy==0.6.0
 mecab-ko-msvc
 mecab-ko-dic-msvc
+
+# Environment variables
+python-dotenv==1.0.0

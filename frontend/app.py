@@ -1,6 +1,10 @@
 import streamlit as st
 import time
 import requests
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 
 st.set_page_config(
