@@ -1,4 +1,4 @@
 -r requirements.txt
 
-# 추가 종속성
+# Additional dependencies
 tiktoken==0.5.2

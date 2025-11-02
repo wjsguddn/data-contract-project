@@ -1,13 +1,13 @@
 -r requirements.txt
 
-# 검색
-# faiss-cpu==1.7.4
+# Search
+# faiss-cpu>=1.8.0
 # whoosh==2.7.4
 
 # LLM
-# openai==1.12.0
+# openai>=1.50.0
 # tiktoken==0.5.2
 
-# PDF 생성
+# PDF generation
 # pymupdf==1.23.14
 # reportlab==4.0.7

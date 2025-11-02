@@ -1,9 +1,4 @@
 -r requirements.txt
 
-# 검색
-# faiss-cpu==1.7.4
-# whoosh==2.7.4
-
-# LLM
-# openai==1.12.0
-# tiktoken==0.5.2
+# Additional dependencies for classification agent
+tiktoken==0.5.2
