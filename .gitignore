@@ -84,6 +84,7 @@ data/chunked_documents/*
 logs/*
 !data/README.md
 !data/.gitkeep
+data/parsed_user_contracts/*.json
 
 # Docker
 .dockerignore
