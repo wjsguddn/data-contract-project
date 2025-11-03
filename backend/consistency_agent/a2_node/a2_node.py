@@ -53,11 +53,17 @@ class ChecklistCheckNode:
         self.checklist_loader = ChecklistLoader()
         self.verifier = ChecklistVerifier(llm_client)
         
+        # 개발 중: 캐시 초기화 (코드 변경 반영 위해)
+        self.checklist_loader.clear_cache()
+        
         logger.info("ChecklistCheckNode 초기화 완료")
     
     def check_checklist(self, contract_id: str) -> Dict[str, Any]:
         """
         체크리스트 검증 메인 함수
+        
+        체크리스트 항목을 검증하고 결과를 반환합니다.
+        MANUAL_CHECK_REQUIRED 항목은 user_article_results 내에 포함됩니다.
         
         Args:
             contract_id: 계약서 ID
@@ -69,7 +75,21 @@ class ChecklistCheckNode:
                 "verified_items": int,
                 "passed_items": int,
                 "failed_items": int,
-                "user_article_results": [...],
+                "user_article_results": [
+                    {
+                        "user_article_no": int,
+                        "checklist_results": [
+                            {
+                                "check_text": str,
+                                "reference": str,
+                                "result": "YES" | "NO" | "UNCLEAR" | "MANUAL_CHECK_REQUIRED",
+                                "evidence": str | None,
+                                "user_action": str (MANUAL_CHECK_REQUIRED인 경우),
+                                "manual_check_reason": str (MANUAL_CHECK_REQUIRED인 경우)
+                            }
+                        ]
+                    }
+                ],
                 "processing_time": float,
                 "verification_date": str
             }
@@ -90,9 +110,13 @@ class ChecklistCheckNode:
         logger.info(f"  - 계약 유형: {contract_type}")
         logger.info(f"  - 매칭된 조항 수: {len(matching_details)}개")
         
-        # 2. 체크리스트 로드
+        # 2. Preamble 존재 여부 확인
+        has_preamble = self._check_preamble(contract_id)
+        logger.info(f"  - Preamble 존재 여부: {has_preamble}")
+        
+        # 3. 체크리스트 로드 (preamble 정보 전달)
         logger.info(f"2. 체크리스트 로드 중 (contract_type={contract_type})...")
-        all_checklists = self.checklist_loader.load_checklist(contract_type)
+        all_checklists = self.checklist_loader.load_checklist(contract_type, has_preamble)
         logger.info(f"  - 전체 체크리스트 항목: {len(all_checklists)}개")
         
         # 3. 사용자 조항별 검증
@@ -175,7 +199,7 @@ class ChecklistCheckNode:
         
         # 6. DB 저장
         logger.info("5. DB 저장 중...")
-        self._checklist_save_db(contract_id, result)
+        self._save_to_db(contract_id, result)
         
         logger.info(f"=== A2 노드 완료 (처리 시간: {processing_time:.2f}초) ===")
         
@@ -336,11 +360,34 @@ class ChecklistCheckNode:
         }
 
     
-    def _checklist_save_db(self, contract_id: str, result: Dict[str, Any]):
+    def _check_preamble(self, contract_id: str) -> bool:
+        """
+        사용자 계약서에 preamble이 있는지 확인
+        
+        Args:
+            contract_id: 계약서 ID
+        
+        Returns:
+            preamble이 존재하고 비어있지 않으면 True
+        """
+        contract = self.db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract or not contract.parsed_data:
+            return False
+        
+        parsed_data = contract.parsed_data
+        preamble = parsed_data.get('preamble', [])
+        
+        # preamble이 존재하고 비어있지 않으면 True
+        return bool(preamble and len(preamble) > 0)
+    
+    def _save_to_db(self, contract_id: str, result: Dict[str, Any]):
         """
         체크리스트 검증 결과 DB 저장
         
-        ValidationResult.checklist_validation 필드에 검증 결과를 저장합니다.
+        ValidationResult.checklist_validation 필드에 저장합니다.
         
         Args:
             contract_id: 계약서 ID
