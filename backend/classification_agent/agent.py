@@ -33,6 +33,119 @@ class ClassificationAgent:
         "brokerage_user": "데이터 중개 계약 (이용자용)"
     }
 
+    # Few-shot 예시 (JSON 출력 형식)
+    FEWSHOT_EXAMPLES = """
+예시 1: 데이터 제공형 (provide)
+---
+역할 구조: 데이터제공자가 자신이 보유한 데이터를 데이터이용자에게 제공하거나 접근 권한을 부여하고, 이용자는 그 대가를 지급한다.
+핵심 패턴: "대상데이터 제공", "이용허락", "대가 지급", "비밀유지", "반환 또는 폐기"
+특징: 새 데이터 생성 없음 (기존 데이터의 제공 중심)
+추상 요약: 이미 존재하는 데이터를 일정 조건으로 이용하게 하는 계약. 제공자 → 이용자 방향의 데이터 흐름.
+
+출력:
+{
+  "type": "provide",
+  "confidence": 0.95,
+  "reason": "데이터 제공 및 이용허락 구조 중심, 창출·가공 조항 부재"
+}
+
+
+
+예시 2: 데이터 생성형 (create)
+---
+역할 구조:
+복수의 당사자가 공동으로 데이터를 생성하고, 생성된 데이터(대상데이터 및 파생데이터)의 이용권리, 귀속, 분배를 정한다.
+
+핵심 패턴:
+- "공동 생성", "파생데이터", "이용권리 귀속", "이익분배", "공동 저작권"
+- 데이터 제공·이용보다 '창출'이 핵심
+- 결과물의 소유권·지식재산권 조정이 중요함
+
+추상 요약:
+→ 여러 당사자가 협력하여 데이터를 새로 만드는 계약.
+→ 데이터 흐름이 쌍방향이며 '공동 창작' 중심.
+
+출력:
+{
+  "type": "create",
+  "confidence": "0.93",
+  "reason": "공동 생성과 파생데이터 귀속, 이익분배 조항 존재"
+}
+
+
+
+예시 3: 데이터 가공형 (process)
+---
+역할 구조:
+데이터이용자가 데이터를 제공하면, 데이터가공사업자가 이를 분석·정제·결합하여 가공데이터를 제작하고 납품한다.
+
+핵심 패턴:
+- "가공서비스", "검수", "하자보수", "대가 지급", "가공데이터 귀속"
+- 원본 데이터를 입력받아 변형·분석·생성하는 행위
+- 공급자는 '가공사업자', 수요자는 '이용자'
+
+추상 요약:
+→ 원본 데이터를 입력받아 가공서비스를 수행하는 위탁형 계약.
+→ 산출물은 '가공데이터'로 명시됨.
+
+출력:
+{
+  "type": "process",
+  "confidence": "0.96",
+  "reason": "대상데이터 제공·가공·검수 및 하자보수 구조 명확"
+}
+
+
+
+예시 4: 데이터 중개형 - 제공자용 (brokerage_provider)
+---
+역할 구조:
+플랫폼운영자가 데이터 거래 플랫폼을 운영하고, 데이터제공자가 그 플랫폼을 통해 데이터를 판매·유통한다.
+
+핵심 패턴:
+- "플랫폼운영자", "정산", "수수료", "플랫폼서비스", "광고·프로모션"
+- 제공자는 거래 데이터 등록자, 운영자는 중개자
+- "거래 제한", "환불", "청약철회 안내", "정산 유보" 등이 등장
+
+추상 요약:
+→ 플랫폼을 매개로 데이터를 판매하는 제공자 중심 계약.
+→ 수수료·정산 등 플랫폼 이용 조건 포함.
+
+출력:
+{
+  "type": "brokerage_provider",
+  "confidence": "0.94",
+  "reason": "플랫폼 이용 조항과 정산·수수료 구조 명확, 제공자 중심"
+}
+
+
+예시 5: 데이터 중개형 - 이용자용 (brokerage_user)
+---
+역할 구조:
+플랫폼운영자가 데이터 거래 플랫폼을 운영하고, 데이터제공자가 그 플랫폼을 통해 데이터를 판매·유통한다.
+
+핵심 패턴:
+- "플랫폼운영자", "정산", "수수료", "플랫폼서비스", "광고·프로모션"
+- 제공자는 거래 데이터 등록자, 운영자는 중개자
+- "거래 제한", "환불", "청약철회 안내", "정산 유보" 등이 등장
+
+추상 요약:
+→ 플랫폼을 매개로 데이터를 판매하는 제공자 중심 계약.
+→ 수수료·정산 등 플랫폼 이용 조건 포함.
+
+출력:
+{
+  "type": "brokerage_user",
+  "confidence": "0.94",
+  "reason": "플랫폼 이용 조항과 정산·수수료 구조 명확, 제공자 중심"
+}
+
+
+"""
+
+    # Gating threshold
+    SCORE_GAP_THRESHOLD = 0.05  # 1위-2위 점수 차이 임계값
+
     def __init__(
         self,
         api_key: str = None,
@@ -106,23 +219,18 @@ class ClassificationAgent:
                 parsed_data
             )
 
-            # 3. LLM으로 최종 분류
-            predicted_type, confidence, reasoning = self._llm_classify(
+            # 3. Hybrid Gating을 통한 분류 (임베딩 vs LLM Few-shot)
+            result = self._classify_with_gating(
                 key_articles,
                 similarity_scores,
                 contract_id,
                 filename
             )
 
-            result = {
-                "contract_id": contract_id,
-                "predicted_type": predicted_type,
-                "confidence": confidence,
-                "scores": similarity_scores,
-                "reasoning": reasoning
-            }
-
-            logger.info(f"분류 완료: {contract_id} -> {predicted_type} (신뢰도: {confidence:.2%})")
+            logger.info(
+                f"분류 완료: {contract_id} -> {result['predicted_type']} "
+                f"(신뢰도: {result['confidence']:.2%}, 방법: {result.get('classification_method', 'unknown')})"
+            )
             return result
 
         except Exception as e:
@@ -355,10 +463,12 @@ class ClassificationAgent:
 4. brokerage_provider: 데이터 중개 계약 (제공자용)
 5. brokerage_user: 데이터 중개 계약 (이용자용)
 
-다음 형식으로 답변해주세요:
-유형: [provide|create|process|brokerage_provider|brokerage_user]
-신뢰도: [0.0-1.0 사이의 숫자]
-이유: [간단한 판단 근거]
+**출력 형식** (반드시 JSON만 출력):
+{{
+  "type": "[provide|create|process|brokerage_provider|brokerage_user]",
+  "confidence": [0.0-1.0 사이의 숫자],
+  "reason": "[간단한 판단 근거]"
+}}
 """
 
         try:
@@ -369,7 +479,8 @@ class ClassificationAgent:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
-                max_tokens=500
+                max_tokens=500,
+                response_format={"type": "json_object"}  # JSON 강제
             )
 
             # 토큰 사용량 로깅
@@ -386,35 +497,51 @@ class ClassificationAgent:
 
             answer = response.choices[0].message.content.strip()
 
-            # 응답 파싱
-            predicted_type = None
-            confidence = 0.5
-            reasoning = answer
+            # JSON 파싱 시도
+            try:
+                import json
+                result = json.loads(answer)
+                predicted_type = result.get("type")
+                confidence = float(result.get("confidence", 0.5))
+                reasoning = result.get("reason", "")
 
-            for line in answer.split("\n"):
-                if line.startswith("유형:"):
-                    type_text = line.split(":", 1)[1].strip()
-                    for t in self.CONTRACT_TYPES.keys():
-                        if t in type_text:
-                            predicted_type = t
-                            break
-                elif line.startswith("신뢰도:"):
-                    try:
-                        conf_text = line.split(":", 1)[1].strip()
-                        confidence = float(conf_text.split()[0])
-                    except:
-                        pass
-                elif line.startswith("이유:"):
-                    reasoning = line.split(":", 1)[1].strip()
+                # 유효성 검증
+                if predicted_type not in self.CONTRACT_TYPES:
+                    raise ValueError(f"Invalid type: {predicted_type}")
 
-            # 예외 처리: LLM이 유형을 명시하지 않은 경우
-            if not predicted_type:
-                # 가장 높은 유사도 점수의 유형 사용
-                predicted_type = max(similarity_scores.items(), key=lambda x: x[1])[0]
-                confidence = max(similarity_scores.values())
-                reasoning = f"LLM 파싱 실패. 최고 유사도 기반 분류: {reasoning}"
+                return predicted_type, confidence, reasoning
 
-            return predicted_type, confidence, reasoning
+            except (json.JSONDecodeError, ValueError, KeyError) as parse_error:
+                logger.warning(f"JSON 파싱 실패, 텍스트 파싱 폴백: {parse_error}")
+
+                # 폴백: 텍스트 파싱
+                predicted_type = None
+                confidence = 0.5
+                reasoning = answer
+
+                for line in answer.split("\n"):
+                    if "type" in line.lower() and ":" in line:
+                        type_text = line.split(":", 1)[1].strip().strip('"').strip("'")
+                        for t in self.CONTRACT_TYPES.keys():
+                            if t in type_text:
+                                predicted_type = t
+                                break
+                    elif "confidence" in line.lower() and ":" in line:
+                        try:
+                            conf_text = line.split(":", 1)[1].strip()
+                            confidence = float(conf_text.split()[0].strip(','))
+                        except:
+                            pass
+                    elif "reason" in line.lower() and ":" in line:
+                        reasoning = line.split(":", 1)[1].strip()
+
+                # 파싱 실패 시 유사도 기반
+                if not predicted_type:
+                    predicted_type = max(similarity_scores.items(), key=lambda x: x[1])[0]
+                    confidence = max(similarity_scores.values())
+                    reasoning = f"LLM 파싱 실패. 최고 유사도 기반 분류."
+
+                return predicted_type, confidence, reasoning
 
         except Exception as e:
             logger.error(f"LLM 분류 실패: {e}")
@@ -500,6 +627,219 @@ class ClassificationAgent:
             finally:
                 if db:
                     db.close()
+
+    def _classify_with_gating(
+        self,
+        key_articles: List[Dict[str, str]],
+        similarity_scores: Dict[str, float],
+        contract_id: str,
+        filename: str = None
+    ) -> Dict[str, Any]:
+        """
+        Hybrid Gating을 통한 분류
+
+        1위-2위 점수 차이가 충분히 크면 임베딩 결과 사용 (LLM 스킵)
+        차이가 작으면 LLM Few-shot 분류 수행
+
+        Args:
+            key_articles: 주요 조항 리스트
+            similarity_scores: 5종 계약 유형별 유사도 점수
+            contract_id: 계약서 ID
+            filename: 파일명 (옵션)
+
+        Returns:
+            분류 결과 딕셔너리
+        """
+        # 1위와 2위 점수 차이 계산
+        sorted_scores = sorted(similarity_scores.items(), key=lambda x: x[1], reverse=True)
+        top1_type, top1_score = sorted_scores[0]
+        top2_type, top2_score = sorted_scores[1] if len(sorted_scores) > 1 else (None, 0.0)
+
+        score_gap = top1_score - top2_score
+
+        # Gating 임계값 확인
+        if score_gap >= self.SCORE_GAP_THRESHOLD:
+            # 명확함 → 임베딩 결과 사용 (LLM 호출 없음)
+            logger.info(f"✓ 임베딩 기반 결정 (gap={score_gap:.3f}, top1={top1_type}:{top1_score:.3f})")
+            return {
+                "contract_id": contract_id,
+                "predicted_type": top1_type,
+                "confidence": top1_score,
+                "scores": similarity_scores,
+                "reasoning": f"임베딩 유사도 차이가 충분함 (gap={score_gap:.3f})",
+                "classification_method": "embedding",
+                "score_gap": score_gap
+            }
+        else:
+            # 애매함 → LLM Few-shot 호출
+            logger.info(f"⚠ LLM 정밀 분류 필요 (gap={score_gap:.3f}, top1={top1_type}:{top1_score:.3f}, top2={top2_type}:{top2_score:.3f})")
+            predicted_type, confidence, reasoning = self._llm_classify_with_fewshot(
+                key_articles,
+                similarity_scores,
+                contract_id,
+                filename
+            )
+            return {
+                "contract_id": contract_id,
+                "predicted_type": predicted_type,
+                "confidence": confidence,
+                "scores": similarity_scores,
+                "reasoning": reasoning,
+                "classification_method": "llm_fewshot",
+                "score_gap": score_gap
+            }
+
+    def _llm_classify_with_fewshot(
+        self,
+        key_articles: List[Dict[str, str]],
+        similarity_scores: Dict[str, float],
+        contract_id: str,
+        filename: str = None
+    ) -> Tuple[str, float, str]:
+        """
+        Few-shot 프롬프트를 사용한 LLM 분류 (JSON 모드)
+
+        Args:
+            key_articles: 주요 조항 리스트
+            similarity_scores: 유사도 점수
+            contract_id: 계약서 ID
+            filename: 파일명 (옵션)
+
+        Returns:
+            (predicted_type, confidence, reasoning) 튜플
+        """
+        try:
+            # 조항 텍스트 구성
+            articles_text = ""
+            for i, art in enumerate(key_articles, 1):
+                title = art.get("title", "")
+                text = art.get("text", "")
+                content_preview = art.get("content", [""])[0] if art.get("content") else ""
+
+                articles_text += f"[조항 {i}] 제목: {title}\n"
+                if text:
+                    articles_text += f"  조문: {text}\n"
+                if content_preview:
+                    preview = content_preview[:200] + "..." if len(content_preview) > 200 else content_preview
+                    articles_text += f"  내용: {preview}\n"
+                articles_text += "\n"
+
+            # 유사도 점수 텍스트
+            scores_text = "\n".join([
+                f"- {self.CONTRACT_TYPES[t]}: {score:.3f}"
+                for t, score in sorted(similarity_scores.items(), key=lambda x: x[1], reverse=True)
+            ])
+
+            # 파일명 정보
+            filename_info = f" (파일명: {filename})" if filename else ""
+
+            # Few-shot 프롬프트 구성
+            prompt = f"""당신은 데이터 계약서 분류 전문가입니다.
+
+다음은 5가지 데이터 계약 유형의 특징과 출력 예시입니다:
+
+{self.FEWSHOT_EXAMPLES}
+
+---
+
+이제 사용자가 업로드한 계약서의 주요 내용을 분석해주세요:{filename_info}
+
+{articles_text}
+
+임베딩 유사도 점수 (참고용):
+{scores_text}
+
+**분석 지침**:
+1. 역할 구조 파악 (누가 누구에게 무엇을 제공/위탁/중개하는가)
+2. 핵심 패턴 찾기 (제공, 생성, 가공, 중개 관련 키워드)
+3. 데이터 흐름 확인 (단방향/양방향, 창출 여부)
+
+**출력 형식** (반드시 JSON만 출력):
+{{
+  "type": "[provide|create|process|brokerage_provider|brokerage_user]",
+  "confidence": [0.0-1.0 사이의 숫자],
+  "reason": "[역할 구조와 핵심 패턴 기반 판단 근거]"
+}}
+"""
+
+            # LLM 호출 (JSON 모드)
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[
+                    {"role": "system", "content": "당신은 데이터 계약서 분류 전문가입니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=600,
+                response_format={"type": "json_object"}  # JSON 강제
+            )
+
+            # 토큰 사용량 로깅
+            self._log_token_usage(
+                contract_id=contract_id,
+                api_type="chat_completion",
+                model=self.chat_model,
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+                extra_info={"purpose": "classification_fewshot"}
+            )
+
+            # 응답 파싱 (JSON 우선)
+            answer = response.choices[0].message.content.strip()
+
+            try:
+                import json
+                result = json.loads(answer)
+                predicted_type = result.get("type")
+                confidence = float(result.get("confidence", 0.5))
+                reasoning = result.get("reason", "")
+
+                # 유효성 검증
+                if predicted_type not in self.CONTRACT_TYPES:
+                    raise ValueError(f"Invalid type: {predicted_type}")
+
+                return predicted_type, confidence, reasoning
+
+            except (json.JSONDecodeError, ValueError, KeyError) as parse_error:
+                logger.warning(f"JSON 파싱 실패, 텍스트 파싱 시도: {parse_error}")
+
+                # 폴백: 텍스트 파싱
+                predicted_type = None
+                confidence = 0.5
+                reasoning = answer
+
+                for line in answer.split("\n"):
+                    if "type" in line.lower() and ":" in line:
+                        type_text = line.split(":", 1)[1].strip().strip('"').strip("'")
+                        for t in self.CONTRACT_TYPES.keys():
+                            if t in type_text:
+                                predicted_type = t
+                                break
+                    elif "confidence" in line.lower() and ":" in line:
+                        try:
+                            conf_text = line.split(":", 1)[1].strip()
+                            confidence = float(conf_text.split()[0].strip(','))
+                        except:
+                            pass
+                    elif "reason" in line.lower() and ":" in line:
+                        reasoning = line.split(":", 1)[1].strip()
+
+                # 파싱 실패 시 폴백
+                if not predicted_type:
+                    predicted_type = max(similarity_scores.items(), key=lambda x: x[1])[0]
+                    confidence = max(similarity_scores.values())
+                    reasoning = f"LLM 파싱 실패. 최고 유사도 기반 분류."
+
+                return predicted_type, confidence, reasoning
+
+        except Exception as e:
+            logger.error(f"LLM Few-shot 분류 실패: {e}")
+            # Fallback: 유사도 기반
+            predicted_type = max(similarity_scores.items(), key=lambda x: x[1])[0]
+            confidence = max(similarity_scores.values())
+            reasoning = f"LLM 호출 실패. 유사도 기반 분류."
+            return predicted_type, confidence, reasoning
 
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """코사인 유사도 계산"""
