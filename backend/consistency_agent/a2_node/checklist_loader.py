@@ -45,9 +45,9 @@ class ChecklistLoader:
         self._cache: Dict[str, List[Dict]] = {}
         logger.info("ChecklistLoader 초기화 완료")
     
-    def load_checklist(self, contract_type: str) -> List[Dict]:
+    def load_checklist(self, contract_type: str, has_preamble: bool = False) -> List[Dict]:
         """
-        체크리스트 JSON 파일 로드
+        체크리스트 JSON 파일 로드 및 reference 정리
         
         Args:
             contract_type: 계약 유형
@@ -56,13 +56,14 @@ class ChecklistLoader:
                 - "process": 데이터 가공서비스형
                 - "brokerage_provider": 데이터 중개거래형 (제공자-운영자)
                 - "brokerage_user": 데이터 중개거래형 (이용자-운영자)
+            has_preamble: 사용자 계약서에 preamble이 있는지 여부
         
         Returns:
-            체크리스트 항목 리스트
+            체크리스트 항목 리스트 (reference 정리됨)
             [
                 {
                     "check_text": str,      # 체크리스트 질문
-                    "reference": str,       # 참조 (예: "제1조 (106쪽)")
+                    "reference": str,       # 참조 (정리됨, 예: "제1조")
                     "global_id": str        # 표준 조항 global_id
                 },
                 ...
@@ -80,21 +81,24 @@ class ChecklistLoader:
                 f"유효한 유형: {self.VALID_CONTRACT_TYPES}"
             )
         
-        # 2. 캐시 확인
-        if contract_type in self._cache:
-            logger.info(f"체크리스트 캐시 히트: {contract_type}")
-            return self._cache[contract_type]
+        # 2. 캐시 키 생성 (preamble 여부 포함)
+        cache_key = f"{contract_type}_preamble_{has_preamble}"
         
-        # 3. 파일 경로 생성
+        # 3. 캐시 확인
+        if cache_key in self._cache:
+            logger.info(f"체크리스트 캐시 히트: {cache_key}")
+            return self._cache[cache_key]
+        
+        # 4. 파일 경로 생성
         file_path = self.CHECKLIST_PATH_TEMPLATE.format(contract_type=contract_type)
         
-        # 4. 파일 존재 확인
+        # 5. 파일 존재 확인
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"체크리스트 파일을 찾을 수 없습니다: {file_path}"
             )
         
-        # 5. 파일 로드
+        # 6. 파일 로드
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 checklist_data = json.load(f)
@@ -104,10 +108,13 @@ class ChecklistLoader:
                 f"({len(checklist_data)} 항목)"
             )
             
-            # 6. 캐시 저장
-            self._cache[contract_type] = checklist_data
+            # 7. Reference 정리
+            cleaned_data = self._clean_references(checklist_data, has_preamble)
             
-            return checklist_data
+            # 8. 캐시 저장
+            self._cache[cache_key] = cleaned_data
+            
+            return cleaned_data
         
         except json.JSONDecodeError as e:
             raise RuntimeError(
@@ -194,3 +201,51 @@ class ChecklistLoader:
             contract_type: len(items)
             for contract_type, items in self._cache.items()
         }
+    
+    def _clean_references(self, checklist_data: List[Dict], has_preamble: bool) -> List[Dict]:
+        """
+        체크리스트 항목의 reference 정리
+        
+        1. 페이지 번호 제거: "제1조 (106쪽)" → "제1조"
+        2. 부가 설명 제거: "제1조 및 서명 날인" → "제1조"
+        3. Preamble 있는 경우: "제1조" → "서문 또는 제1조"
+        
+        Args:
+            checklist_data: 체크리스트 항목 리스트
+            has_preamble: preamble 존재 여부
+        
+        Returns:
+            reference가 정리된 체크리스트 항목 리스트
+        """
+        import re
+        
+        cleaned_data = []
+        
+        for item in checklist_data:
+            cleaned_item = item.copy()
+            reference = cleaned_item.get('reference', '')
+            
+            if reference:
+                # 1. 페이지 번호 제거: (86쪽), (100-105쪽) 등
+                cleaned_ref = re.sub(r'\s*\(\d+[-~]\d+쪽\)', '', reference)
+                cleaned_ref = re.sub(r'\s*\(\d+쪽\)', '', cleaned_ref)
+                
+                # 2. "및 ..." 이후 부가 설명 제거
+                cleaned_ref = re.sub(r'\s*및\s+.*$', '', cleaned_ref)
+                
+                # 3. "또는 ..." 이후 부가 설명 제거 (단, "서문 또는 제1조"는 유지)
+                if '서문 또는' not in cleaned_ref:
+                    cleaned_ref = re.sub(r'\s*또는\s+(?!제\d+조).*$', '', cleaned_ref)
+                
+                # 4. 앞뒤 공백 제거
+                cleaned_ref = cleaned_ref.strip()
+                
+                # 5. Preamble이 있고 "제1조"가 포함된 경우 "서문 또는 제1조"로 변경
+                if has_preamble and '제1조' in cleaned_ref and '서문' not in cleaned_ref:
+                    cleaned_ref = cleaned_ref.replace('제1조', '서문 또는 제1조')
+                
+                cleaned_item['reference'] = cleaned_ref
+            
+            cleaned_data.append(cleaned_item)
+        
+        return cleaned_data
