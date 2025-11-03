@@ -110,20 +110,38 @@ class ChecklistCheckNode:
         logger.info(f"  - 계약 유형: {contract_type}")
         logger.info(f"  - 매칭된 조항 수: {len(matching_details)}개")
         
-        # 2. Preamble 존재 여부 확인
-        has_preamble = self._check_preamble(contract_id)
+        # 2. Preamble 존재 여부 확인 및 텍스트 로드
+        preamble_text = self._get_preamble_text(contract_id)
+        has_preamble = bool(preamble_text)
         logger.info(f"  - Preamble 존재 여부: {has_preamble}")
+        if has_preamble:
+            logger.info(f"  - Preamble 길이: {len(preamble_text)} 문자")
         
         # 3. 체크리스트 로드 (preamble 정보 전달)
         logger.info(f"2. 체크리스트 로드 중 (contract_type={contract_type})...")
         all_checklists = self.checklist_loader.load_checklist(contract_type, has_preamble)
         logger.info(f"  - 전체 체크리스트 항목: {len(all_checklists)}개")
         
-        # 3. 사용자 조항별 검증
-        logger.info("3. 사용자 조항별 체크리스트 검증 시작...")
+        # 3. Preamble 체크리스트 검증 (있는 경우)
         user_article_results = []
         
-        for idx, detail in enumerate(matching_details, 1):
+        if has_preamble:
+            logger.info("3-1. Preamble 체크리스트 검증 시작...")
+            preamble_result = self._verify_preamble_checklist(
+                contract_id,
+                preamble_text,
+                all_checklists,
+                contract_type
+            )
+            if preamble_result:
+                user_article_results.append(preamble_result)
+                logger.info(f"  Preamble 검증 완료: {len(preamble_result.get('checklist_results', []))}개 항목")
+        
+        # 4. 사용자 조항별 검증
+        logger.info("3-2. 사용자 조항별 체크리스트 검증 시작...")
+        article_start_idx = len(user_article_results) + 1
+        
+        for idx, detail in enumerate(matching_details, article_start_idx):
             if not detail.get('matched', False):
                 logger.info(f"  [{idx}/{len(matching_details)}] 조항 {detail.get('user_article_no')}: 매칭 없음, 건너뜀")
                 continue
@@ -177,7 +195,7 @@ class ChecklistCheckNode:
                 "checklist_results": checklist_results
             })
         
-        # 4. 통계 계산
+        # 5. 통계 계산
         logger.info("4. 통계 계산 중...")
         statistics = self._calculate_statistics(user_article_results)
         logger.info(
@@ -187,7 +205,7 @@ class ChecklistCheckNode:
             f"  - 미충족: {statistics['failed_items']}개"
         )
         
-        # 5. 최종 결과 구성
+        # 6. 최종 결과 구성
         processing_time = time.time() - start_time
         
         result = {
@@ -197,7 +215,7 @@ class ChecklistCheckNode:
             "verification_date": datetime.now().isoformat()
         }
         
-        # 6. DB 저장
+        # 7. DB 저장
         logger.info("5. DB 저장 중...")
         self._save_to_db(contract_id, result)
         
@@ -360,28 +378,99 @@ class ChecklistCheckNode:
         }
 
     
-    def _check_preamble(self, contract_id: str) -> bool:
+    def _get_preamble_text(self, contract_id: str) -> str:
         """
-        사용자 계약서에 preamble이 있는지 확인
+        사용자 계약서의 preamble 텍스트 로드
         
         Args:
             contract_id: 계약서 ID
         
         Returns:
-            preamble이 존재하고 비어있지 않으면 True
+            preamble 전문 (줄바꿈으로 결합)
+            빈 문자열: preamble이 없는 경우
         """
         contract = self.db.query(ContractDocument).filter(
             ContractDocument.contract_id == contract_id
         ).first()
         
         if not contract or not contract.parsed_data:
-            return False
+            return ""
         
         parsed_data = contract.parsed_data
         preamble = parsed_data.get('preamble', [])
         
-        # preamble이 존재하고 비어있지 않으면 True
-        return bool(preamble and len(preamble) > 0)
+        if not preamble:
+            return ""
+        
+        # 리스트를 줄바꿈으로 결합
+        if isinstance(preamble, list):
+            return '\n'.join(str(line) for line in preamble if line)
+        else:
+            return str(preamble) if preamble else ""
+    
+    def _verify_preamble_checklist(
+        self,
+        contract_id: str,
+        preamble_text: str,
+        all_checklists: List[Dict[str, Any]],
+        contract_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Preamble 체크리스트 검증
+        
+        제1조 관련 체크리스트 중 preamble에서 확인해야 하는 항목들을 검증합니다.
+        
+        Args:
+            contract_id: 계약서 ID
+            preamble_text: preamble 전문
+            all_checklists: 전체 체크리스트 항목
+            contract_type: 계약 유형
+        
+        Returns:
+            preamble 검증 결과 또는 None (관련 체크리스트가 없는 경우)
+        """
+        # 제1조 global_id
+        art1_global_id = f"urn:std:{contract_type}:art:001"
+        
+        # 제1조 관련 체크리스트 필터링
+        art1_checklists = self.checklist_loader.filter_by_global_ids(
+            all_checklists,
+            [art1_global_id]
+        )
+        
+        if not art1_checklists:
+            logger.warning("  제1조 관련 체크리스트가 없음")
+            return None
+        
+        logger.info(f"  제1조 관련 체크리스트: {len(art1_checklists)}개")
+        
+        # 제1조 조문 텍스트도 함께 로드 (있는 경우)
+        art1_text = self._get_user_clause_text(contract_id, "user_article_001")
+        
+        # Preamble + 제1조 결합
+        combined_text = preamble_text
+        if art1_text:
+            combined_text = f"{preamble_text}\n\n{art1_text}"
+        
+        # LLM 검증
+        checklist_results = self.verifier.verify_batch(
+            combined_text,
+            art1_checklists
+        )
+        
+        # reference에 "서문 + " 추가 (서문 검증이므로)
+        for result in checklist_results:
+            reference = result.get('reference', '')
+            if reference and '제1조' in reference:
+                result['reference'] = f"서문 + {reference}"
+        
+        return {
+            "user_article_no": 0,  # preamble은 0번으로 표시
+            "user_article_id": "preamble",
+            "user_article_title": "서문",
+            "matched_std_global_ids": [art1_global_id],
+            "checklist_results": checklist_results
+        }
     
     def _save_to_db(self, contract_id: str, result: Dict[str, Any]):
         """
