@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from ..models import ArticleAnalysis, ContentAnalysisResult
-from .article_matcher import ArticleMatcher
 from .content_comparator import ContentComparator
 
 logger = logging.getLogger(__name__)
@@ -17,36 +16,27 @@ logger = logging.getLogger(__name__)
 
 class ContentAnalysisNode:
     """
-    A3 노드 - 내용 분석
-    
-    주요 기능:
-    1. 사용자 조항과 표준 조항 매칭 (ArticleMatcher)
-    2. LLM 기반 내용 비교 (ContentComparator)
-    3. 개선 제안 생성 (SuggestionGenerator)
-    4. 특수 조항 처리 (SpecialArticleHandler)
+    Content analysis node (A3).
+
+    Responsibilities:
+    1. Load standard article details from A1 matching outputs.
+    2. Compare contract content via LLM (ContentComparator).
+    3. Draft improvement suggestions (SuggestionGenerator).
+    4. Handle special cases (SpecialArticleHandler).
     """
     
     def __init__(
         self,
         knowledge_base_loader,
-        azure_client,
-        similarity_threshold: float = 0.7
+        azure_client
     ):
         """
         Args:
             knowledge_base_loader: KnowledgeBaseLoader 인스턴스
             azure_client: Azure OpenAI 클라이언트
-            similarity_threshold: 매칭 임계값
         """
         self.kb_loader = knowledge_base_loader
         self.azure_client = azure_client
-        
-        # 하위 컴포넌트 초기화
-        self.article_matcher = ArticleMatcher(
-            knowledge_base_loader,
-            azure_client,
-            similarity_threshold=similarity_threshold
-        )
 
         self.content_comparator = ContentComparator(azure_client)
 
@@ -219,7 +209,7 @@ class ContentAnalysisNode:
 
             for std_article_id in matched_article_ids:
                 # 해당 조의 청크 로드 (global_id 지원)
-                chunks = self.article_matcher.load_full_article_chunks(
+                chunks = self._load_standard_article_chunks(
                     std_article_id,
                     contract_type
                 )
@@ -353,6 +343,48 @@ class ContentAnalysisNode:
             analysis.reasoning = f"분석 중 오류 발생: {str(e)}"
 
         return analysis
+
+    def _load_standard_article_chunks(
+        self,
+        article_identifier: str,
+        contract_type: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Load chunk records for a standard article identified by parent_id or global_id.
+
+        Args:
+            article_identifier: Either a parent_id (e.g. "조문5") or global_id (e.g. "urn:std:provide:art:005").
+            contract_type: Contract type key used by the knowledge base loader.
+
+        Returns:
+            List of chunk dictionaries that belong to the article.
+        """
+        logger.debug(f"  Loading standard article chunks: {article_identifier}")
+
+        try:
+            chunks = self.kb_loader.load_chunks(contract_type)
+        except Exception as exc:
+            logger.error(f"    Failed to load chunks for {contract_type}: {exc}")
+            return []
+
+        if not chunks:
+            logger.warning(f"    Chunk data not available: {contract_type}")
+            return []
+
+        if article_identifier.startswith("urn:"):
+            article_chunks = [
+                chunk for chunk in chunks
+                if chunk.get("global_id", "").startswith(article_identifier)
+            ]
+        else:
+            article_chunks = [
+                chunk for chunk in chunks
+                if chunk.get("parent_id") == article_identifier
+            ]
+
+        article_chunks.sort(key=lambda x: x.get("order_index", 0))
+        logger.debug(f"    Loaded {len(article_chunks)} chunk(s) for {article_identifier}")
+        return article_chunks
 
     def _load_a1_matching_results(self, contract_id: str) -> List[Dict[str, Any]]:
         """
