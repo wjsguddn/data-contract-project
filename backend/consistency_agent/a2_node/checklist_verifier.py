@@ -242,22 +242,39 @@ JSON 형식:
 {checklist_text}
 
 각 항목에 대해 다음 형식으로 답변해주세요:
-1. 결과: YES 또는 NO
-2. 근거: 판단 근거가 되는 계약서 내용 (YES인 경우만, 간략히)
+1. 결과: YES, NO, 또는 MANUAL_CHECK_REQUIRED
+2. 근거: 판단 근거 (YES인 경우 계약서의 해당 부분 인용, 간략히)
 3. 신뢰도: 0.0~1.0 사이의 값
+4. 사용자 확인 필요 시: 이유와 확인 방법
 
 **판단 기준:**
-- YES: 요구사항이 계약서에 명시되어 있음
-- NO: 요구사항이 계약서에 명시되지 않음
+- **YES**: 요구사항이 계약서에 명시되어 있음
+- **NO**: 요구사항이 계약서에 명시되지 않음
+- **MANUAL_CHECK_REQUIRED**: AI가 판단할 수 없음 (외부 데이터 필요)
+  
+**MANUAL_CHECK_REQUIRED 판단 기준:**
+다음과 같은 경우 MANUAL_CHECK_REQUIRED로 판단하세요:
+1. 등기부등본, 사업자등록증 등 외부 공적 문서와 대조가 필요한 경우
+   예: "등기부등본에 표시된 것 그대로 기재되어 있는가?"
+2. 법적 권한, 적법성 등 법률 전문가 판단이 필요한 경우
+   예: "적법한 권한을 가진 대표자의 성명이 기재되어 있는가?"
+3. 물리적 확인이 필요한 경우
+   예: "날인 또는 서명이 되어 있는가?"
+4. 첨부 문서, 별지 등 계약서 외부 문서 확인이 필요한 경우
+   예: "별지에 데이터 명세가 구체적으로 작성되어 있는가?"
+5. 사전 협의 내용, 시장 수준 등 외부 정보가 필요한 경우
+   예: "계약 금액이 사전 협의 내용과 일치하는가?"
 
 JSON 배열 형식으로 답변:
 {{
   "results": [
     {{
       "item_number": 1,
-      "result": "YES" or "NO",
+      "result": "YES" or "NO" or "MANUAL_CHECK_REQUIRED",
       "evidence": "근거 텍스트" or null,
-      "confidence": 0.95
+      "confidence": 0.95,
+      "manual_check_reason": "외부 문서 대조 필요" (MANUAL_CHECK_REQUIRED인 경우만),
+      "user_action": "등기부등본과 대조하여 회사명, 주소 확인" (MANUAL_CHECK_REQUIRED인 경우만)
     }},
     ...
   ]
@@ -294,14 +311,21 @@ JSON 배열 형식으로 답변:
                 llm_result = llm_results[idx]
             
             if llm_result:
-                results.append({
+                result_data = {
                     "check_text": item.get('check_text', ''),
                     "reference": item.get('reference', ''),
                     "std_global_id": item.get('global_id', ''),
                     "result": llm_result.get('result', 'NO'),
                     "evidence": llm_result.get('evidence'),
                     "confidence": float(llm_result.get('confidence', 0.5))
-                })
+                }
+                
+                # MANUAL_CHECK_REQUIRED인 경우 추가 정보 포함
+                if llm_result.get('result') == 'MANUAL_CHECK_REQUIRED':
+                    result_data['manual_check_reason'] = llm_result.get('manual_check_reason', '')
+                    result_data['user_action'] = llm_result.get('user_action', '')
+                
+                results.append(result_data)
             else:
                 # LLM 결과가 없으면 NO 처리
                 logger.warning(f"  항목 {idx+1}의 LLM 결과 없음, NO 처리")
