@@ -26,6 +26,9 @@ class ArticleAnalysis:
     # 매칭된 모든 조 (정렬됨: 하위항목 개수 → 유사도 → 조 번호 순)
     matched_articles: List[Dict[str, Any]] = field(default_factory=list)
 
+    # A1 노드의 상세 매칭 정보 (하위항목별 점수 포함)
+    matched_articles_details: List[Dict[str, Any]] = field(default_factory=list)
+
     # 하위항목별 검색 결과
     sub_item_results: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -47,6 +50,7 @@ class ArticleAnalysis:
             "std_article_title": self.std_article_title,
             "is_special": self.is_special,
             "matched_articles": self.matched_articles,
+            "matched_articles_details": self.matched_articles_details,
             "sub_item_results": self.sub_item_results,
             "suggestions": self.suggestions,
             "reasoning": self.reasoning,

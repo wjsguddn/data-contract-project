@@ -127,11 +127,16 @@ class ContentAnalysisNode:
             except Exception as e:
                 logger.error(f"  조항 분석 실패 (제{article.get('number')}조): {e}")
                 continue
+            finally:
+                # 조항별 내용 검증 완료 구분선
+                logger.info("--------------------------------------------------------------------------------")
 
         # 처리 시간 기록
         result.processing_time = time.time() - start_time
 
         logger.info(f"A3 분석 완료: {result.analyzed_articles}/{result.total_articles}개 조항 분석 ({result.processing_time:.2f}초)")
+        logger.info("================================================================================")
+        logger.info("================================================================================")
 
         return result
     
@@ -240,6 +245,9 @@ class ContentAnalysisNode:
             analysis.similarity = first_article.get('score', 0.0)
             analysis.std_article_id = first_article['parent_id']
             analysis.std_article_title = first_article.get('title', '')
+
+            # A1의 상세 매칭 정보를 A3 결과에 포함 (프론트엔드 하위항목 드랍다운용)
+            analysis.matched_articles_details = matched_details
 
             # 매칭 성공
             logger.info(f"    매칭 성공 (A1 참조): {analysis.std_article_id}")

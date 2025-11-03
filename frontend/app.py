@@ -66,7 +66,6 @@ def main() -> None:
             max_value=1.0,
             value=st.session_state.text_weight,
             step=0.05,
-            help="본문과 제목의 가중합 비율 (본문:제목)",
             key="text_weight_slider"
         )
         title_weight = 1.0 - text_weight
@@ -83,7 +82,6 @@ def main() -> None:
             max_value=1.0,
             value=st.session_state.dense_weight,
             step=0.05,
-            help="시멘틱(FAISS)과 키워드(Whoosh)의 가중합 비율",
             key="dense_weight_slider"
         )
         sparse_weight = 1.0 - dense_weight
@@ -523,71 +521,83 @@ def display_validation_result(validation_data: dict):
                 # Primary 매칭 조
                 std_article_id = analysis.get('std_article_id', '')
                 std_article_title = analysis.get('std_article_title', '')
-                st.markdown(f"**Primary 매칭**: {std_article_id} ({std_article_title}) - Rank Score: {similarity:.3f}")
+                formatted_std_id = _format_std_reference(std_article_id)
+                st.markdown(f"**Primary 매칭**: {formatted_std_id} ({std_article_title}) - Rank Score: {similarity:.3f}")
 
-                # 다중 매칭 항목 표시
-                matched_articles = analysis.get('matched_articles', [])
-                if matched_articles and len(matched_articles) > 1:
-                    st.markdown(f"**다중 매칭 항목** ({len(matched_articles)}개 조):")
-                    for i, article in enumerate(matched_articles, 1):
+                # 다중 매칭 항목 표시 (A1 노드의 matched_articles_details 사용)
+                matched_articles_details = analysis.get('matched_articles_details', [])
+                if matched_articles_details and len(matched_articles_details) > 1:
+                    st.markdown(f"**다중 매칭 항목** ({len(matched_articles_details)}개 조):")
+                    for i, article in enumerate(matched_articles_details, 1):
                         article_id = article.get('parent_id', '')
+                        article_global_id = article.get('global_id', '')
+                        formatted_article_id = _format_std_reference(article_global_id)
                         article_title = article.get('title', '')
-                        article_score = article.get('score', 0.0)
+                        article_score = article.get('combined_score', 0.0)
                         num_sub_items = article.get('num_sub_items', 0)
                         matched_sub_items = article.get('matched_sub_items', [])
                         sub_items_str = ', '.join(map(str, matched_sub_items))
 
                         # Primary는 강조 표시
                         if i == 1:
-                            st.markdown(f"  **{i}. {article_id}** ({article_title}): {article_score:.3f} (하위항목 {num_sub_items}개: {sub_items_str})")
+                            st.markdown(f"  **{i}. {formatted_article_id}** ({article_title}): {article_score:.3f} (하위항목 {num_sub_items}개: {sub_items_str})")
                         else:
-                            st.markdown(f"  {i}. {article_id} ({article_title}): {article_score:.3f} (하위항목 {num_sub_items}개: {sub_items_str})")
+                            st.markdown(f"  {i}. {formatted_article_id} ({article_title}): {article_score:.3f} (하위항목 {num_sub_items}개: {sub_items_str})")
             else:
                 st.markdown(f"**매칭 결과**: 매칭 실패 (검색 결과 없음)")
 
-            # 하위항목별 상세 결과
-            sub_item_results = analysis.get('sub_item_results', [])
-            if sub_item_results:
-                # 하위항목별 상세 결과 (커스텀 토글)
-                show_details_key = f"show_details_{user_article_no}"
-                if show_details_key not in st.session_state:
-                    st.session_state[show_details_key] = False
+            # 하위항목별 상세 결과 (A1 노드의 matched_articles_details 사용)
+            matched_articles_details = analysis.get('matched_articles_details', [])
+            if matched_articles_details:
+                # 모든 매칭된 조문의 하위항목 수 합산
+                total_sub_items = sum(len(article.get('sub_items_scores', [])) for article in matched_articles_details)
+                
+                if total_sub_items > 0:
+                    # 하위항목별 상세 결과 (커스텀 토글)
+                    show_details_key = f"show_details_{user_article_no}"
+                    if show_details_key not in st.session_state:
+                        st.session_state[show_details_key] = False
 
-                # 현재 상태 읽기
-                is_expanded = st.session_state[show_details_key]
+                    # 현재 상태 읽기
+                    is_expanded = st.session_state[show_details_key]
 
-                # 토글 버튼 (현재 상태 기준으로 레이블 표시)
-                button_label = f"{'▼' if is_expanded else '▶'} 하위항목별 상세 ({len(sub_item_results)}개)"
+                    # 토글 버튼 (현재 상태 기준으로 레이블 표시)
+                    button_label = f"{'▼' if is_expanded else '▶'} 하위항목별 상세 ({total_sub_items}개)"
 
-                # 버튼 클릭 시 상태 토글 후 즉시 리렌더링
-                if st.button(button_label, key=f"toggle_{user_article_no}", use_container_width=False):
-                    st.session_state[show_details_key] = not is_expanded
-                    st.rerun()
+                    # 버튼 클릭 시 상태 토글 후 즉시 리렌더링
+                    if st.button(button_label, key=f"toggle_{user_article_no}", use_container_width=False):
+                        st.session_state[show_details_key] = not is_expanded
+                        st.rerun()
 
-                if is_expanded:
-                    for sub_result in sub_item_results:
-                        sub_idx = sub_result.get('sub_item_index', 0)
-                        sub_text = sub_result.get('sub_item_text', '')[:50]
-                        matched_article = sub_result.get('matched_article_id', '')
-                        matched_title = sub_result.get('matched_article_title', '')
-                        sub_score = sub_result.get('score', 0.0)
-                        
-                        # Dense/Sparse 점수 추출 (matched_chunks에서)
-                        matched_chunks = sub_result.get('matched_chunks', [])
-                        if matched_chunks:
-                            # 첫 번째 청크의 점수 사용 (대표값)
-                            first_chunk = matched_chunks[0]
-                            dense_score = first_chunk.get('dense_score', 0.0)
-                            dense_score_raw = first_chunk.get('dense_score_raw', 0.0)
-                            sparse_score = first_chunk.get('sparse_score', 0.0)
-                            sparse_score_raw = first_chunk.get('sparse_score_raw', 0.0)
+                    if is_expanded:
+                        # 각 매칭된 조문별로 하위항목 표시
+                        for article_idx, article in enumerate(matched_articles_details, 1):
+                            article_global_id = article.get('global_id', '')
+                            formatted_article_id = _format_std_reference(article_global_id)
+                            article_title = article.get('title', '')
+                            sub_items_scores = article.get('sub_items_scores', [])
                             
-                            st.markdown(f"  {sub_idx}. `{sub_text}...`")
-                            st.markdown(f"     → {matched_article} ({matched_title})")
-                            st.markdown(f"     Rank Score: {sub_score:.3f} (Dense: {dense_score:.3f}[{dense_score_raw:.3f}], Sparse: {sparse_score:.3f}[{sparse_score_raw:.3f}])")
-                        else:
-                            st.markdown(f"  {sub_idx}. `{sub_text}...`")
-                            st.markdown(f"     → {matched_article} ({matched_title}) - Rank Score: {sub_score:.3f}")
+                            if sub_items_scores:
+                                # 매칭된 조문이 여러 개인 경우 구분 표시
+                                if len(matched_articles_details) > 1:
+                                    st.markdown(f"**[{formatted_article_id} ({article_title})]**")
+                                
+                                for sub_idx, sub_item in enumerate(sub_items_scores, 1):
+                                    sub_text = sub_item.get('text', '')[:50]
+                                    sub_global_id = sub_item.get('global_id', '')
+                                    combined_score = sub_item.get('combined_score', 0.0)
+                                    dense_score = sub_item.get('dense_score', 0.0)
+                                    dense_score_raw = sub_item.get('dense_score_raw', 0.0)
+                                    sparse_score = sub_item.get('sparse_score', 0.0)
+                                    sparse_score_raw = sub_item.get('sparse_score_raw', 0.0)
+                                    
+                                    st.markdown(f"  {sub_idx}. `{sub_text}...`")
+                                    st.markdown(f"     → {sub_global_id}")
+                                    st.markdown(f"     Rank Score: {combined_score:.3f} (Dense: {dense_score:.3f}[{dense_score_raw:.3f}], Sparse: {sparse_score:.3f}[{sparse_score_raw:.3f}])")
+                                
+                                # 조문 간 구분선 (마지막 조문 제외)
+                                if len(matched_articles_details) > 1 and article_idx < len(matched_articles_details):
+                                    st.markdown("")
 
             # 분석 이유
             reasoning = analysis.get('reasoning', '')
@@ -674,14 +684,17 @@ def display_validation_result(validation_data: dict):
             is_truly_missing = analysis.get('is_truly_missing', True)
             confidence = analysis.get('confidence', 0.0)
             
+            # global_id를 읽기 쉬운 형식으로 변환
+            formatted_id = _format_std_reference(std_article_id)
+            
             # 헤더
             if is_truly_missing:
-                st.markdown(f"<h4 style='color:#ef4444;'>❌ {std_article_id} ({std_article_title})</h4>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='color:#ef4444;'>❌ {formatted_id} ({std_article_title})</h4>", unsafe_allow_html=True)
                 st.markdown(f"**상태**: 실제 누락 확인 (신뢰도: {confidence:.1%})")
             else:
                 matched_user = analysis.get('matched_user_article', {})
                 matched_no = matched_user.get('number', '?') if matched_user else '?'
-                st.markdown(f"<h4 style='color:#10b981;'>✅ {std_article_id} ({std_article_title})</h4>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='color:#10b981;'>✅ {formatted_id} ({std_article_title})</h4>", unsafe_allow_html=True)
                 st.markdown(f"**상태**: 누락 아님 - 제{matched_no}조에 포함 (신뢰도: {confidence:.1%})")
             
             # 판단 근거
@@ -693,7 +706,7 @@ def display_validation_result(validation_data: dict):
             # 증거 (상세 분석)
             evidence = analysis.get('evidence', '')
             if evidence:
-                with st.expander("📄 상세 증거 보기"):
+                with st.expander("상세 증거 보기"):
                     # 개행을 markdown 개행으로 변환
                     formatted_evidence = evidence.replace('\n', '  \n')
                     st.markdown(formatted_evidence)
@@ -714,7 +727,7 @@ def display_validation_result(validation_data: dict):
             # 후보 조문 분석 (있는 경우)
             top_candidates = analysis.get('top_candidates', [])
             if top_candidates:
-                with st.expander(f"🔎 검토된 후보 조문 ({len(top_candidates)}개)"):
+                with st.expander(f"검토된 후보 조문 ({len(top_candidates)}개)"):
                     for i, candidate in enumerate(top_candidates, 1):
                         user_article = candidate.get('user_article', {})
                         user_no = user_article.get('number', '?')
@@ -750,16 +763,24 @@ def _format_std_reference(global_id: str) -> str:
     표준 조항 global_id를 읽기 쉬운 형식으로 변환
     
     Args:
-        global_id: 예: "urn:std:provide:art:001"
+        global_id: 예: "urn:std:provide:art:001" 또는 "urn:std:provide:ex:001"
     
     Returns:
-        예: "제1조"
+        예: "제1조" 또는 "별지1"
     """
     try:
         parts = global_id.split(':')
         if len(parts) >= 5:
-            article_num = parts[4]  # "001"
-            return f"제{int(article_num)}조"
+            item_type = parts[3]  # "art" 또는 "ex"
+            item_num = parts[4]   # "001"
+            
+            if item_type == 'art':
+                return f"제{int(item_num)}조"
+            elif item_type == 'ex':
+                return f"별지{int(item_num)}"
+            else:
+                # 알 수 없는 타입은 원본 반환
+                return global_id
     except (ValueError, IndexError):
         pass
     return global_id

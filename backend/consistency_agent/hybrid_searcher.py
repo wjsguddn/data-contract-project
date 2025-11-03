@@ -458,8 +458,8 @@ class HybridSearcher:
         text_query: str,
         title_query: str,
         top_k: int = 10,
-        dense_top_k: int = 50,
-        sparse_top_k: int = 50,
+        dense_top_k: int = 30,
+        sparse_top_k: int = 30,
         contract_id: str = None
     ) -> List[Dict[str, Any]]:
         """
@@ -481,8 +481,8 @@ class HybridSearcher:
         text_embedding,
         title_embedding,
         top_k: int = 10,
-        dense_top_k: int = 50,
-        sparse_top_k: int = 50,
+        dense_top_k: int = 30,
+        sparse_top_k: int = 30,
         contract_id: str = None
     ) -> List[Dict[str, Any]]:
         """
