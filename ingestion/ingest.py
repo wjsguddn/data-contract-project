@@ -42,7 +42,8 @@ Commands:
         else:
             self.base_path = Path("./data")
             self.index_path = Path("./data/search_indexes")
-        
+
+        self.source_path = self.base_path / "source_documents"
         self.extracted_path = self.base_path / "extracted_documents"
         self.chunked_path = self.base_path / "chunked_documents"
     
@@ -158,24 +159,24 @@ Commands:
     def _run_full_pipeline(self, filename):
         logger.info("=== 전체 파이프라인 실행 ===")
         self._run_parsing(filename)
-        
+
         # 파싱 결과를 청킹 입력으로
         if filename == 'all':
             chunking_file = 'all'
         else:
             # .pdf 또는 .docx를 .json으로 변환
             chunking_file = filename.replace('.pdf', '.json').replace('.docx', '_structured.json')
-        
-        self._run_art_chunking(chunking_file)
-        
+
+        self._run_chunking(chunking_file)
+
         # 청킹 결과를 임베딩 입력으로
         if filename == 'all':
             embedding_file = 'all'
         else:
-            # 확장자 제거 후 _art_chunks.jsonl 추가
+            # 확장자 제거 후 _chunks.json 추가
             base_name = filename.rsplit('.', 1)[0]
-            embedding_file = f"{base_name}_art_chunks.jsonl"
-        
+            embedding_file = f"{base_name}_chunks.json"
+
         self._run_embedding(embedding_file)
     
     def _get_parser(self, filename: str, file_ext: str):
@@ -220,13 +221,13 @@ Commands:
         self.extracted_path.mkdir(parents=True, exist_ok=True)
         
         if filename == 'all':
-            # 모든 파일 처리 (PDF와 DOCX)
-            pdf_files = list(self.source_path.glob("*.pdf"))
-            docx_files = list(self.source_path.glob("*.docx"))
+            # 표준계약서 파일만 처리 (_std_contract.pdf, _std_contract.docx)
+            pdf_files = list(self.source_path.glob("*_std_contract.pdf"))
+            docx_files = list(self.source_path.glob("*_std_contract.docx"))
             all_files = pdf_files + docx_files
-            
-            logger.info(f"  처리할 파일: {len(all_files)}개 (PDF: {len(pdf_files)}, DOCX: {len(docx_files)})")
-            
+
+            logger.info(f"  처리할 파일: {len(all_files)}개 (표준계약서만, PDF: {len(pdf_files)}, DOCX: {len(docx_files)})")
+
             for file in all_files:
                 file_ext = file.suffix.lower()
                 
@@ -853,11 +854,11 @@ Commands:
           status --detail
         """
         logger.info("=== 디렉토리 상태 ===")
-        
-        # source_documents
-        pdf_files = list(self.source_path.glob("*.pdf")) if self.source_path.exists() else []
-        docx_files = list(self.source_path.glob("*.docx")) if self.source_path.exists() else []
-        logger.info(f"\n [원본 문서] ({self.source_path}):")
+
+        # source_documents (표준계약서만 카운트)
+        pdf_files = list(self.source_path.glob("*_std_contract.pdf")) if self.source_path.exists() else []
+        docx_files = list(self.source_path.glob("*_std_contract.docx")) if self.source_path.exists() else []
+        logger.info(f"\n [원본 문서 - 표준계약서] ({self.source_path}):")
         logger.info(f"  총 {len(pdf_files) + len(docx_files)}개 파일 (PDF: {len(pdf_files)}, DOCX: {len(docx_files)})")
         if '--detail' in arg:
             for f in pdf_files + docx_files:
