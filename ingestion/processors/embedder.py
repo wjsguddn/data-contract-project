@@ -54,16 +54,26 @@ class TextEmbedder:
             # 1. 파일 읽기
             logger.info(f"  파일 읽기: {input_path.name}")
             with open(input_path, 'r', encoding='utf-8') as f:
-                chunks = json.load(f)
+                all_chunks = json.load(f)
 
-            if not isinstance(chunks, list):
+            if not isinstance(all_chunks, list):
                 logger.error("   [ERROR] chunks는 리스트 형식이어야 합니다")
                 return False
 
-            logger.info(f"  총 {len(chunks)}개 청크")
+            logger.info(f"  총 {len(all_chunks)}개 청크 (필터링 전)")
+
+            # 2. 별지 항목 제외 (global_id에서 ':ex:' 패턴으로 판별)
+            chunks = [
+                chunk for chunk in all_chunks
+                if ':ex:' not in chunk.get('global_id', '')
+            ]
+
+            excluded_count = len(all_chunks) - len(chunks)
+            logger.info(f"  별지 항목 {excluded_count}개 제외")
+            logger.info(f"  임베딩 대상: {len(chunks)}개 청크")
 
             if not chunks:
-                logger.error("   [ERROR] 청크가 없습니다")
+                logger.error("   [ERROR] 임베딩할 청크가 없습니다")
                 return False
 
             # 2. 이중 임베딩 생성 (text_norm, title)
