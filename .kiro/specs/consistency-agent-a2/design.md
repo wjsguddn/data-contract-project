@@ -2,7 +2,9 @@
 
 ## 개요
 
-A2 노드(체크리스트 검증)는 A1 노드의 매칭 결과를 기반으로 활용안내서의 체크리스트 항목을 LLM을 사용하여 검증합니다. 사용자 계약서의 각 조항이 매칭된 표준 조항의 체크리스트 요구사항을 충족하는지 자동으로 평가하고, 결과를 구조화된 형태로 저장합니다.
+A2 노드(사용자 수동 확인 가이드)는 AI가 자동으로 검증할 수 없는 항목들을 식별하고, 사용자에게 체계적으로 안내하는 역할을 합니다. 등기부등본 대조, 법적 권한 확인, 날인/서명 확인 등 외부 문서나 물리적 확인이 필요한 항목들을 계약 유형별 템플릿에서 로드하여 제공합니다.
+
+**핵심 철학**: AI의 한계를 솔직하게 인정하고, 사람과 AI가 협력하여 계약서를 검증하는 구조를 만듭니다. A1 Node는 조항 존재 여부를, A3 Node는 내용 유사도를 검증하고, A2 Node는 사용자가 직접 확인해야 할 항목을 안내합니다.
 
 ## 아키텍처
 
@@ -11,51 +13,78 @@ A2 노드(체크리스트 검증)는 A1 노드의 매칭 결과를 기반으로 
 ```
 1. A2 노드 실행
    ↓
-2. A1 매칭 결과 로드 (ValidationResult.completeness_check)
+2. 계약 유형 확인 (ClassificationResult.confirmed_type)
    ↓
-3. 체크리스트 데이터 로드 (JSON 파일)
+3. 수동 확인 항목 템플릿 로드 (JSON 파일)
    ↓
-4. Global ID 기반 체크리스트 필터링
+4. Preamble 존재 여부 확인 (당사자 정보 위치 파악)
    ↓
-5. 사용자 조항별 체크리스트 검증 (LLM)
+5. 카테고리별 항목 구조화
    ↓
-6. 검증 결과 집계 및 통계 계산
+6. 우선순위별 통계 계산
    ↓
 7. DB 저장
-   └─ ValidationResult.checklist_validation
+   └─ ValidationResult.manual_checks
 ```
 
 ### 컴포넌트 구조
 
 ```
-ChecklistCheckNode (a2_node.py)
-├─ check_checklist()
-│  ├─ _load_a1_results() → A1 매칭 결과 로드
-│  ├─ _filter_checklists() → global_id 기반 필터링
-│  ├─ _verify_article() → 조항별 검증
-│  ├─ _calculate_statistics() → 통계 계산
+ManualCheckNode (a2_node.py)
+├─ generate_manual_checks()
+│  ├─ _load_contract_type() → 계약 유형 확인
+│  ├─ _check_preamble() → Preamble 존재 여부 확인
+│  ├─ _structure_by_category() → 카테고리별 구조화
+│  ├─ _calculate_statistics() → 우선순위별 통계
 │  ├─ _save_to_db() → DB 저장
-│  └─ _export_to_json() → JSON 파일 생성
+│  └─ _export_to_json() → JSON 파일 생성 (선택)
 │
-├─ ChecklistLoader
-│  ├─ load_checklist() → JSON 파일 로드
-│  └─ filter_by_global_ids() → global_id 필터링
-│
-└─ ChecklistVerifier
-   ├─ verify_batch() → 배치 검증 (LLM)
-   ├─ verify_single() → 단일 항목 검증 (LLM)
-   ├─ verify_with_context() → 표준 조항 컨텍스트 포함 검증
-   └─ handle_low_confidence() → 신뢰도 기반 재검증
+└─ ManualCheckLoader
+   ├─ load_template() → 템플릿 JSON 파일 로드
+   ├─ get_common_items() → 공통 항목 로드
+   └─ merge_items() → 공통 + 계약 유형별 항목 병합
+```
+
+## 템플릿 데이터 구조
+
+### 수동 확인 항목 템플릿 (JSON)
+
+```json
+{
+  "common_items": [
+    {
+      "category": "당사자 정보",
+      "check_text": "당사자 정보가 등기부등본과 일치하는가?",
+      "user_action": "등기부등본과 대조하여 회사명, 주소, 대표자명 확인",
+      "priority": "high",
+      "reference": "서문 또는 제1조",
+      "why_manual": "등기부등본 등 외부 공적 문서 대조 필요"
+    }
+  ],
+  "contract_specific_items": {
+    "provide": [],
+    "brokerage_provider": [
+      {
+        "category": "중개 관계",
+        "check_text": "중개 운영자의 역할과 책임이 명확한가?",
+        "user_action": "중개 플랫폼 운영자의 의무사항 확인",
+        "priority": "medium",
+        "reference": "계약서 전체",
+        "why_manual": "계약 관계의 복잡성으로 인한 맥락 이해 필요"
+      }
+    ]
+  }
+}
 ```
 
 ## 컴포넌트 설계
 
-### ChecklistLoader
+### ManualCheckLoader
 
-**역할**: 체크리스트 데이터 로드 및 필터링
+**역할**: 수동 확인 항목 템플릿 로드
 
 ```python
-class ChecklistLoader:
+class ManualCheckLoader:
     """활용안내서 체크리스트 로더"""
     
     def __init__(self):
