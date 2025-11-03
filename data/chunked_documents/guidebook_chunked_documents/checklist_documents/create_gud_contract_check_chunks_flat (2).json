@@ -1,0 +1,302 @@
+[
+  {
+    "check_text": "개인의 경우 이름, 법인의 경우 상호 등이 기재되어 있는가?",
+    "reference": "제1조 (70쪽) 및 서명 날인",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "당사자가 개인(개인사업자 포함)인가, 법인인가? 법인인 경우 ‘합명회사’, ‘합자회사’, ‘유한책임회사’, ‘주식회사’, ‘유한회사’인지 정확하게 표현되어 있는가?",
+    "reference": "제1조 (70쪽) 및 서명 날인",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "등기부등본 등 공적장부에 표시된 것 그대로 기재되어 있는가?",
+    "reference": "제1조 (70쪽) 및 서명 날인",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "적법한 권한을 가진 대표자의 성명이 기재되어 있는가?",
+    "reference": "제1조 (70쪽) 및 서명 날인",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "계약체결의 당사자, 목적 등이 기재되어 있는가?",
+    "reference": "제1조 (70쪽)",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "데이터를 공동으로 생성하는 사업 등이 기재되어 있는가?",
+    "reference": "제1조 (70쪽)",
+    "global_id": "urn:std:provide:art:001"
+  },
+  {
+    "check_text": "계약서 본문에서 사용되는 용어 중 해석상 논란이 될 만한 부분이 모두 정의되어 있는가? 정의된 용어는 서로 모순되지 않는가? 정의된 용어가 명확한가? 법률용어의 정의에 배치되는 것은 아닌가?",
+    "reference": "제2조 (70쪽)",
+    "global_id": "urn:std:provide:art:002"
+  },
+  {
+    "check_text": "각 당사자는 계약의 내용을 신의성실의 원칙에 따라 이행하는가?",
+    "reference": "제3조 (71쪽)",
+    "global_id": "urn:std:provide:art:003"
+  },
+  {
+    "check_text": "각 당사자는 계약의 내용 및 이행에 있어 제반 법령을 준수하는가?",
+    "reference": "제3조 (71쪽)",
+    "global_id": "urn:std:provide:art:003"
+  },
+  {
+    "check_text": "계약기간의 시기(始期)와 종기(終期)가 명확하게 기재되어 있는가?",
+    "reference": "제4조 (71쪽)",
+    "global_id": "urn:std:provide:art:004"
+  },
+  {
+    "check_text": "계약기간의 갱신조항을 둘 것인가? (명시적 갱신 대 묵시적 갱신)",
+    "reference": "제4조 (71쪽)",
+    "global_id": "urn:std:provide:art:004"
+  },
+  {
+    "check_text": "대상데이터의 범위가 구체적으로 기재되어 있는가?",
+    "reference": "제5조 (72쪽)",
+    "global_id": "urn:std:provide:art:005"
+  },
+  {
+    "check_text": "대상데이터의 취득수집방법이 구체적으로 기재되어 있는가?",
+    "reference": "제5조 (72쪽)",
+    "global_id": "urn:std:provide:art:005"
+  },
+  {
+    "check_text": "대상데이터를 이용할 권리의 귀속과 그 이용범위에 대하여 구체적으로 기재되어 있는가?",
+    "reference": "제6조 (72쪽)",
+    "global_id": "urn:std:provide:art:006"
+  },
+  {
+    "check_text": "파생데이터의 범위를 정하고 있는가?",
+    "reference": "제7조 (74쪽)",
+    "global_id": "urn:std:provide:art:007"
+  },
+  {
+    "check_text": "파생데이터를 이용할 권리의 귀속과 그 이용범위에 대하여 구체적으로 기재되어 있는가?",
+    "reference": "제7조 (74쪽)",
+    "global_id": "urn:std:provide:art:007"
+  },
+  {
+    "check_text": "대상데이터등에 대한 지식재산권의 귀속에 대하여 구체적으로 기재되어 있는가?",
+    "reference": "제8조 (76쪽)",
+    "global_id": "urn:std:provide:art:008"
+  },
+  {
+    "check_text": "대상데이터를 제3자에게 제공하는 것을 허락/금지할 것인가?",
+    "reference": "제9조 (78쪽)",
+    "global_id": "urn:std:provide:art:009"
+  },
+  {
+    "check_text": "제3자 제공에 대한 동의방법, 절차, 제공조건 등을 규정하고 있는가?",
+    "reference": "제9조 (78쪽)",
+    "global_id": "urn:std:provide:art:009"
+  },
+  {
+    "check_text": "대상데이터등에 대한 이용대가가 유상 또는 무상임이 명확하게 규정되어 있는가?",
+    "reference": "제10조 (79쪽)",
+    "global_id": "urn:std:provide:art:010"
+  },
+  {
+    "check_text": "대상데이터등을 제3자에게 제공하는 경우 그 수익에 대한 정산방법이 규정되어 있는가?",
+    "reference": "제10조 (79쪽)",
+    "global_id": "urn:std:provide:art:010"
+  },
+  {
+    "check_text": "수익을 정산하는 경우 문서 등 수익을 증빙하는 방법이 규정되어 있는가?",
+    "reference": "제10조 (79쪽)",
+    "global_id": "urn:std:provide:art:010"
+  },
+  {
+    "check_text": "대상데이터등의 관리의무를 규정하고 있는가?",
+    "reference": "제11조 (80쪽)",
+    "global_id": "urn:std:provide:art:011"
+  },
+  {
+    "check_text": "대상데이터등의 관리상황에 대한 서면통지를 요구하거나 대상데이터의 관리방법보관방법의 개선을 요구하고 있는가?",
+    "reference": "제11조 (80쪽)",
+    "global_id": "urn:std:provide:art:011"
+  },
+  {
+    "check_text": "개인정보보호 법령에 따라 개인정보의 물리적, 관리적, 기술적 조치의무의 이행을 요구하고 있는가?",
+    "reference": "제11조 (80쪽)",
+    "global_id": "urn:std:provide:art:011"
+  },
+  {
+    "check_text": "대상데이터 유출등 사고 발생 시 통지 규정을 두고 있는가?",
+    "reference": "제12조 (80쪽)",
+    "global_id": "urn:std:provide:art:012"
+  },
+  {
+    "check_text": "유출등 사고 발생 시 통지수단 및 통지내용이 규정되어 있는가?",
+    "reference": "제12조 (80쪽)",
+    "global_id": "urn:std:provide:art:012"
+  },
+  {
+    "check_text": "해제해지사유는 명확히 기재하고 있는가?",
+    "reference": "제13조 (81쪽)",
+    "global_id": "urn:std:provide:art:013"
+  },
+  {
+    "check_text": "해제해지절차는 즉시해지, 자동해지, 최고 후 해지 등 그 사유에 따라 절차가 명확히 기재되어 있는가?",
+    "reference": "제13조 (81쪽)",
+    "global_id": "urn:std:provide:art:013"
+  },
+  {
+    "check_text": "해제해지의 효과를 명확히 정하고 있는가?",
+    "reference": "제13조 (81쪽)",
+    "global_id": "urn:std:provide:art:013"
+  },
+  {
+    "check_text": "손해배상에 관한 사항이 규정되어 있는가?",
+    "reference": "제14조 (81쪽)",
+    "global_id": "urn:std:provide:art:014"
+  },
+  {
+    "check_text": "책임제한/면책사유에 대해 규정하고 있는가?",
+    "reference": "제15조 (81쪽)",
+    "global_id": "urn:std:provide:art:015"
+  },
+  {
+    "check_text": "책임제한/면책사유는 적절한가?",
+    "reference": "제15조 (81쪽)",
+    "global_id": "urn:std:provide:art:015"
+  },
+  {
+    "check_text": "책임을 대신 부담하는 경우 구상권에 대해 규정하고 있는가?",
+    "reference": "제15조 (81쪽)",
+    "global_id": "urn:std:provide:art:015"
+  },
+  {
+    "check_text": "불가항력에 속하는 사유를 명시하고 있는가?",
+    "reference": "제16조 (82쪽)",
+    "global_id": "urn:std:provide:art:016"
+  },
+  {
+    "check_text": "불가항력에 속하는 사유가 적절한가?",
+    "reference": "제16조 (82쪽)",
+    "global_id": "urn:std:provide:art:016"
+  },
+  {
+    "check_text": "불가항력의 경우 그 효과를 명확히 정하고 있는가?",
+    "reference": "제16조 (82쪽)",
+    "global_id": "urn:std:provide:art:016"
+  },
+  {
+    "check_text": "계약기간 만료 후 반환하거나 폐기하여야 할 데이터의 범위를 명확하게 규정하고 있는가?",
+    "reference": "제17조 (82쪽)",
+    "global_id": "urn:std:provide:art:017"
+  },
+  {
+    "check_text": "폐기하는 경우 그 절차와 방법을 규정하고 있는가?",
+    "reference": "제18조 (83쪽)",
+    "global_id": "urn:std:provide:art:018"
+  },
+  {
+    "check_text": "비밀정보의 범위, 비밀유지의무와 그 예외가 기재되어 있는가?",
+    "reference": "제18조 (83쪽)",
+    "global_id": "urn:std:provide:art:018"
+  },
+  {
+    "check_text": "비밀유지의무를 위반하는 경우 손해배상액의 예정조항을 둘 것인가?",
+    "reference": "제18조 (83쪽)",
+    "global_id": "urn:std:provide:art:018"
+  },
+  {
+    "check_text": "계약기간 만료 후에도 일정 기간 효력을 유지할 필요가 있는 계약조항을 둘 것인가?",
+    "reference": "제19조 (84쪽)",
+    "global_id": "urn:std:provide:art:019"
+  },
+  {
+    "check_text": "효력유지기간이 기재되어 있는가?",
+    "reference": "제19조 (84쪽)",
+    "global_id": "urn:std:provide:art:019"
+  },
+  {
+    "check_text": "계약상 지위 또는 권리의무를 제3자에게 양도, 이전, 담보제공 등 처분의 금지에 대해 규정하고 있는가?",
+    "reference": "제22조 (84쪽)",
+    "global_id": "urn:std:provide:art:022"
+  },
+  {
+    "check_text": "계약상 지위 또는 권리의무를 제3자에게 양도, 이전, 담보제공 등 처분할 수 있는 방법에 대해 규정하고 있는가?",
+    "reference": "제22조 (84쪽)",
+    "global_id": "urn:std:provide:art:022"
+  },
+  {
+    "check_text": "분쟁조정, 중재, 소송 등 분쟁해결 방법이 기재되어 있는가?",
+    "reference": "제24조 (85쪽)",
+    "global_id": "urn:std:provide:art:024"
+  },
+  {
+    "check_text": "소송의 경우 관할에 합의하였는가?",
+    "reference": "제24조 (85쪽)",
+    "global_id": "urn:std:provide:art:024"
+  },
+  {
+    "check_text": "준거법을 정하고 있는가?",
+    "reference": "제25조 (85쪽)",
+    "global_id": "urn:std:provide:art:025"
+  },
+  {
+    "check_text": "국제거래 시 적용될 준거법이 기재되어 있는가?",
+    "reference": "제25조 (85쪽)",
+    "global_id": "urn:std:provide:art:025"
+  },
+  {
+    "check_text": "본 계약이 당사자 간 기존 의사표시 또는 구두합의보다 우선한다는 내용을 포함하고 있는가?",
+    "reference": "제20조 (84쪽)",
+    "global_id": "urn:std:provide:art:020"
+  },
+  {
+    "check_text": "계약의 일부가 무효로 인정되더라도 특별한 사정이 없는 한 계약의 나머지 부분에 영향을 미치지 않는다는 내용이 기재되어 있는가?",
+    "reference": "제21조 (84쪽)",
+    "global_id": "urn:std:provide:art:021"
+  },
+  {
+    "check_text": "당사자가 상대방에 대한 통지 방법에 대해 규정되어 있는가?",
+    "reference": "제23조 (85쪽)",
+    "global_id": "urn:std:provide:art:023"
+  },
+  {
+    "check_text": "당사자들이 계약본문보다 우선하여 적용할 특약을 기재할 것인가?",
+    "reference": "제26조 (85쪽)",
+    "global_id": "urn:std:provide:art:026"
+  },
+  {
+    "check_text": "계약체결일(서명일)이 기재되어 있는가?",
+    "reference": "계약 서명 날인",
+    "global_id": null
+  },
+  {
+    "check_text": "적법한 권한을 가진 자가 서명 또는 날인하였는가?",
+    "reference": "계약 서명 날인",
+    "global_id": null
+  },
+  {
+    "check_text": "공적장부(인감증명서)를 확인하였는가?",
+    "reference": "계약 서명 날인",
+    "global_id": null
+  },
+  {
+    "check_text": "법인인감증명서, 사용인감 확인서 등을 확인하고 날인하였는가?",
+    "reference": "계약 서명 날인",
+    "global_id": null
+  },
+  {
+    "check_text": "대리인의 경우 위임장 등을 통해 대리권이 있음을 확인하였는가?",
+    "reference": "계약 서명 날인",
+    "global_id": null
+  },
+  {
+    "check_text": "계약본문에서 별지 또는 별첨으로 명기된 사항이 모두 첨부되었는가?",
+    "reference": "첨부서류 있는 경우",
+    "global_id": null
+  },
+  {
+    "check_text": "별지 또는 별첨 자료에 필요한 사항이 모두 기재되어 있는가?",
+    "reference": "첨부서류 있는 경우",
+    "global_id": null
+  }
+]
