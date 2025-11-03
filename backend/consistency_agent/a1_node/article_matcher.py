@@ -139,7 +139,7 @@ class ArticleMatcher:
         self,
         user_article: Dict[str, Any],
         contract_type: str,
-        top_k: int = 1,
+        top_k: int = 3,
         contract_id: str = None,
         text_weight: float = 0.7,
         title_weight: float = 0.3,

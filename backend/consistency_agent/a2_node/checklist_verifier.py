@@ -246,24 +246,51 @@ JSON 형식:
 2. 근거: 판단 근거 (YES인 경우 계약서의 해당 부분 인용, 간략히)
 3. 신뢰도: 0.0~1.0 사이의 값
 4. 사용자 확인 필요 시: 이유와 확인 방법
+5. NO인 경우: 왜 매칭되지 않는지 구체적 설명 및 위험성 평가
 
 **판단 기준:**
 - **YES**: 요구사항이 계약서에 명시되어 있음
-- **NO**: 요구사항이 계약서에 명시되지 않음
-- **MANUAL_CHECK_REQUIRED**: AI가 판단할 수 없음 (외부 데이터 필요)
+- **NO**: 요구사항이 계약서에 명시되지 않음 (내용 자체가 없음)
+- **MANUAL_CHECK_REQUIRED**: 계약서에 내용은 있으나 외부 확인이 필요함
   
-**MANUAL_CHECK_REQUIRED 판단 기준:**
-다음과 같은 경우 MANUAL_CHECK_REQUIRED로 판단하세요:
-1. 등기부등본, 사업자등록증 등 외부 공적 문서와 대조가 필요한 경우
-   예: "등기부등본에 표시된 것 그대로 기재되어 있는가?"
-2. 법적 권한, 적법성 등 법률 전문가 판단이 필요한 경우
-   예: "적법한 권한을 가진 대표자의 성명이 기재되어 있는가?"
-3. 물리적 확인이 필요한 경우
-   예: "날인 또는 서명이 되어 있는가?"
-4. 첨부 문서, 별지 등 계약서 외부 문서 확인이 필요한 경우
-   예: "별지에 데이터 명세가 구체적으로 작성되어 있는가?"
-5. 사전 협의 내용, 시장 수준 등 외부 정보가 필요한 경우
-   예: "계약 금액이 사전 협의 내용과 일치하는가?"
+**MANUAL_CHECK_REQUIRED 판단 기준 (매우 중요!):**
+다음 조건을 **모두** 만족해야 MANUAL_CHECK_REQUIRED입니다:
+1. **계약서에 해당 내용이 이미 기재되어 있어야 함**
+2. **그 내용이 정확한지 외부 문서/정보와 대조가 필요함**
+
+**구체적 예시:**
+
+✅ MANUAL_CHECK_REQUIRED (내용 있음 + 외부 확인 필요):
+- 계약서: "갑: 주식회사 ABC, 서울시 강남구..." 
+  → 질문: "등기부등본과 일치하는가?" 
+  → MANUAL_CHECK_REQUIRED (내용은 있으나 등기부등본 대조 필요)
+
+- 계약서: "대표이사 홍길동"
+  → 질문: "적법한 권한을 가진 대표자인가?"
+  → MANUAL_CHECK_REQUIRED (내용은 있으나 법적 권한 확인 필요)
+
+- 계약서: "날인란: [   ]"
+  → 질문: "날인이 되어 있는가?"
+  → MANUAL_CHECK_REQUIRED (날인란은 있으나 실제 날인 여부는 물리적 확인 필요)
+
+❌ NO (내용 자체가 없음):
+- 계약서: 당사자 정보 없음
+  → 질문: "당사자가 개인인가 법인인가?"
+  → NO (당사자 정보 자체가 없으므로 추가 필요)
+
+- 계약서: 대표자 이름 없음
+  → 질문: "대표자 성명이 기재되어 있는가?"
+  → NO (대표자 정보 자체가 없으므로 추가 필요)
+
+**핵심 원칙**: 
+- 내용이 **없으면** → NO (추가 필요)
+- 내용이 **있는데 확인이 필요하면** → MANUAL_CHECK_REQUIRED (외부 확인 필요)
+
+**NO 판단 시 추가 정보:**
+- missing_explanation: 어떤 키워드/개념을 찾았는지, 왜 충분하지 않은지 구체적 설명
+- risk_level: "high" | "medium" | "low" - 누락 시 위험도
+- risk_description: 이 항목이 없으면 어떤 법적/실무적 위험이 있는지 설명
+- recommendation: 개선 권장사항
 
 JSON 배열 형식으로 답변:
 {{
@@ -274,7 +301,11 @@ JSON 배열 형식으로 답변:
       "evidence": "근거 텍스트" or null,
       "confidence": 0.95,
       "manual_check_reason": "외부 문서 대조 필요" (MANUAL_CHECK_REQUIRED인 경우만),
-      "user_action": "등기부등본과 대조하여 회사명, 주소 확인" (MANUAL_CHECK_REQUIRED인 경우만)
+      "user_action": "등기부등본과 대조하여 회사명, 주소 확인" (MANUAL_CHECK_REQUIRED인 경우만),
+      "missing_explanation": "수행계획서 작성 절차 명시 없음, 단순 일정 협의만 있음" (NO인 경우만),
+      "risk_level": "high" (NO인 경우만),
+      "risk_description": "수행계획서 미작성 시 용역 범위 분쟁 가능성" (NO인 경우만),
+      "recommendation": "제1조에 수행계획서 작성 및 제출 절차 추가" (NO인 경우만)
     }},
     ...
   ]
@@ -324,6 +355,13 @@ JSON 배열 형식으로 답변:
                 if llm_result.get('result') == 'MANUAL_CHECK_REQUIRED':
                     result_data['manual_check_reason'] = llm_result.get('manual_check_reason', '')
                     result_data['user_action'] = llm_result.get('user_action', '')
+                
+                # NO인 경우 추가 정보 포함
+                elif llm_result.get('result') == 'NO':
+                    result_data['missing_explanation'] = llm_result.get('missing_explanation', '')
+                    result_data['risk_level'] = llm_result.get('risk_level', 'medium')
+                    result_data['risk_description'] = llm_result.get('risk_description', '')
+                    result_data['recommendation'] = llm_result.get('recommendation', '')
                 
                 results.append(result_data)
             else:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 A1 Node - Completeness Check (완전성 검증)
 
 사용자 계약서 조문별로 표준계약과 매칭하여 누락된 조문을 식별
@@ -215,7 +215,7 @@ class CompletenessCheckNode:
         article_id = user_article.get('article_id')  # user_article_001 형식
         article_title = user_article.get('title', '')
 
-        logger.info(f"  완전성 검증 제{article_no}조({article_title})")
+        logger.info(f"  완전성 검증: {article_title}")
 
         # 기본 결과 객체
         result = {
@@ -232,7 +232,7 @@ class CompletenessCheckNode:
             matching_result = self.article_matcher.find_matching_article(
                 user_article,
                 contract_type,
-                top_k=1,  # 단계별로 top-1까지만 사용
+                top_k=3,  # 단계별로 top-3까지만 사용
                 contract_id=contract_id,
                 text_weight=text_weight,
                 title_weight=title_weight,
