@@ -124,6 +124,7 @@ class ChecklistCheckNode:
         
         # 3. Preamble 체크리스트 검증 (있는 경우)
         user_article_results = []
+        verified_yes_items = set()  # YES인 체크리스트 추적 (중복 방지)
         
         if has_preamble:
             logger.info("3-1. Preamble 체크리스트 검증 시작...")
@@ -136,6 +137,13 @@ class ChecklistCheckNode:
             if preamble_result:
                 user_article_results.append(preamble_result)
                 logger.info(f"  Preamble 검증 완료: {len(preamble_result.get('checklist_results', []))}개 항목")
+                
+                # YES인 항목 추적
+                for result in preamble_result.get('checklist_results', []):
+                    if result.get('result') == 'YES':
+                        verified_yes_items.add(result.get('check_text', ''))
+                
+                logger.info(f"  YES 항목: {len(verified_yes_items)}개 (다음 조항에서 제외)")
         
         # 4. 사용자 조항별 검증
         logger.info("3-2. 사용자 조항별 체크리스트 검증 시작...")
@@ -169,7 +177,17 @@ class ChecklistCheckNode:
                 logger.info(f"    관련 체크리스트 없음, 건너뜀")
                 continue
             
-            logger.info(f"    관련 체크리스트: {len(relevant_checklists)}개")
+            # 이미 YES인 항목 제외
+            new_checklists = [
+                item for item in relevant_checklists
+                if item.get('check_text', '') not in verified_yes_items
+            ]
+            
+            if not new_checklists:
+                logger.info(f"    모든 체크리스트 항목이 이미 검증됨 (YES), 건너뜀")
+                continue
+            
+            logger.info(f"    관련 체크리스트: {len(relevant_checklists)}개 (이미 YES: {len(relevant_checklists) - len(new_checklists)}개, 검증 필요: {len(new_checklists)}개)")
             
             # 사용자 조항 텍스트 로드
             user_clause_text = self._get_user_clause_text(contract_id, user_article_id)
@@ -178,13 +196,18 @@ class ChecklistCheckNode:
                 logger.warning(f"    사용자 조항 텍스트를 찾을 수 없음, 건너뜀")
                 continue
             
-            # LLM 검증
+            # LLM 검증 (새로운 항목만)
             checklist_results = self.verifier.verify_batch(
                 user_clause_text,
-                relevant_checklists
+                new_checklists
             )
             
-            logger.info(f"    검증 완료: {len(checklist_results)}개 결과")
+            # YES인 항목 추적
+            for result in checklist_results:
+                if result.get('result') == 'YES':
+                    verified_yes_items.add(result.get('check_text', ''))
+            
+            logger.info(f"    검증 완료: {len(checklist_results)}개 결과 (누적 YES: {len(verified_yes_items)}개)")
             
             # 결과 수집
             user_article_results.append({
