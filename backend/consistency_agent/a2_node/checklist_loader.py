@@ -208,11 +208,11 @@ class ChecklistLoader:
         
         1. 페이지 번호 제거: "제1조 (106쪽)" → "제1조"
         2. 부가 설명 제거: "제1조 및 서명 날인" → "제1조"
-        3. Preamble 있는 경우: "제1조" → "서문 또는 제1조"
+        3. "서문 또는 제1조" → "제1조" (서문은 별도 처리)
         
         Args:
             checklist_data: 체크리스트 항목 리스트
-            has_preamble: preamble 존재 여부
+            has_preamble: preamble 존재 여부 (현재 미사용)
         
         Returns:
             reference가 정리된 체크리스트 항목 리스트
@@ -231,18 +231,18 @@ class ChecklistLoader:
                 cleaned_ref = re.sub(r'\s*\(\d+쪽\)', '', cleaned_ref)
                 
                 # 2. "및 ..." 이후 부가 설명 제거
-                cleaned_ref = re.sub(r'\s*및\s+.*$', '', cleaned_ref)
+                cleaned_ref = re.sub(r'\s*및\s+.*$', '', cleaned_ref, flags=re.DOTALL)
                 
                 # 3. "또는 ..." 이후 부가 설명 제거 (단, "서문 또는 제1조"는 유지)
                 if '서문 또는' not in cleaned_ref:
-                    cleaned_ref = re.sub(r'\s*또는\s+(?!제\d+조).*$', '', cleaned_ref)
+                    cleaned_ref = re.sub(r'\s*또는\s+(?!제\d+조).*$', '', cleaned_ref, flags=re.DOTALL)
                 
-                # 4. 앞뒤 공백 제거
+                # 4. "서문 또는 제1조" → "제1조" (서문은 A2 노드에서 별도 처리)
+                if '서문 또는' in cleaned_ref:
+                    cleaned_ref = cleaned_ref.replace('서문 또는 ', '')
+                
+                # 5. 앞뒤 공백 제거
                 cleaned_ref = cleaned_ref.strip()
-                
-                # 5. Preamble이 있고 "제1조"가 포함된 경우 "서문 또는 제1조"로 변경
-                if has_preamble and '제1조' in cleaned_ref and '서문' not in cleaned_ref:
-                    cleaned_ref = cleaned_ref.replace('제1조', '서문 또는 제1조')
                 
                 cleaned_item['reference'] = cleaned_ref
             
