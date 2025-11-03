@@ -20,7 +20,8 @@
       "Bash(/tmp/embedding_service.py)",
       "Bash(c:Userseric1PythonProjectsdata-contract-projecttemp_a1_agent.py)",
       "Bash(c:/Users/eric1/PythonProjects/data-contract-project/temp_a1_agent.py)",
-      "Bash(c:/Users/eric1/PythonProjects/data-contract-project/temp_a1_ingest.py)"
+      "Bash(c:/Users/eric1/PythonProjects/data-contract-project/temp_a1_ingest.py)",
+      "Bash(git check-ignore:*)"
     ],
     "deny": [],
     "ask": []
