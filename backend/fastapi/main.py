@@ -137,6 +137,22 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         db.commit()
         db.refresh(contract_doc)
 
+        # 파싱된 데이터를 JSON 파일로 저장 (임베딩 전 상태)
+        try:
+            parsed_contracts_dir = Path("data/parsed_user_contracts")
+            parsed_contracts_dir.mkdir(parents=True, exist_ok=True)
+
+            # 원본 파일명.json으로 저장
+            output_filename = Path(filename).stem + ".json"
+            output_path = parsed_contracts_dir / output_filename
+
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(result["structured_data"], f, ensure_ascii=False, indent=2)
+
+            logger.info(f"Parsed data saved to file: {output_path}")
+        except Exception as save_err:
+            logger.error(f"Failed to save parsed data to file: {save_err}")
+
         # 임베딩 생성 및 저장
         try:
             from backend.shared.services.embedding_generator import EmbeddingGenerator
