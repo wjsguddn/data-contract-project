@@ -775,7 +775,7 @@ def _format_matching_info(user_article_no, reference: str) -> str:
     
     Returns:
         예: "사용자 제3조 - 표준 제1조 매칭"
-        예: "사용자 서문 - 표준 제1조 매칭"
+        예: "사용자 서문 - 표준 서문 + 제1조 매칭"
     """
     if not reference:
         return ""
@@ -786,12 +786,8 @@ def _format_matching_info(user_article_no, reference: str) -> str:
     else:
         user_ref = f"사용자 제{user_article_no}조"
     
-    # 표준 조항 참조 정리
-    if "서문 또는" in reference:
-        # "서문 또는 제1조" → "제1조"
-        std_ref = reference.replace("서문 또는 ", "")
-    else:
-        std_ref = reference
+    # 표준 조항 참조 정리 (중복 제거)
+    std_ref = reference
     
     return f"{user_ref} - 표준 {std_ref} 매칭"
 
@@ -844,8 +840,11 @@ def display_checklist_results(checklist_validation: dict):
         if not checklist_results:
             continue
         
-        # 조항 헤더
-        st.markdown(f"<h4>제{user_article_no}조 {user_article_title}</h4>", unsafe_allow_html=True)
+        # 조항 헤더 (중복 제거)
+        if user_article_no == 0 or user_article_no == "preamble":
+            st.markdown(f"<h4>서문</h4>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<h4>제{user_article_no}조 ({user_article_title})</h4>", unsafe_allow_html=True)
         
         # 매칭된 표준 조항 정보 표시
         if matched_std_global_ids:
@@ -875,10 +874,32 @@ def display_checklist_results(checklist_validation: dict):
             
             elif result == 'NO':
                 # 빨간색 X 아이콘
+                missing_explanation = item.get('missing_explanation', '')
+                risk_level = item.get('risk_level', 'medium')
+                risk_description = item.get('risk_description', '')
+                recommendation = item.get('recommendation', '')
+                
                 st.error(f"❌ {check_text}")
-                st.caption("해당 내용이 계약서에 명시되지 않았습니다")
+                
+                # 매칭 정보
                 if matching_info:
                     st.caption(f"매칭 정보: {matching_info}")
+                
+                # 누락 설명
+                if missing_explanation:
+                    st.markdown(f"**누락 상세**: {missing_explanation}")
+                else:
+                    st.caption("해당 내용이 계약서에 명시되지 않았습니다")
+                
+                # 위험도 (단순 텍스트)
+                if risk_description:
+                    risk_labels = {'high': '높음', 'medium': '보통', 'low': '낮음'}
+                    risk_label = risk_labels.get(risk_level, '알 수 없음')
+                    st.markdown(f"위험도 {risk_label}: {risk_description}")
+                
+                # 권장사항 (단순 텍스트)
+                if recommendation:
+                    st.markdown(f"권장사항: {recommendation}")
             
             elif result == 'UNCLEAR':
                 # 노란색 물음표 아이콘
