@@ -3,6 +3,7 @@ from backend.shared.core.celery_app import celery_app
 from backend.shared.database import get_db, ValidationResult, ContractDocument, ClassificationResult
 from backend.shared.services.knowledge_base_loader import KnowledgeBaseLoader
 from .a1_node.a1_node import CompletenessCheckNode
+from .a2_node.a2_node import ChecklistCheckNode
 from .a3_node.a3_node import ContentAnalysisNode
 import logging
 import os
@@ -265,10 +266,184 @@ def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title
             db.close()
 
 
+def check_checklist_task(contract_id: str):
+    """
+    A2 노드: 체크리스트 검증 작업
+    
+    사용자 계약서의 각 조항이 매칭된 표준 조항의 체크리스트 요구사항을 충족하는지 검증
+    
+    Args:
+        contract_id: 검증할 계약서 ID
+    
+    Returns:
+        체크리스트 검증 결과
+    """
+    logger.info(f"A2 노드 체크리스트 검증 시작: {contract_id}")
+    
+    db = None
+    try:
+        # 데이터베이스 세션 생성
+        db = next(get_db())
+        
+        # Azure OpenAI 클라이언트 초기화
+        azure_client = _init_azure_client()
+        
+        if not azure_client:
+            raise ValueError("Azure OpenAI 클라이언트 초기화 실패")
+        
+        # 지식베이스 로더 초기화
+        kb_loader = KnowledgeBaseLoader()
+        
+        # A2 노드 초기화
+        a2_node = ChecklistCheckNode(
+            db_session=db,
+            llm_client=azure_client,
+            kb_loader=kb_loader
+        )
+        
+        # A2 체크리스트 검증 수행
+        checklist_result = a2_node.check_checklist(contract_id)
+        
+        logger.info(
+            f"A2 노드 검증 완료: {contract_id} "
+            f"(전체: {checklist_result['total_checklist_items']}개, "
+            f"통과: {checklist_result['passed_items']}개, "
+            f"미충족: {checklist_result['failed_items']}개)"
+        )
+        
+        return {
+            "status": "completed",
+            "contract_id": contract_id,
+            "checklist_summary": {
+                "total_checklist_items": checklist_result['total_checklist_items'],
+                "verified_items": checklist_result['verified_items'],
+                "passed_items": checklist_result['passed_items'],
+                "failed_items": checklist_result['failed_items'],
+                "processing_time": checklist_result['processing_time']
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"A2 노드 검증 실패: {contract_id}, 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "status": "failed",
+            "contract_id": contract_id,
+            "error": str(e)
+        }
+    
+    finally:
+        if db:
+            db.close()
+
+
+# ============================================================================
+# 독립 Celery Task (병렬처리용 - 현재 주석 처리)
+# ============================================================================
+# 
+# 병렬처리 리팩토링 시 아래 주석을 해제하고 사용하세요.
+# 
+# from celery import group
+# 
+# @celery_app.task(bind=True, name="consistency.check_checklist", queue="consistency_validation")
+# def check_checklist_celery_task(self, contract_id: str):
+#     """
+#     A2 노드: 체크리스트 검증 Celery Task (병렬처리용)
+#     
+#     병렬처리 시 사용:
+#     - A1 완료 후 A2, A3를 병렬로 실행
+#     - group(check_checklist_celery_task.s(contract_id), analyze_content_task.s(contract_id))
+#     
+#     Args:
+#         contract_id: 검증할 계약서 ID
+#     
+#     Returns:
+#         체크리스트 검증 결과
+#     """
+#     return check_checklist_task(contract_id)
+# 
+# 
+# @celery_app.task(bind=True, name="consistency.validate_contract_parallel", queue="consistency_validation")
+# def validate_contract_parallel_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
+#     """
+#     통합 검증 작업 (병렬처리 버전): A1 → (A2 || A3) 병렬 실행
+#     
+#     워크플로우:
+#     1. A1 완전성 검증 (순차)
+#     2. A2 체크리스트 검증 + A3 내용 분석 (병렬)
+#     3. 결과 통합
+#     
+#     Args:
+#         contract_id: 검증할 계약서 ID
+#         text_weight: 본문 가중치 (기본값 0.7)
+#         title_weight: 제목 가중치 (기본값 0.3)
+#         dense_weight: 시멘틱 가중치 (기본값 0.85)
+#     
+#     Returns:
+#         통합 검증 결과
+#     """
+#     logger.info(f"통합 검증 시작 (병렬처리): {contract_id}")
+#     
+#     try:
+#         # A1: 완전성 검증
+#         logger.info(f"  [1/2] A1 완전성 검증 실행 중...")
+#         a1_result = check_completeness_task(contract_id, text_weight, title_weight, dense_weight)
+#         
+#         if a1_result['status'] != 'completed':
+#             logger.error(f"  A1 검증 실패: {a1_result.get('error')}")
+#             return {
+#                 "status": "failed",
+#                 "contract_id": contract_id,
+#                 "error": f"A1 검증 실패: {a1_result.get('error')}",
+#                 "stage": "completeness_check"
+#             }
+#         
+#         logger.info(f"  [1/2] A1 완전성 검증 완료")
+#         
+#         # A2, A3 병렬 실행
+#         logger.info(f"  [2/2] A2, A3 병렬 실행 중...")
+#         parallel_tasks = group(
+#             check_checklist_celery_task.s(contract_id),
+#             analyze_content_task.s(contract_id, text_weight, title_weight, dense_weight)
+#         )
+#         
+#         results = parallel_tasks.apply_async().get()
+#         a2_result, a3_result = results
+#         
+#         logger.info(f"  [2/2] A2, A3 병렬 실행 완료")
+#         
+#         # 부분 실패 처리
+#         status = "completed"
+#         if a2_result.get('status') == 'failed' or a3_result.get('status') == 'failed':
+#             status = "partial"
+#         
+#         return {
+#             "status": status,
+#             "contract_id": contract_id,
+#             "a1_summary": a1_result.get('completeness_summary'),
+#             "a2_summary": a2_result.get('checklist_summary'),
+#             "a3_summary": a3_result.get('analysis_summary'),
+#             "result_id": a3_result.get('result_id')
+#         }
+#     
+#     except Exception as e:
+#         logger.error(f"통합 검증 실패 (병렬처리): {contract_id}, 오류: {e}")
+#         import traceback
+#         logger.error(traceback.format_exc())
+#         return {
+#             "status": "failed",
+#             "contract_id": contract_id,
+#             "error": str(e)
+#         }
+# 
+# ============================================================================
+
+
 @celery_app.task(bind=True, name="consistency.validate_contract", queue="consistency_validation")
 def validate_contract_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
     """
-    통합 검증 작업: A1 (완전성) → A3 (내용 분석) 순차 실행
+    통합 검증 작업: A1 (완전성) → A2 (체크리스트) → A3 (내용 분석) 순차 실행
 
     Args:
         contract_id: 검증할 계약서 ID
@@ -283,7 +458,7 @@ def validate_contract_task(self, contract_id: str, text_weight: float = 0.7, tit
 
     try:
         # A1: 완전성 검증
-        logger.info(f"  [1/2] A1 완전성 검증 실행 중...")
+        logger.info(f"  [1/3] A1 완전성 검증 실행 중...")
         a1_result = check_completeness_task(contract_id, text_weight, title_weight, dense_weight)
 
         if a1_result['status'] != 'completed':
@@ -295,10 +470,26 @@ def validate_contract_task(self, contract_id: str, text_weight: float = 0.7, tit
                 "stage": "completeness_check"
             }
 
-        logger.info(f"  [1/2] A1 완전성 검증 완료")
+        logger.info(f"  [1/3] A1 완전성 검증 완료")
+
+        # A2: 체크리스트 검증 (A1 결과 참조)
+        logger.info(f"  [2/3] A2 체크리스트 검증 실행 중...")
+        a2_result = check_checklist_task(contract_id)
+
+        if a2_result['status'] != 'completed':
+            logger.error(f"  A2 검증 실패: {a2_result.get('error')}")
+            return {
+                "status": "partial",
+                "contract_id": contract_id,
+                "error": f"A2 검증 실패: {a2_result.get('error')}",
+                "stage": "checklist_validation",
+                "a1_result": a1_result
+            }
+
+        logger.info(f"  [2/3] A2 체크리스트 검증 완료")
 
         # A3: 내용 분석 (A1 결과 참조)
-        logger.info(f"  [2/2] A3 내용 분석 실행 중...")
+        logger.info(f"  [3/3] A3 내용 분석 실행 중...")
         a3_result = analyze_content_task(contract_id, text_weight, title_weight, dense_weight)
 
         if a3_result['status'] != 'completed':
@@ -308,16 +499,18 @@ def validate_contract_task(self, contract_id: str, text_weight: float = 0.7, tit
                 "contract_id": contract_id,
                 "error": f"A3 분석 실패: {a3_result.get('error')}",
                 "stage": "content_analysis",
-                "a1_result": a1_result
+                "a1_result": a1_result,
+                "a2_result": a2_result
             }
 
-        logger.info(f"  [2/2] A3 내용 분석 완료")
+        logger.info(f"  [3/3] A3 내용 분석 완료")
 
         # 통합 결과 반환
         return {
             "status": "completed",
             "contract_id": contract_id,
             "a1_summary": a1_result.get('completeness_summary'),
+            "a2_summary": a2_result.get('checklist_summary'),
             "a3_summary": a3_result.get('analysis_summary'),
             "result_id": a3_result.get('result_id')
         }
