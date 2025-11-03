@@ -142,6 +142,9 @@ class CompletenessCheckNode:
             except Exception as e:
                 logger.error(f"  조항 검증 실패 (제{article.get('number')}조): {e}")
                 continue
+            finally:
+                # 조항별 매칭 검증 완료 구분선
+                logger.info("--------------------------------------------------------------------------------")
 
         # 2단계: 누락된 표준 조문 식별
         missing_articles = [
@@ -186,6 +189,8 @@ class CompletenessCheckNode:
         }
 
         logger.info(f"A1 완전성 검증 완료: {processing_time:.2f}초")
+        logger.info("================================================================================")
+        logger.info("================================================================================")
 
         return result
 
@@ -542,6 +547,9 @@ class CompletenessCheckNode:
                     "top_candidates": [],
                     "candidates_analysis": []
                 })
+            finally:
+                # 누락 조문별 재검증 완료 구분선
+                logger.info("--------------------------------------------------------------------------------")
         
         # 실제 누락 조문 통계
         truly_missing_count = sum(1 for r in analysis_results if r['is_truly_missing'])

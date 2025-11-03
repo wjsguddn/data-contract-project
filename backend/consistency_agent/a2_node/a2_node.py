@@ -217,6 +217,9 @@ class ChecklistCheckNode:
                 "matched_std_global_ids": matched_global_ids,
                 "checklist_results": checklist_results
             })
+            
+            # 조항별 체크리스트 검증 완료 구분선
+            logger.info("--------------------------------------------------------------------------------")
         
         # 5. 통계 계산
         logger.info("4. 통계 계산 중...")
@@ -243,6 +246,8 @@ class ChecklistCheckNode:
         self._save_to_db(contract_id, result)
         
         logger.info(f"=== A2 노드 완료 (처리 시간: {processing_time:.2f}초) ===")
+        logger.info("================================================================================")
+        logger.info("================================================================================")
         
         return result
 
