@@ -14,7 +14,7 @@ WORKDIR /app
 # Python 의존성
 COPY requirements/requirements.txt .
 COPY requirements/requirements-report.txt .
-RUN pip install --no-cache-dir --timeout=600 --retries=5 -r requirements-report.txt
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 -r requirements-report.txt
 
 # PYTHONPATH 설정
 ENV PYTHONPATH=/app

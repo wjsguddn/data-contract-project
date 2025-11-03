@@ -18,7 +18,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
 COPY requirements/requirements-ingestion.txt ./
-RUN pip install --no-cache-dir --timeout=600 --retries=5 -r requirements-ingestion.txt
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 -r requirements-ingestion.txt
 
 COPY ingestion/ ./ingestion/
 
