@@ -67,6 +67,7 @@ class ValidationResult(Base):
     contract_type = Column(String, nullable=True)  # 계약 유형 (A3 노드에서 설정)
     completeness_check = Column(JSON, nullable=True)  # 완전성 검증 결과 (A1 노드)
     checklist_validation = Column(JSON, nullable=True)  # 체크리스트 검증 결과 (A2 노드)
+    manual_checks = Column(JSON, nullable=True)  # 사용자 확인 항목 (A2 노드)
     content_analysis = Column(JSON, nullable=True)  # 내용 분석 결과 (A3 노드)
     overall_score = Column(Float, nullable=True)
     issues = Column(JSON, nullable=True)  # 이슈 리스트
