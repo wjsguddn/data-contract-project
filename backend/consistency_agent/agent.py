@@ -306,20 +306,20 @@ def check_checklist_task(contract_id: str):
         
         logger.info(
             f"A2 노드 검증 완료: {contract_id} "
-            f"(전체: {checklist_result['total_checklist_items']}개, "
-            f"통과: {checklist_result['passed_items']}개, "
-            f"미충족: {checklist_result['failed_items']}개)"
+            f"(전체: {checklist_result.get('total_checklist_items', 0)}개, "
+            f"통과: {checklist_result.get('passed_items', 0)}개, "
+            f"미충족: {checklist_result.get('failed_items', 0)}개)"
         )
         
         return {
             "status": "completed",
             "contract_id": contract_id,
             "checklist_summary": {
-                "total_checklist_items": checklist_result['total_checklist_items'],
-                "verified_items": checklist_result['verified_items'],
-                "passed_items": checklist_result['passed_items'],
-                "failed_items": checklist_result['failed_items'],
-                "processing_time": checklist_result['processing_time']
+                "total_checklist_items": checklist_result.get('total_checklist_items', 0),
+                "verified_items": checklist_result.get('verified_items', 0),
+                "passed_items": checklist_result.get('passed_items', 0),
+                "failed_items": checklist_result.get('failed_items', 0),
+                "processing_time": checklist_result.get('processing_time', 0.0)
             }
         }
     
