@@ -162,7 +162,10 @@ def main() -> None:
             try:
                 backend_url = "http://localhost:8000/upload"
                 files = {"file": (file.name, file.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-                resp = requests.post(backend_url, files=files, timeout=60)
+
+                # 업로드 중 스피너 표시 (파싱 + 임베딩 포함)
+                with st.spinner("파일 업로드 및 처리 중입니다..."):
+                    resp = requests.post(backend_url, files=files, timeout=60)
 
                 if resp.status_code == 200 and resp.json().get("success"):
                     data = resp.json()
@@ -224,15 +227,14 @@ def main() -> None:
 
         # 분류 결과 - 상태 표시
         status_placeholder = st.empty()
+        classification_spinner_placeholder = st.empty()
 
         # 분류가 아직 안된 경우에만 폴링
         if 'classification_done' not in st.session_state or not st.session_state.classification_done:
-            # 초기 상태: 업로드 및 파싱 성공
-            status_placeholder.success("업로드 및 파싱 성공")
-
             # 자동으로 분류 결과 조회
-            with st.spinner("분류 작업이 진행 중입니다..."):
-                success, result = poll_classification_result(contract_id)
+            with classification_spinner_placeholder:
+                with st.spinner("분류 작업을 진행중입니다..."):
+                    success, result = poll_classification_result(contract_id)
 
             # 계약 유형 매핑
             type_names = {
@@ -280,8 +282,7 @@ def main() -> None:
                 if st.session_state.get('user_modified', False):
                     status_placeholder.success(f"분류 완료: **{type_names.get(predicted_type, predicted_type)}** (선택)")
                 else:
-                    confidence = st.session_state.confidence
-                    status_placeholder.success(f"분류 완료: **{type_names.get(predicted_type, predicted_type)}** (신뢰도: {confidence:.1%})")
+                    status_placeholder.success(f"분류 완료: **{type_names.get(predicted_type, predicted_type)}**")
 
         # 파싱 메타데이터
         metadata = uploaded_data['parsed_metadata']
@@ -546,58 +547,78 @@ def display_validation_result(validation_data: dict):
             else:
                 st.markdown(f"**매칭 결과**: 매칭 실패 (검색 결과 없음)")
 
-            # 하위항목별 상세 결과 (A1 노드의 matched_articles_details 사용)
+            # 하위항목별 상세 결과 (멀티매칭 - matched_articles_details 사용)
+            # A1 노드에서 생성한 상세 매칭 정보 사용
             matched_articles_details = analysis.get('matched_articles_details', [])
+
+            # 하위항목별 드랍다운 표시 조건: matched_articles_details가 있고, 하위항목 점수 정보가 있는 경우
+            has_sub_item_details = False
             if matched_articles_details:
-                # 모든 매칭된 조문의 하위항목 수 합산
-                total_sub_items = sum(len(article.get('sub_items_scores', [])) for article in matched_articles_details)
-                
-                if total_sub_items > 0:
-                    # 하위항목별 상세 결과 (커스텀 토글)
-                    show_details_key = f"show_details_{user_article_no}"
-                    if show_details_key not in st.session_state:
-                        st.session_state[show_details_key] = False
+                for detail in matched_articles_details:
+                    if detail.get('sub_items_scores'):
+                        has_sub_item_details = True
+                        break
 
-                    # 현재 상태 읽기
-                    is_expanded = st.session_state[show_details_key]
+            if has_sub_item_details:
+                # 하위항목별 상세 결과 (커스텀 토글)
+                show_details_key = f"show_details_{user_article_no}"
+                if show_details_key not in st.session_state:
+                    st.session_state[show_details_key] = False
 
-                    # 토글 버튼 (현재 상태 기준으로 레이블 표시)
-                    button_label = f"{'▼' if is_expanded else '▶'} 하위항목별 상세 ({total_sub_items}개)"
+                # 현재 상태 읽기
+                is_expanded = st.session_state[show_details_key]
 
-                    # 버튼 클릭 시 상태 토글 후 즉시 리렌더링
-                    if st.button(button_label, key=f"toggle_{user_article_no}", use_container_width=False):
-                        st.session_state[show_details_key] = not is_expanded
-                        st.rerun()
+                # 하위항목 총 개수 계산
+                total_sub_items = 0
+                for detail in matched_articles_details:
+                    sub_items_scores = detail.get('sub_items_scores', [])
+                    total_sub_items += len(sub_items_scores)
 
-                    if is_expanded:
-                        # 각 매칭된 조문별로 하위항목 표시
-                        for article_idx, article in enumerate(matched_articles_details, 1):
-                            article_global_id = article.get('global_id', '')
-                            formatted_article_id = _format_std_reference(article_global_id)
-                            article_title = article.get('title', '')
-                            sub_items_scores = article.get('sub_items_scores', [])
-                            
-                            if sub_items_scores:
-                                # 매칭된 조문이 여러 개인 경우 구분 표시
-                                if len(matched_articles_details) > 1:
-                                    st.markdown(f"**[{formatted_article_id} ({article_title})]**")
-                                
-                                for sub_idx, sub_item in enumerate(sub_items_scores, 1):
-                                    sub_text = sub_item.get('text', '')[:50]
-                                    sub_global_id = sub_item.get('global_id', '')
-                                    combined_score = sub_item.get('combined_score', 0.0)
-                                    dense_score = sub_item.get('dense_score', 0.0)
-                                    dense_score_raw = sub_item.get('dense_score_raw', 0.0)
-                                    sparse_score = sub_item.get('sparse_score', 0.0)
-                                    sparse_score_raw = sub_item.get('sparse_score_raw', 0.0)
-                                    
-                                    st.markdown(f"  {sub_idx}. `{sub_text}...`")
-                                    st.markdown(f"     → {sub_global_id}")
-                                    st.markdown(f"     Rank Score: {combined_score:.3f} (Dense: {dense_score:.3f}[{dense_score_raw:.3f}], Sparse: {sparse_score:.3f}[{sparse_score_raw:.3f}])")
-                                
-                                # 조문 간 구분선 (마지막 조문 제외)
-                                if len(matched_articles_details) > 1 and article_idx < len(matched_articles_details):
-                                    st.markdown("")
+                # 토글 버튼 (현재 상태 기준으로 레이블 표시)
+                button_label = f"{'▼' if is_expanded else '▶'} 하위항목별 상세 매칭 정보 ({total_sub_items}개)"
+
+                # 버튼 클릭 시 상태 토글 후 즉시 리렌더링
+                if st.button(button_label, key=f"toggle_{user_article_no}", use_container_width=False):
+                    st.session_state[show_details_key] = not is_expanded
+                    st.rerun()
+
+                if is_expanded:
+                    # 각 매칭된 표준 조문별로 하위항목 표시
+                    for detail_idx, detail in enumerate(matched_articles_details, 1):
+                        parent_id = detail.get('parent_id', '')
+                        global_id = detail.get('global_id', '')
+                        title = detail.get('title', '')
+                        combined_score = detail.get('combined_score', 0.0)
+                        sub_items_scores = detail.get('sub_items_scores', [])
+
+                        if not sub_items_scores:
+                            continue
+
+                        # 표준 조문 헤더
+                        formatted_std_id = _format_std_reference(global_id)
+                        st.markdown(f"**{detail_idx}. {formatted_std_id}** ({title}) - 종합 점수: {combined_score:.3f}")
+
+                        # 하위항목별 점수 표시
+                        for sub_idx, sub_item in enumerate(sub_items_scores, 1):
+                            chunk_id = sub_item.get('chunk_id', '')
+                            chunk_global_id = sub_item.get('global_id', '')
+                            chunk_text = sub_item.get('text', '')[:80]
+                            dense_score = sub_item.get('dense_score', 0.0)
+                            dense_score_raw = sub_item.get('dense_score_raw', 0.0)
+                            sparse_score = sub_item.get('sparse_score', 0.0)
+                            sparse_score_raw = sub_item.get('sparse_score_raw', 0.0)
+                            combined = sub_item.get('combined_score', 0.0)
+
+                            # 하위항목 정보
+                            st.markdown(f"  **{sub_idx}. {chunk_id}**")
+                            st.markdown(f"     텍스트: `{chunk_text}...`")
+                            st.markdown(f"     Global ID: `{chunk_global_id}`")
+                            st.markdown(f"     Rank Score: {combined:.3f} (Dense: {dense_score:.3f}[{dense_score_raw:.3f}], Sparse: {sparse_score:.3f}[{sparse_score_raw:.3f}])")
+                            st.markdown("")  # 여백
+
+                        # 조문 간 구분선
+                        if detail_idx < len(matched_articles_details):
+                            st.markdown("---")
 
             # 분석 이유
             reasoning = analysis.get('reasoning', '')
