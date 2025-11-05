@@ -70,7 +70,7 @@ Thumbs.db
 # Project specific
 data/uploads/*
 data/reports/*
-data/database/*.db
+data/database/*
 data/embeddings/*
 data/search_indexes/*/*
 !data/search_indexes/.gitkeep
