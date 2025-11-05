@@ -12,7 +12,7 @@ logger = logging.getLogger("uvicorn.error")
 from backend.fastapi.user_contract_parser import UserContractParser
 from backend.shared.database import init_db, get_db, ContractDocument, ClassificationResult, ValidationResult, TokenUsage
 from backend.classification_agent.agent import classify_contract_task
-from backend.consistency_agent.agent import validate_contract_task
+from backend.consistency_agent.agent import validate_contract_task, validate_contract_parallel_task
 
 app = FastAPI()
 
@@ -365,18 +365,20 @@ async def start_validation(
     text_weight: float = 0.7,
     title_weight: float = 0.3,
     dense_weight: float = 0.85,
+    use_parallel: bool = True,  # 병렬 처리 사용 여부 (기본값: True)
     db: Session = Depends(get_db)
 ):
     """
-    계약서 검증 시작 (A3 노드)
-    
+    계약서 검증 시작 (병렬 처리)
+
     Args:
         contract_id: 계약서 ID
         text_weight: 본문 가중치 (기본값: 0.7)
         title_weight: 제목 가중치 (기본값: 0.3)
         dense_weight: 시멘틱 가중치 (기본값: 0.85)
+        use_parallel: 병렬 처리 사용 여부 (기본값: True)
         db: 데이터베이스 세션
-        
+
     Returns:
         {
             "message": str,
@@ -395,40 +397,54 @@ async def start_validation(
             raise HTTPException(status_code=400, detail="시멘틱 가중치는 0~1 사이여야 합니다")
         if abs(text_weight + title_weight - 1.0) > 0.001:
             raise HTTPException(status_code=400, detail="본문 가중치와 제목 가중치의 합은 1.0이어야 합니다")
-        
+
         # 계약서 존재 확인
         contract = db.query(ContractDocument).filter(
             ContractDocument.contract_id == contract_id
         ).first()
-        
+
         if not contract:
             raise HTTPException(status_code=404, detail="계약서를 찾을 수 없습니다")
-        
+
         # 분류 완료 확인
         classification = db.query(ClassificationResult).filter(
             ClassificationResult.contract_id == contract_id
         ).first()
-        
+
         if not classification:
             raise HTTPException(status_code=400, detail="계약서 분류가 완료되지 않았습니다")
-        
-        # 검증 작업 큐에 전송 (가중치 파라미터 전달)
-        task = validate_contract_task.delay(
-            contract_id,
-            text_weight=text_weight,
-            title_weight=title_weight,
-            dense_weight=dense_weight
-        )
-        
-        logger.info(f"검증 작업 시작: {contract_id}, task_id: {task.id}, weights: text={text_weight}, title={title_weight}, dense={dense_weight}")
-        
+
+        # 검증 작업 큐에 전송 (병렬 또는 순차)
+        if use_parallel:
+            # 병렬 처리: A1-Stage1 → [A1-Stage2 || A2 || A3]
+            task = validate_contract_parallel_task.delay(
+                contract_id,
+                text_weight=text_weight,
+                title_weight=title_weight,
+                dense_weight=dense_weight
+            )
+            message = "검증이 시작되었습니다 (병렬 처리)"
+        else:
+            # 순차 처리 (기존 방식)
+            task = validate_contract_task.delay(
+                contract_id,
+                text_weight=text_weight,
+                title_weight=title_weight,
+                dense_weight=dense_weight
+            )
+            message = "검증이 시작되었습니다 (순차 처리)"
+
+        logger.info(f"검증 작업 시작 ({'병렬' if use_parallel else '순차'}): {contract_id}, "
+                   f"task_id: {task.id}, weights: text={text_weight}, title={title_weight}, dense={dense_weight}")
+
         return {
-            "message": "검증이 시작되었습니다",
+            "message": message,
             "contract_id": contract_id,
             "task_id": task.id,
-            "status": "processing"
+            "status": "processing",
+            "parallel": use_parallel
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -439,12 +455,15 @@ async def start_validation(
 @app.get("/api/validation/{contract_id}")
 async def get_validation_result(contract_id: str, db: Session = Depends(get_db)):
     """
-    검증 결과 조회
-    
+    검증 결과 조회 (병렬 처리 대응)
+
+    병렬 처리 시 A1-Stage2, A2, A3가 독립적으로 완료되므로
+    모든 필드가 완료되었는지 확인합니다.
+
     Args:
         contract_id: 계약서 ID
         db: 데이터베이스 세션
-        
+
     Returns:
         검증 결과
     """
@@ -453,24 +472,88 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
         validation = db.query(ValidationResult).filter(
             ValidationResult.contract_id == contract_id
         ).first()
-        
+
         if not validation:
             return {
                 "contract_id": contract_id,
                 "status": "not_started",
                 "message": "검증이 시작되지 않았습니다"
             }
-        
-        # A3 결과 확인
+
+        # 각 노드 결과 확인
+        completeness_check = validation.completeness_check
+        checklist_validation = validation.checklist_validation
         content_analysis = validation.content_analysis
-        
-        if not content_analysis or content_analysis.get('status') == 'pending':
+
+        # 디버그: 실제 DB 값 출력 (100자 제한)
+        logger.info(f"[GET DEBUG] {contract_id} - completeness_check exists: {bool(completeness_check)}")
+
+        checklist_str = str(checklist_validation)[:100] if checklist_validation else "None"
+        logger.info(f"[GET DEBUG] {contract_id} - checklist_validation: {checklist_str}...")
+
+        content_str = str(content_analysis)[:100] if content_analysis else "None"
+        logger.info(f"[GET DEBUG] {contract_id} - content_analysis: {content_str}...")
+
+        if completeness_check:
+            has_missing = 'missing_article_analysis' in completeness_check
+            logger.info(f"[GET DEBUG] {contract_id} - missing_article_analysis exists: {has_missing}")
+
+        if checklist_validation:
+            logger.info(f"[GET DEBUG] {contract_id} - total_checklist_items: {checklist_validation.get('total_checklist_items')}")
+
+        if content_analysis:
+            logger.info(f"[GET DEBUG] {contract_id} - total_articles: {content_analysis.get('total_articles')}")
+
+        # 1. completeness_check 없음 → A1-Stage1도 완료 안됨
+        if not completeness_check:
             return {
                 "contract_id": contract_id,
                 "status": "processing",
-                "message": "검증이 진행 중입니다"
+                "message": "매칭 검증 중입니다 (A1-Stage1)"
             }
-        
+
+        # 2. A1-Stage1 완료 확인 (matching_details 존재 여부로 판단)
+        if not completeness_check.get('matching_details'):
+            return {
+                "contract_id": contract_id,
+                "status": "processing",
+                "message": "매칭 검증 중입니다 (A1-Stage1)"
+            }
+
+        # 3. checklist_validation 없음 또는 미완료 → A2 진행 중
+        if not checklist_validation or checklist_validation == {} or checklist_validation.get('status') == 'pending':
+            return {
+                "contract_id": contract_id,
+                "status": "processing",
+                "message": "체크리스트 검증 중입니다 (A2)"
+            }
+
+        # 4. content_analysis 없음 또는 미완료 → A3 진행 중
+        if not content_analysis or content_analysis == {} or content_analysis.get('status') == 'pending':
+            return {
+                "contract_id": contract_id,
+                "status": "processing",
+                "message": "내용 분석 중입니다 (A3)"
+            }
+
+        # 5. 모든 필드가 실제 데이터를 가지고 있는지 확인
+        # A2 필수 필드: total_checklist_items
+        # A3 필수 필드: total_articles
+        if not checklist_validation.get('total_checklist_items'):
+            return {
+                "contract_id": contract_id,
+                "status": "processing",
+                "message": "체크리스트 검증 데이터 확인 중 (A2)"
+            }
+
+        if not content_analysis.get('total_articles'):
+            return {
+                "contract_id": contract_id,
+                "status": "processing",
+                "message": "내용 분석 데이터 확인 중 (A3)"
+            }
+
+        # 모든 필드 완료 → 검증 완료
         return {
             "contract_id": contract_id,
             "status": "completed",
@@ -478,13 +561,13 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
                 "id": validation.id,
                 "overall_score": validation.overall_score,
                 "content_analysis": content_analysis,
-                "completeness_check": validation.completeness_check,
-                "checklist_validation": validation.checklist_validation,
+                "completeness_check": completeness_check,
+                "checklist_validation": checklist_validation,
                 "recommendations": validation.recommendations,
                 "created_at": validation.created_at.isoformat() if validation.created_at else None
             }
         }
-        
+
     except Exception as e:
         logger.error(f"검증 결과 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
