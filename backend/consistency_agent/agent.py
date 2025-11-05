@@ -570,6 +570,7 @@ def _init_azure_client():
     try:
         api_key = os.getenv('AZURE_OPENAI_API_KEY')
         endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        max_retries = int(os.getenv('AZURE_OPENAI_MAX_RETRIES', '10'))
 
         if not api_key or not endpoint:
             logger.error("Azure OpenAI 환경 변수가 설정되지 않음")
@@ -578,9 +579,11 @@ def _init_azure_client():
         client = AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version="2024-02-01"
+            api_version="2024-02-01",
+            max_retries=max_retries
         )
 
+        logger.info(f"Azure OpenAI 클라이언트 초기화 완료 (max_retries={max_retries})")
         return client
 
     except Exception as e:
