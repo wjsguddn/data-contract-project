@@ -3,12 +3,17 @@
 SQLite 사용
 """
 
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, JSON
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, JSON, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 from datetime import datetime
 import os
 import json
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 데이터베이스 URL
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/database/contracts.db")
@@ -16,10 +21,24 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/database/contracts
 # SQLAlchemy 엔진 생성
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30  # 기본 5초 → 30초로 증가
+    } if "sqlite" in DATABASE_URL else {},
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),  # 한글 인코딩 보장
     json_deserializer=lambda obj: json.loads(obj)
 )
+
+# SQLite WAL 모드 활성화 (병렬 처리 안정성 향상)
+if "sqlite" in DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        """SQLite 연결 시 WAL 모드 및 busy_timeout 설정"""
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30초
+        cursor.close()
+        logger.debug("SQLite WAL 모드 활성화 완료")
 
 # 세션 생성
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -117,7 +136,7 @@ def init_db():
 def get_db():
     """
     데이터베이스 세션 생성 (FastAPI 의존성)
-    
+
     Yields:
         Session: 데이터베이스 세션
     """
@@ -126,3 +145,195 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# DB 재시도 헬퍼 함수
+def db_retry_on_lock(max_retries: int = 3, base_delay: float = 0.5):
+    """
+    DB Lock 에러 발생 시 재시도하는 데코레이터
+
+    병렬 처리 시 SQLite의 "database is locked" 에러를 처리하기 위한 재시도 로직
+
+    Args:
+        max_retries: 최대 재시도 횟수 (기본 3회)
+        base_delay: 기본 대기 시간 (초, 기본 0.5초)
+
+    Example:
+        @db_retry_on_lock(max_retries=3)
+        def update_validation_result(contract_id, data):
+            db = SessionLocal()
+            try:
+                result = db.query(ValidationResult).filter(...).first()
+                result.completeness_check = data
+                db.commit()
+            finally:
+                db.close()
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+
+                except OperationalError as e:
+                    last_exception = e
+                    error_msg = str(e).lower()
+
+                    # "database is locked" 에러인 경우만 재시도
+                    if "database is locked" in error_msg or "locked" in error_msg:
+                        if attempt < max_retries - 1:
+                            # Exponential backoff: 0.5초, 1초, 2초...
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(
+                                f"DB locked, 재시도 {attempt + 1}/{max_retries} "
+                                f"(대기: {delay:.1f}초) - {func.__name__}"
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            logger.error(
+                                f"DB lock 재시도 {max_retries}회 실패 - {func.__name__}: {e}"
+                            )
+                            raise
+                    else:
+                        # 다른 DB 에러는 즉시 raise
+                        logger.error(f"DB 에러 (재시도 불가) - {func.__name__}: {e}")
+                        raise
+
+                except Exception as e:
+                    # DB lock 외 다른 에러는 즉시 raise
+                    logger.error(f"예외 발생 - {func.__name__}: {e}")
+                    raise
+
+            # 모든 재시도 실패
+            if last_exception:
+                raise last_exception
+
+        return wrapper
+    return decorator
+
+
+def update_validation_field_with_retry(
+    contract_id: str,
+    field_name: str,
+    data: dict,
+    max_retries: int = 3
+) -> bool:
+    """
+    ValidationResult의 특정 필드를 재시도 로직과 함께 업데이트
+
+    병렬 처리 시 각 노드가 독립적으로 자신의 필드만 업데이트하기 위한 헬퍼 함수
+
+    Args:
+        contract_id: 계약서 ID
+        field_name: 업데이트할 필드명 ("completeness_check", "checklist_validation", "content_analysis")
+        data: 저장할 데이터 (dict)
+        max_retries: 최대 재시도 횟수
+
+    Returns:
+        성공 시 True, 실패 시 False
+
+    Example:
+        # A1-stage2에서 누락 검증 결과 업데이트
+        success = update_validation_field_with_retry(
+            contract_id,
+            "completeness_check",
+            updated_completeness_check
+        )
+    """
+    @db_retry_on_lock(max_retries=max_retries)
+    def _update():
+        db = SessionLocal()
+        try:
+            # ValidationResult 조회
+            validation_result = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+
+            if not validation_result:
+                logger.error(f"ValidationResult를 찾을 수 없음: {contract_id}")
+                return False
+
+            # 필드 업데이트
+            setattr(validation_result, field_name, data)
+
+            # 커밋
+            db.commit()
+            logger.info(f"ValidationResult.{field_name} 업데이트 완료: {contract_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"ValidationResult.{field_name} 업데이트 실패: {contract_id}, {e}")
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    try:
+        return _update()
+    except Exception as e:
+        logger.error(f"재시도 후에도 업데이트 실패: {field_name}, {contract_id}, {e}")
+        return False
+
+
+def update_completeness_check_partial_with_retry(
+    contract_id: str,
+    partial_data: dict,
+    max_retries: int = 3
+) -> bool:
+    """
+    completeness_check 필드를 부분적으로 업데이트 (merge)
+
+    A1-stage2에서 missing_article_analysis를 기존 completeness_check에 추가할 때 사용
+
+    Args:
+        contract_id: 계약서 ID
+        partial_data: 추가할 데이터 (예: {"missing_article_analysis": [...]})
+        max_retries: 최대 재시도 횟수
+
+    Returns:
+        성공 시 True, 실패 시 False
+    """
+    @db_retry_on_lock(max_retries=max_retries)
+    def _update():
+        db = SessionLocal()
+        try:
+            validation_result = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+
+            if not validation_result:
+                logger.error(f"ValidationResult를 찾을 수 없음: {contract_id}")
+                return False
+
+            # 기존 completeness_check 가져오기
+            existing_check = validation_result.completeness_check or {}
+
+            # partial_data를 기존 데이터에 merge
+            existing_check.update(partial_data)
+
+            # 업데이트 (새로운 dict 객체를 할당하여 SQLAlchemy가 변경 감지하도록)
+            validation_result.completeness_check = dict(existing_check)
+
+            # flag_modified로 명시적으로 변경 표시
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(validation_result, 'completeness_check')
+
+            db.commit()
+            logger.info(f"completeness_check 부분 업데이트 완료: {contract_id}, keys={list(partial_data.keys())}")
+            return True
+
+        except Exception as e:
+            logger.error(f"completeness_check 부분 업데이트 실패: {contract_id}, {e}")
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    try:
+        return _update()
+    except Exception as e:
+        logger.error(f"재시도 후에도 부분 업데이트 실패: {contract_id}, {e}")
+        return False
