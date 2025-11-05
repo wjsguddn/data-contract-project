@@ -485,6 +485,78 @@ flowchart TD
     
     NOTE --> EN
 
+## A2 Node 상세 플로우 (체크리스트 검증)
+
+```mermaid
+flowchart TD
+    START([A2 Node 시작])
+    
+    LOAD_A1[article_mapping.json 로드]
+    FILTER[matched 조항만 필터링]
+    
+    LOAD_CHECKLIST[활용안내서<br/>체크리스트 로드]
+    
+    LOOP{모든 매칭<br/>조항 처리?}
+    
+    GET_ARTICLE[다음 조항 가져오기]
+    FILTER_CHECKLIST[관련 체크리스트 필터링<br/>global_id 기준]
+    DEDUP[이미 YES인 항목 제외]
+    
+    LOAD_TEXT[사용자 조항 텍스트 로드]
+    
+    LLM_VERIFY[LLM 배치 검증<br/>ChecklistVerifier]
+    
+    CONFIDENCE{신뢰도<br/>< 0.7?}
+    REVERIFY[표준 조항 추가<br/>재검증]
+    
+    RESULT_TYPE{결과 유형}
+    
+    YES_RESULT[YES<br/>evidence]
+    NO_RESULT[NO<br/>missing_explanation<br/>risk_level<br/>recommendation]
+    UNCLEAR_RESULT[UNCLEAR<br/>manual_review]
+    MANUAL_RESULT[MANUAL_CHECK_REQUIRED<br/>user_action]
+    
+    TRACK_YES2[YES 항목 추적]
+    ACCUMULATE[결과 누적]
+    
+    STATS[통계 계산<br/>통과율, 등급]
+    SAVE[checklist_result.json<br/>저장]
+    END([A2 Node 완료])
+    
+    START --> LOAD_A1
+    LOAD_A1 --> FILTER
+    FILTER --> LOAD_CHECKLIST
+    LOAD_CHECKLIST --> LOOP
+    
+    LOOP -->|No| GET_ARTICLE
+    GET_ARTICLE --> FILTER_CHECKLIST
+    FILTER_CHECKLIST --> DEDUP
+    DEDUP --> LOAD_TEXT
+    LOAD_TEXT --> LLM_VERIFY
+    
+    LLM_VERIFY --> CONFIDENCE
+    CONFIDENCE -->|Yes| REVERIFY
+    REVERIFY --> RESULT_TYPE
+    CONFIDENCE -->|No| RESULT_TYPE
+    
+    RESULT_TYPE -->|YES| YES_RESULT
+    RESULT_TYPE -->|NO| NO_RESULT
+    RESULT_TYPE -->|UNCLEAR| UNCLEAR_RESULT
+    RESULT_TYPE -->|MANUAL| MANUAL_RESULT
+    
+    YES_RESULT --> TRACK_YES2
+    NO_RESULT --> ACCUMULATE
+    UNCLEAR_RESULT --> ACCUMULATE
+    MANUAL_RESULT --> ACCUMULATE
+    
+    TRACK_YES2 --> ACCUMULATE
+    ACCUMULATE --> LOOP
+    
+    LOOP -->|Yes| STATS
+    STATS --> SAVE
+    SAVE --> END
+```
+
 ## A2/A3 Node의 A1 결과 활용
 
 ```mermaid
