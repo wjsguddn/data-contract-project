@@ -360,6 +360,7 @@ class ContentComparator:
             result = self._parse_llm_response(analysis_text)
             result["prompt_tokens"] = usage.prompt_tokens
             result["completion_tokens"] = usage.completion_tokens
+            result["total_tokens"] = usage.total_tokens
 
             return result
 

@@ -249,6 +249,7 @@ class CompletenessCheckNode:
                 return result
 
             candidate_articles = matching_result['matched_articles']
+            sub_item_results = matching_result.get('sub_item_results', [])  # 하위항목별 매칭 결과
             logger.info(f"    후보 조문: {len(candidate_articles)}개")
 
             # 2단계: LLM 매칭 검증(MatchingVerifier)
@@ -323,7 +324,13 @@ class CompletenessCheckNode:
                 result['matched_articles'] = selected_parent_ids  # parent_id 리스트로 저장 (A3/프론트 호환)
                 result['matched_articles_global_ids'] = selected_global_ids  # global_id 별도 저장
                 result['matched_articles_details'] = matched_details  # 상세 점수 정보
+                result['sub_item_results'] = sub_item_results  # 하위항목별 멀티매칭 결과
                 result['verification_details'] = verification_result.get('verification_details', [])
+
+                # 디버깅: sub_item_results 로그
+                logger.info(f"    sub_item_results 포함: {len(sub_item_results)}개 하위항목")
+                for sub_result in sub_item_results:
+                    logger.info(f"      하위항목 {sub_result.get('sub_item_index')}: {len(sub_result.get('matched_articles', []))}개 조")
 
                 logger.info(f"    매칭 성공: {len(result['matched_articles'])}개 조문")
                 for i, (parent_id, global_id) in enumerate(zip(selected_parent_ids, selected_global_ids)):

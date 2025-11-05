@@ -672,7 +672,8 @@ class ClassificationAgent:
             }
         else:
             # 애매함 → LLM Few-shot 호출
-            logger.info(f"⚠ LLM 정밀 분류 필요 (gap={score_gap:.3f}, top1={top1_type}:{top1_score:.3f}, top2={top2_type}:{top2_score:.3f})")
+            # logger.info(f"⚠ LLM 정밀 분류 필요 (gap={score_gap:.3f}, top1={top1_type}:{top1_score:.3f}, top2={top2_type}:{top2_score:.3f})")
+            logger.info(f"⚠ LLM 정밀 분류 필요 (유사도 점수 차이 0.05 미만)")
             predicted_type, confidence, reasoning = self._llm_classify_with_fewshot(
                 key_articles,
                 similarity_scores,

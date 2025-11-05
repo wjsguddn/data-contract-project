@@ -17,12 +17,13 @@ logger = logging.getLogger(__name__)
 class ArticleMatcher:
     """
     대응 조항 검색기
-    
-    멀티벡터 검색 방식:
+
+    멀티벡터 검색 방식 (멀티매칭):
     1. 사용자 조항의 각 하위항목으로 개별 검색
     2. Top-K 청크 검색 (FAISS + Whoosh 하이브리드)
-    3. 청크를 조 단위로 취합 (정규화된 평균 점수)
-    4. 최고 점수 조 선택
+    3. 청크를 조 단위로 중복 제거 (각 조당 최고 점수만 유지)
+    4. 모든 조 반환 (하위항목당 최대 K개 조 매칭 가능)
+    5. 하위항목별 결과를 조 단위로 집계 (등장 횟수 기반 정렬)
     """
     
     def __init__(
@@ -146,21 +147,22 @@ class ArticleMatcher:
         dense_weight: float = 0.85
     ) -> tuple[List[Dict], List[Dict]]:
         """
-        사용자 조항의 각 하위항목으로 검색 (top-1 방식)
-        
+        사용자 조항의 각 하위항목으로 검색 (멀티매칭 방식)
+
         각 하위항목별로:
-        1. top-1 청크 검색 (제목/본문 분리)
-        2. 최고 점수 조 1개 선정
-        
+        1. top-k 청크 검색 (제목/본문 분리)
+        2. 조별 중복 제거 (각 조당 최고 점수만 유지)
+        3. 모든 조 반환 (최대 k개)
+
         Args:
             text_weight: 본문 가중치 (기본값: 0.7)
             title_weight: 제목 가중치 (기본값: 0.3)
             dense_weight: 시멘틱 가중치 (기본값: 0.85)
-        
+
         Returns:
             (article_scores, sub_item_results)
             - article_scores: 조 단위 최종 결과 (하위항목별 결과 집계)
-            - sub_item_results: 하위항목별 매칭 결과
+            - sub_item_results: 하위항목별 매칭 결과 (각 하위항목당 여러 조 포함 가능)
         """
         content_items = user_article.get('content', [])
         article_title = user_article.get('title', '')
@@ -212,22 +214,23 @@ class ArticleMatcher:
             
             if not chunk_results:
                 continue
-            
-            # top-1 결과에서 최고 점수 조 선정
-            best_article = self._select_best_article_from_chunks(chunk_results)
-            
-            if best_article:
+
+            # 조별 중복 제거 후 모든 조 반환
+            matched_articles = self._select_articles_from_chunks(chunk_results)
+
+            if matched_articles:
+                # 하위항목별로 여러 조 저장
                 sub_item_results.append({
                     'sub_item_index': idx,
                     'sub_item_text': sub_item,
                     'normalized_text': normalized,
-                    'matched_article_id': best_article['parent_id'],
-                    'matched_article_title': best_article['title'],
-                    'score': best_article['score'],
-                    'matched_chunks': best_article['chunks']
+                    'matched_articles': matched_articles  # List[Dict] 형태로 저장
                 })
-                
-                logger.debug(f"      → {best_article['parent_id']}: {best_article['score']:.3f}")
+
+                # 로깅
+                logger.info(f"      하위항목 {idx}: {len(matched_articles)}개 조 매칭")
+                for article in matched_articles:
+                    logger.info(f"         → {article['parent_id']}: {article['score']:.3f}")
         
         if not sub_item_results:
             return [], []
@@ -421,123 +424,143 @@ class ArticleMatcher:
 
         return results
 
-    def _select_best_article_from_chunks(
+    def _select_articles_from_chunks(
         self,
         chunk_results: List[Dict]
-    ) -> Optional[Dict]:
+    ) -> List[Dict]:
         """
-        청크 검색 결과에서 최고 점수 조 1개 선정 (top-1 방식)
-        
-        각 조의 최고 점수 청크를 대표 점수로 사용
-        
+        청크 검색 결과에서 조별 중복 제거 후 모든 조 반환
+
+        각 조의 최고 점수 청크만 유지 (중복 제거)
+
         Args:
-            chunk_results: 하이브리드 검색 결과 (top-1 청크)
-            
+            chunk_results: 하이브리드 검색 결과 (top-k 청크)
+
         Returns:
-            {
+            List[{
                 'parent_id': str,
                 'title': str,
-                'score': float,  # 조의 최고 점수
-                'chunks': List[Dict]  # 해당 조의 청크들
-            }
+                'score': float,  # 해당 조의 최고 점수
+                'chunks': List[Dict]  # 해당 조의 최고 점수 청크만 포함
+            }]
         """
         # parent_id로 그룹화
         article_groups = defaultdict(list)
-        
+
         for result in chunk_results:
             parent_id = result.get('parent_id')
             if not parent_id:
                 continue
-            
+
             article_groups[parent_id].append(result)
-        
+
         if not article_groups:
-            return None
-        
-        # 조별 최고 점수 계산
-        article_scores = []
-        
+            return []
+
+        # 조별 최고 점수만 유지 (중복 제거)
+        article_results = []
+
         for parent_id, chunks in article_groups.items():
-            # 최고 점수 (top-1 방식)
-            max_score = max(c.get('score', 0.0) for c in chunks)
-            
+            # 최고 점수 청크 찾기
+            best_chunk = max(chunks, key=lambda c: c.get('score', 0.0))
+            max_score = best_chunk.get('score', 0.0)
+
             # 제목 추출
             title = chunks[0].get('title', '') if chunks else ''
-            
-            article_scores.append({
+
+            article_results.append({
                 'parent_id': parent_id,
                 'title': title,
                 'score': max_score,
-                'chunks': chunks
+                'chunks': [best_chunk]  # 최고 점수 청크만 포함
             })
-        
-        # 최고 점수 조 선택
-        best_article = max(article_scores, key=lambda x: x['score'])
-        
-        return best_article
+
+        # 점수 순으로 정렬 (높은 순)
+        article_results.sort(key=lambda x: x['score'], reverse=True)
+
+        return article_results
     
     def _aggregate_sub_item_results(
         self,
         sub_item_results: List[Dict]
     ) -> List[Dict]:
         """
-        하위항목별 매칭 결과를 조 단위로 집계
+        하위항목별 매칭 결과를 조 단위로 집계 (멀티매칭 방식)
 
-        같은 조를 선택한 하위항목들의 점수를 평균내고,
-        다른 조를 선택한 경우 모두 결과에 포함
+        각 하위항목은 여러 조에 매칭될 수 있으며,
+        조가 몇 개의 하위항목에 등장했는지를 카운트
 
         정렬 순서:
-        1. 하위항목 개수 (많은 순)
+        1. 하위항목 개수 (많은 순) - 더 많은 하위항목에 등장한 조가 우선
         2. 평균 유사도 (높은 순)
         3. 조 번호 (낮은 순)
 
         Args:
             sub_item_results: 하위항목별 매칭 결과
+                각 항목은 'matched_articles' 키에 List[Dict] 형태로 여러 조 포함
 
         Returns:
             조 단위 집계 결과 (정렬됨)
         """
-        # 조별로 그룹화
-        article_groups = defaultdict(list)
+        # 조별로 그룹화: {parent_id: {'sub_items': set(), 'scores': [], 'title': str, 'chunks': []}}
+        article_groups = defaultdict(lambda: {
+            'sub_items': set(),
+            'scores': [],
+            'title': '',
+            'chunks': []
+        })
 
-        for result in sub_item_results:
-            article_id = result['matched_article_id']
-            article_groups[article_id].append(result)
+        # 모든 하위항목의 매칭 결과를 순회
+        for sub_item_result in sub_item_results:
+            sub_item_index = sub_item_result['sub_item_index']
+            matched_articles = sub_item_result['matched_articles']  # List[Dict]
 
-        # 조별 평균 점수 계산
+            # 각 하위항목에서 매칭된 조들을 순회
+            for article in matched_articles:
+                parent_id = article['parent_id']
+                score = article['score']
+                title = article['title']
+                chunks = article['chunks']
+
+                # 해당 조에 이 하위항목 추가
+                article_groups[parent_id]['sub_items'].add(sub_item_index)
+                article_groups[parent_id]['scores'].append(score)
+
+                # 제목 설정 (처음 한 번만)
+                if not article_groups[parent_id]['title']:
+                    article_groups[parent_id]['title'] = title
+
+                # 청크 추가 (중복 제거)
+                for chunk in chunks:
+                    chunk_id = chunk.get('chunk', {}).get('id')
+                    # 이미 존재하는 청크 ID인지 확인
+                    if not any(c.get('chunk', {}).get('id') == chunk_id for c in article_groups[parent_id]['chunks']):
+                        article_groups[parent_id]['chunks'].append(chunk)
+
+        # 조별 집계 결과 생성
         article_scores = []
 
-        for article_id, results in article_groups.items():
+        for parent_id, data in article_groups.items():
+            # 하위항목 개수 (몇 개의 하위항목에 등장했는지)
+            num_sub_items = len(data['sub_items'])
+
             # 평균 점수
-            avg_score = sum(r['score'] for r in results) / len(results)
+            avg_score = sum(data['scores']) / len(data['scores']) if data['scores'] else 0.0
 
-            # 제목 (첫 번째 결과에서)
-            title = results[0]['matched_article_title']
-
-            # 매칭된 하위항목 인덱스
-            matched_sub_items = [r['sub_item_index'] for r in results]
-
-            # 모든 청크 수집 (중복 제거)
-            all_chunks = []
-            seen_chunk_ids = set()
-            for r in results:
-                for chunk in r['matched_chunks']:
-                    chunk_id = chunk.get('chunk', {}).get('id')
-                    if chunk_id and chunk_id not in seen_chunk_ids:
-                        all_chunks.append(chunk)
-                        seen_chunk_ids.add(chunk_id)
+            # 매칭된 하위항목 인덱스 리스트 (정렬)
+            matched_sub_items = sorted(list(data['sub_items']))
 
             # base_global_id 추출 (첫 번째 청크에서)
-            base_global_id = self._extract_base_global_id(all_chunks[0]) if all_chunks else None
+            base_global_id = self._extract_base_global_id(data['chunks'][0]) if data['chunks'] else None
 
             article_scores.append({
-                'parent_id': article_id,
-                'title': title,
+                'parent_id': parent_id,
+                'title': data['title'],
                 'score': avg_score,
                 'matched_sub_items': matched_sub_items,
-                'num_sub_items': len(results),
-                'matched_chunks': all_chunks,
-                'base_global_id': base_global_id  # 추가
+                'num_sub_items': num_sub_items,
+                'matched_chunks': data['chunks'],
+                'base_global_id': base_global_id
             })
 
         # 정렬: 1. 하위항목 개수 (내림차순) → 2. 유사도 (내림차순) → 3. 조 번호 (오름차순)
@@ -554,7 +577,7 @@ class ArticleMatcher:
             if chunks:
                 avg_dense = sum(c.get('dense_score', 0.0) for c in chunks) / len(chunks)
                 avg_sparse = sum(c.get('sparse_score', 0.0) for c in chunks) / len(chunks)
-                logger.info(f"      {i}. {article['parent_id']}: {article['score']:.3f} (D:{avg_dense:.3f}, S:{avg_sparse:.3f}, 하위항목:{article['num_sub_items']})")
+                logger.info(f"      {i}. {article['parent_id']}: {article['score']:.3f} (D:{avg_dense:.3f}, S:{avg_sparse:.3f}, 하위항목:{article['num_sub_items']}개)")
             else:
                 logger.debug(f"      {i}. {article['parent_id']}: {article['score']:.3f} (하위항목: {article['num_sub_items']}개)")
 
