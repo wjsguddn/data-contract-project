@@ -58,7 +58,7 @@ class CompletenessCheckNode:
 
         logger.info("A1 노드 (Completeness Check) 초기화 완료")
 
-    def check_completeness(
+    def check_completeness_stage1(
         self,
         contract_id: str,
         user_contract: Dict[str, Any],
@@ -68,7 +68,11 @@ class CompletenessCheckNode:
         dense_weight: float = 0.85
     ) -> Dict[str, Any]:
         """
-        계약서 완전성 검증
+        계약서 완전성 검증 - Stage 1: 매칭 + LLM 검증
+
+        A2/A3가 필요로 하는 매칭 결과를 생성합니다.
+        누락 조문은 식별만 하고 재검증은 하지 않습니다 (Stage 2에서 수행).
+
         Args:
             contract_id: 계약서 ID
             user_contract: 사용자 계약서 파싱 결과
@@ -78,18 +82,25 @@ class CompletenessCheckNode:
             dense_weight: 임베딩가중치 (기본값 0.85)
 
         Returns:
-            완전성 검증 결과
+            완전성 검증 결과 (누락 검증 제외)
+            {
+                "matching_details": [...],  # A2/A3 필수
+                "missing_standard_articles": [...],  # Stage 2에서 사용
+                "matched_user_articles": int,
+                "total_user_articles": int,
+                ...
+            }
         """
         start_time = time.time()
 
-        logger.info(f"A1 완전성 검증 시작: {contract_id} (type={contract_type})")
+        logger.info(f"[A1-S1] 매칭 검증 시작: {contract_id} (type={contract_type})")
 
         # 사용자 계약서 조항 추출
         user_articles = user_contract.get('articles', [])
         total_user_articles = len(user_articles)
 
         if not user_articles:
-            logger.warning("  검증할 조항이 없습니다")
+            logger.warning(f"[A1-S1] 검증할 조항이 없습니다")
             return {
                 "contract_id": contract_id,
                 "contract_type": contract_type,
@@ -106,14 +117,14 @@ class CompletenessCheckNode:
         # 표준계약서 항목 로드
         standard_chunks = self.kb_loader.load_chunks(contract_type)
         if not standard_chunks:
-            logger.error(f"  표준계약서 데이터를 로드 실패: {contract_type}")
+            logger.error(f"[A1-S1] 표준계약서 데이터를 로드 실패: {contract_type}")
             raise ValueError(f"표준계약서 데이터를 로드할 수 없습니다: {contract_type}")
 
         # 표준계약서의 parent_id 목록 추출
         standard_articles = self._extract_standard_articles(standard_chunks)
         total_standard_articles = len(standard_articles)
 
-        logger.info(f"  사용자 조문: {total_user_articles}개, 표준 조문: {total_standard_articles}개")
+        logger.info(f"[A1-S1] 사용자 조문: {total_user_articles}개, 표준 조문: {total_standard_articles}개")
 
         # 1단계: 모든 사용자 조문과 표준 조문 매칭 수행
         matched_standard_articles: Set[str] = set()  # 매칭된 표준 조문 ID
@@ -140,23 +151,180 @@ class CompletenessCheckNode:
                         matched_standard_articles.add(matched_std_id)
 
             except Exception as e:
-                logger.error(f"  조항 검증 실패 (제{article.get('number')}조): {e}")
+                logger.error(f"[A1-S1] 조항 검증 실패 (제{article.get('number')}조): {e}")
                 continue
             finally:
                 # 조항별 매칭 검증 완료 구분선
-                logger.info("--------------------------------------------------------------------------------")
+                logger.info("----------------------------------------[A1-S1]----------------------------------------")
 
-        # 2단계: 누락된 표준 조문 식별
+        # 2단계: 누락된 표준 조문 식별 (재검증은 하지 않음)
         missing_articles = [
             std_article for std_article in standard_articles
             if std_article['parent_id'] not in matched_standard_articles
         ]
 
-        logger.info(f"  매칭 완료: 사용자 {len(matched_user_articles)}/{total_user_articles}, "
+        logger.info(f"[A1-S1] 매칭 완료: 사용자 {len(matched_user_articles)}/{total_user_articles}, "
                    f"표준 {len(matched_standard_articles)}/{total_standard_articles}")
-        logger.info(f"  누락 조문: {len(missing_articles)}개")
+        logger.info(f"[A1-S1] 누락 조문 식별: {len(missing_articles)}개 (재검증은 Stage 2에서 수행)")
 
-        # 3단계: 누락 조문 재검증 (역방향 검증)
+        # 결과 생성 (missing_article_analysis 없음)
+        processing_time = time.time() - start_time
+
+        result = {
+            "contract_id": contract_id,
+            "contract_type": contract_type,
+            "total_user_articles": total_user_articles,
+            "matched_user_articles": len(matched_user_articles),
+            "total_standard_articles": total_standard_articles,
+            "matched_standard_articles": len(matched_standard_articles),
+            "missing_standard_articles": missing_articles,
+            "matching_details": matching_details,
+            "processing_time": processing_time,
+            "verification_date": datetime.now().isoformat()
+        }
+
+        logger.info(f"[A1-S1] 매칭 검증 완료: {processing_time:.2f}초")
+        logger.info("========================================[A1-S1]========================================")
+
+        return result
+
+    def check_missing_articles(
+        self,
+        contract_id: str,
+        contract_type: str,
+        text_weight: float = 0.7,
+        title_weight: float = 0.3,
+        dense_weight: float = 0.85
+    ) -> Dict[str, Any]:
+        """
+        계약서 완전성 검증 - Stage 2: 누락 조문 재검증
+
+        DB에서 Stage 1 결과를 로드하여 누락 조문만 재검증합니다.
+        이 메서드는 A2, A3와 병렬로 실행됩니다.
+
+        Args:
+            contract_id: 계약서 ID
+            contract_type: 계약 유형
+            text_weight: 본문 가중치
+            title_weight: 제목 가중치
+            dense_weight: 시멘틱 가중치
+
+        Returns:
+            누락 검증 결과
+            {
+                "missing_article_analysis": [...],
+                "processing_time": float
+            }
+        """
+        from backend.shared.database import SessionLocal, ValidationResult, ContractDocument
+
+        start_time = time.time()
+        logger.info(f"[A1-S2] 누락 조문 재검증 시작: {contract_id}")
+
+        db = SessionLocal()
+        try:
+            # DB에서 Stage 1 결과 로드
+            validation_result = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+
+            if not validation_result or not validation_result.completeness_check:
+                raise ValueError(f"A1-Stage1 결과를 찾을 수 없습니다: {contract_id}")
+
+            completeness_check = validation_result.completeness_check
+            missing_articles = completeness_check.get('missing_standard_articles', [])
+
+            if not missing_articles:
+                logger.info(f"[A1-S2] 누락 조문이 없습니다")
+                return {
+                    "missing_article_analysis": [],
+                    "processing_time": time.time() - start_time
+                }
+
+            logger.info(f"[A1-S2] 누락 조문: {len(missing_articles)}개")
+
+            # 사용자 계약서 로드 (역방향 검증용)
+            contract = db.query(ContractDocument).filter(
+                ContractDocument.contract_id == contract_id
+            ).first()
+
+            if not contract or not contract.parsed_data:
+                raise ValueError(f"계약서 데이터를 찾을 수 없습니다: {contract_id}")
+
+            user_articles = contract.parsed_data.get('articles', [])
+
+            # 누락 조문 재검증
+            missing_article_analysis = self._verify_missing_articles(
+                missing_articles,
+                user_articles,
+                contract_type,
+                contract_id,
+                text_weight,
+                title_weight,
+                dense_weight
+            )
+
+            processing_time = time.time() - start_time
+
+            result = {
+                "missing_article_analysis": missing_article_analysis,
+                "processing_time": processing_time
+            }
+
+            logger.info(f"[A1-S2] 누락 조문 재검증 완료: {len(missing_article_analysis)}개 ({processing_time:.2f}초)")
+            logger.info("========================================[A1-S2]========================================")
+            logger.info("========================================[A1-S2]========================================")
+
+            return result
+
+        finally:
+            db.close()
+
+    def check_completeness(
+        self,
+        contract_id: str,
+        user_contract: Dict[str, Any],
+        contract_type: str,
+        text_weight: float = 0.7,
+        title_weight: float = 0.3,
+        dense_weight: float = 0.85
+    ) -> Dict[str, Any]:
+        """
+        계약서 완전성 검증 (전체 - 하위 호환성 유지)
+
+        Stage 1과 Stage 2를 순차적으로 실행하여 전체 검증을 수행합니다.
+        병렬 처리가 아닌 기존 순차 방식에서 사용됩니다.
+
+        Args:
+            contract_id: 계약서 ID
+            user_contract: 사용자 계약서 파싱 결과
+            contract_type: 분류된 계약 유형
+            text_weight: 본문 가중치 (기본값 0.7)
+            title_weight: 제목 가중치 (기본값 0.3)
+            dense_weight: 임베딩가중치 (기본값 0.85)
+
+        Returns:
+            완전성 검증 결과 (전체)
+        """
+        start_time = time.time()
+
+        logger.info(f"A1 완전성 검증 시작 (순차): {contract_id} (type={contract_type})")
+
+        # Stage 1: 매칭 + LLM 검증
+        stage1_result = self.check_completeness_stage1(
+            contract_id,
+            user_contract,
+            contract_type,
+            text_weight,
+            title_weight,
+            dense_weight
+        )
+
+        # Stage 1 결과에서 필요한 데이터 추출
+        user_articles = user_contract.get('articles', [])
+        missing_articles = stage1_result.get('missing_standard_articles', [])
+
+        # Stage 2: 누락 조문 재검증
         missing_article_analysis = []
         if missing_articles:
             logger.info(f"  누락 조문 재검증 시작: {len(missing_articles)}개")
@@ -171,24 +339,16 @@ class CompletenessCheckNode:
             )
             logger.info(f"  누락 조문 재검증 완료: {len(missing_article_analysis)}개")
 
-        # 결과 생성
+        # 전체 결과 생성 (Stage 1 + Stage 2 통합)
         processing_time = time.time() - start_time
 
         result = {
-            "contract_id": contract_id,
-            "contract_type": contract_type,
-            "total_user_articles": total_user_articles,
-            "matched_user_articles": len(matched_user_articles),
-            "total_standard_articles": total_standard_articles,
-            "matched_standard_articles": len(matched_standard_articles),
-            "missing_standard_articles": missing_articles,
-            "missing_article_analysis": missing_article_analysis,
-            "matching_details": matching_details,
-            "processing_time": processing_time,
-            "verification_date": datetime.now().isoformat()
+            **stage1_result,  # Stage 1 결과 복사
+            "missing_article_analysis": missing_article_analysis,  # Stage 2 결과 추가
+            "processing_time": processing_time  # 전체 처리 시간으로 덮어쓰기
         }
 
-        logger.info(f"A1 완전성 검증 완료: {processing_time:.2f}초")
+        logger.info(f"A1 완전성 검증 완료 (순차): {processing_time:.2f}초")
         logger.info("================================================================================")
         logger.info("================================================================================")
 
@@ -220,7 +380,7 @@ class CompletenessCheckNode:
         article_id = user_article.get('article_id')  # user_article_001 형식
         article_title = user_article.get('title', '')
 
-        logger.info(f"  완전성 검증: {article_title}")
+        logger.info(f"[A1-S1] 완전성 검증: {article_title}")
 
         # 기본 결과 객체
         result = {
@@ -245,12 +405,12 @@ class CompletenessCheckNode:
             )
 
             if not matching_result['matched'] or not matching_result['matched_articles']:
-                logger.warning(f"    매칭 실패: 검색결과 없음")
+                logger.warning(f"[A1-S1] 매칭 실패: 검색결과 없음")
                 return result
 
             candidate_articles = matching_result['matched_articles']
             sub_item_results = matching_result.get('sub_item_results', [])  # 하위항목별 매칭 결과
-            logger.info(f"    후보 조문: {len(candidate_articles)}개")
+            logger.info(f"[A1-S1] 후보 조문: {len(candidate_articles)}개")
 
             # 2단계: LLM 매칭 검증(MatchingVerifier)
             verification_result = self.matching_verifier.verify_matching(
@@ -318,7 +478,7 @@ class CompletenessCheckNode:
                                 break
 
                     if not found:
-                        logger.warning(f"    base_global_id를 찾을 수 없음: {parent_id}")
+                        logger.warning(f"[A1-S1] base_global_id를 찾을 수 없음: {parent_id}")
 
                 result['matched'] = True
                 result['matched_articles'] = selected_parent_ids  # parent_id 리스트로 저장 (A3/프론트 호환)
@@ -328,18 +488,18 @@ class CompletenessCheckNode:
                 result['verification_details'] = verification_result.get('verification_details', [])
 
                 # 디버깅: sub_item_results 로그
-                logger.info(f"    sub_item_results 포함: {len(sub_item_results)}개 하위항목")
+                logger.info(f"[A1-S1] sub_item_results 포함: {len(sub_item_results)}개 하위항목")
                 for sub_result in sub_item_results:
-                    logger.info(f"      하위항목 {sub_result.get('sub_item_index')}: {len(sub_result.get('matched_articles', []))}개 조")
+                    logger.info(f"[A1-S1]   하위항목 {sub_result.get('sub_item_index')}: {len(sub_result.get('matched_articles', []))}개 조")
 
-                logger.info(f"    매칭 성공: {len(result['matched_articles'])}개 조문")
+                logger.info(f"[A1-S1] 매칭 성공: {len(result['matched_articles'])}개 조문")
                 for i, (parent_id, global_id) in enumerate(zip(selected_parent_ids, selected_global_ids)):
-                    logger.info(f"      - {parent_id} → {global_id}")
+                    logger.info(f"[A1-S1]   - {parent_id} → {global_id}")
             else:
-                logger.warning(f"    매칭 실패: LLM 검증 통과 못함")
+                logger.warning(f"[A1-S1] 매칭 실패: LLM 검증 통과 못함")
 
         except Exception as e:
-            logger.error(f"    조항 검증 중 오류: {e}")
+            logger.error(f"[A1-S1] 조항 검증 중 오류: {e}")
             result['error'] = str(e)
 
         return result
@@ -469,30 +629,30 @@ class CompletenessCheckNode:
             ]
         """
         analysis_results = []
-        
+
         # 사용자 조문 FAISS 인덱스 생성 (한 번만)
-        logger.info(f"  사용자 조문 FAISS 인덱스 생성 시작...")
-        logger.info(f"    - 사용자 조문 수: {len(user_articles)}개")
-        logger.info(f"    - contract_id: {contract_id}")
-        
+        logger.info(f"[A1-S2] 사용자 조문 FAISS 인덱스 생성 시작...")
+        logger.info(f"[A1-S2]   - 사용자 조문 수: {len(user_articles)}개")
+        logger.info(f"[A1-S2]   - contract_id: {contract_id}")
+
         user_faiss_index, embedding_map = self.article_matcher.build_user_faiss_index(
             user_articles=user_articles,
             contract_id=contract_id
         )
-        
+
         if user_faiss_index is None:
-            logger.error(f"  ❌ FAISS 인덱스 생성 실패 - 누락 검증 중단")
-            logger.error(f"    원인: 임베딩을 하나도 로드하지 못했습니다")
-            logger.error(f"    확인사항: 1) contract_id 정확한지, 2) DB에 임베딩 저장되어 있는지")
+            logger.error(f"[A1-S2] ❌ FAISS 인덱스 생성 실패 - 누락 검증 중단")
+            logger.error(f"[A1-S2]   원인: 임베딩을 하나도 로드하지 못했습니다")
+            logger.error(f"[A1-S2]   확인사항: 1) contract_id 정확한지, 2) DB에 임베딩 저장되어 있는지")
             return []
-        
-        logger.info(f"  ✓ FAISS 인덱스 생성 완료: {len(embedding_map)}개 하위항목")
-        
+
+        logger.info(f"[A1-S2] ✓ FAISS 인덱스 생성 완료: {len(embedding_map)}개 하위항목")
+
         for i, missing_article in enumerate(missing_articles, 1):
             parent_id = missing_article['parent_id']
             title = missing_article['title']
-            
-            logger.info(f"  [{i}/{len(missing_articles)}] 누락 조문 재검증: {parent_id} ({title})")
+
+            logger.info(f"[A1-S2] [{i}/{len(missing_articles)}] 누락 조문 재검증: {parent_id} ({title})")
             
             try:
                 # 1단계: 역방향 검색 (표준 → 사용자) - FAISS 인덱스 재사용
@@ -531,13 +691,13 @@ class CompletenessCheckNode:
                 
                 # 로깅
                 if verification_result['is_truly_missing']:
-                    logger.warning(f"    → 실제 누락 확인 (신뢰도: {verification_result['confidence']:.2f})")
+                    logger.warning(f"[A1-S2]   → 실제 누락 확인 (신뢰도: {verification_result['confidence']:.2f})")
                 else:
                     matched_no = verification_result.get('matched_user_article', {}).get('number', '?')
-                    logger.info(f"    → 누락 아님: 제{matched_no}조에 포함 (신뢰도: {verification_result['confidence']:.2f})")
-                
+                    logger.info(f"[A1-S2]   → 누락 아님: 제{matched_no}조에 포함 (신뢰도: {verification_result['confidence']:.2f})")
+
             except Exception as e:
-                logger.error(f"    재검증 실패: {e}")
+                logger.error(f"[A1-S2]   재검증 실패: {e}")
                 # missing_article의 chunks에서 global_id 추출
                 global_id = self._extract_global_id_from_article(missing_article, contract_type)
                 # 실패 시 기본 결과
@@ -556,12 +716,12 @@ class CompletenessCheckNode:
                 })
             finally:
                 # 누락 조문별 재검증 완료 구분선
-                logger.info("--------------------------------------------------------------------------------")
-        
+                logger.info("----------------------------------------[A1-S2]----------------------------------------")
+
         # 실제 누락 조문 통계
         truly_missing_count = sum(1 for r in analysis_results if r['is_truly_missing'])
         false_positive_count = len(analysis_results) - truly_missing_count
-        
-        logger.info(f"  재검증 요약: 실제 누락 {truly_missing_count}개, 오탐지 {false_positive_count}개")
-        
+
+        logger.info(f"[A1-S2] 재검증 요약: 실제 누락 {truly_missing_count}개, 오탐지 {false_positive_count}개")
+
         return analysis_results
