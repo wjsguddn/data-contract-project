@@ -698,4 +698,3 @@ class StdContractDocxParser:
                 continue
         
         return result
-
