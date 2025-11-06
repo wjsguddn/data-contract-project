@@ -28,7 +28,7 @@ def poll_classification_result(contract_id: str, max_attempts: int = 30, interva
     for _ in range(max_attempts):
         try:
             classification_url = f"http://localhost:8000/api/classification/{contract_id}"
-            class_resp = requests.get(classification_url, timeout=10)
+            class_resp = requests.get(classification_url, timeout=30)
 
             if class_resp.status_code == 200:
                 return True, class_resp.json()
@@ -386,7 +386,7 @@ def main() -> None:
                 # fallback: API에서 조회
                 try:
                     validation_url = f"http://localhost:8000/api/validation/{contract_id}"
-                    resp = requests.get(validation_url, timeout=10)
+                    resp = requests.get(validation_url, timeout=30)
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -456,7 +456,7 @@ def poll_validation_result(contract_id: str, max_attempts: int = 600, interval: 
     for _ in range(max_attempts):
         try:
             validation_url = f"http://localhost:8000/api/validation/{contract_id}"
-            resp = requests.get(validation_url, timeout=10)
+            resp = requests.get(validation_url, timeout=30)
             
             if resp.status_code == 200:
                 data = resp.json()
@@ -489,8 +489,17 @@ def display_validation_result(validation_data: dict):
 
     st.markdown("### 📋 검증 결과")
     
+
+    
     validation_result = validation_data.get('validation_result', {})
     content_analysis = validation_result.get('content_analysis', {})
+    content_analysis_recovered = validation_result.get('content_analysis_recovered', {})
+    
+    # 디버그: recovered 데이터 확인 (문제 해결 완료, 주석 처리)
+    # st.write(f"DEBUG: content_analysis_recovered exists: {bool(content_analysis_recovered)}")
+    # st.write(f"DEBUG: content_analysis_recovered type: {type(content_analysis_recovered)}")
+    # if content_analysis_recovered:
+    #     st.write(f"DEBUG: analyzed_articles: {content_analysis_recovered.get('analyzed_articles', 0)}")
     
     col1, col2 = st.columns(2)
     
@@ -777,6 +786,212 @@ def display_validation_result(validation_data: dict):
                         st.markdown("")  # 여백
             
             st.markdown("---")
+    
+    # Recovered 매칭 결과 표시
+    st.write(f"DEBUG [A3 Recovered]: exists={content_analysis_recovered is not None}, type={type(content_analysis_recovered)}")
+    if content_analysis_recovered:
+        st.write(f"DEBUG [A3 Recovered]: total_articles={content_analysis_recovered.get('total_articles', 0)}, analyzed={content_analysis_recovered.get('analyzed_articles', 0)}")
+        
+        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+        st.markdown("### 🔄 오탐지 복구 매칭 결과")
+        st.markdown("정방향 매칭에서 누락으로 판정되었으나, 역방향 재검증을 통해 복구된 매칭 결과입니다.")
+        
+        recovered_articles = content_analysis_recovered.get('article_analysis', [])
+        if recovered_articles:
+            st.markdown(f"**복구된 조항**: {len(recovered_articles)}개")
+            st.markdown("---")
+            
+            for analysis in recovered_articles:
+                user_article_no = analysis.get('user_article_no', 'N/A')
+                user_article_title = analysis.get('user_article_title', '')
+                matched = analysis.get('matched', False)
+                
+                if not matched:
+                    continue  # 매칭 안 된 것은 건너뜀
+                
+                st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>제{user_article_no}조 {user_article_title}</h3>", unsafe_allow_html=True)
+                
+                # 매칭된 표준 조항 정보
+                matched_articles_details = analysis.get('matched_articles_details', [])
+                if matched_articles_details:
+                    st.markdown(f"**복구된 매칭**: {len(matched_articles_details)}개 표준 조항")
+                    for i, article in enumerate(matched_articles_details, 1):
+                        article_global_id = article.get('global_id', '')
+                        formatted_article_id = _format_std_reference(article_global_id)
+                        article_title = article.get('title', '')
+                        article_score = article.get('combined_score', 0.0)
+                        st.markdown(f"  {i}. {formatted_article_id} ({article_title}): {article_score:.3f}")
+                
+                # 분석 이유
+                reasoning = analysis.get('reasoning', '')
+                if reasoning:
+                    st.markdown(f"{reasoning}")
+                
+                # 내용 분석
+                suggestions = analysis.get('suggestions', [])
+                if suggestions:
+                    for suggestion in suggestions:
+                        if isinstance(suggestion, dict):
+                            analysis_text = suggestion.get('analysis', '')
+                            severity = suggestion.get('severity', 'low')
+                            selected_articles = suggestion.get('selected_standard_articles', [])
+                            
+                            severity_config = {
+                                'high': {'icon': '🔴', 'label': '개선 필요'},
+                                'medium': {'icon': '🟡', 'label': '개선 권장'},
+                                'low': {'icon': '🟢', 'label': '경미한 개선'},
+                                'info': {'icon': '✅', 'label': '충실히 작성됨'}
+                            }
+                            config = severity_config.get(severity, {'icon': '⚪', 'label': '분석'})
+                            severity_icon = config['icon']
+                            severity_label = config['label']
+                            
+                            if selected_articles:
+                                articles_str = ', '.join(selected_articles)
+                                st.markdown(f"**{severity_icon} {severity_label}** (참조: {articles_str})")
+                            else:
+                                st.markdown(f"**{severity_icon} {severity_label}**")
+                            
+                            if analysis_text:
+                                formatted_text = analysis_text.replace('\n', '  \n')
+                                st.markdown(formatted_text)
+                            
+                            st.markdown("")
+                        else:
+                            st.markdown(f"  - {suggestion}")
+                
+                st.markdown("---")
+            
+            processing_time = content_analysis_recovered.get('processing_time', 0.0)
+            st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
+        else:
+            st.info("복구된 매칭 결과가 없습니다.")
+    
+    # A2 Recovered 체크리스트 검증 결과 표시
+    checklist_validation_recovered = validation_result.get('checklist_validation_recovered')
+    
+    # 디버그
+    st.write(f"DEBUG [A2 Recovered]: exists={checklist_validation_recovered is not None}, type={type(checklist_validation_recovered)}")
+    if checklist_validation_recovered:
+        st.write(f"DEBUG [A2 Recovered]: total_items={checklist_validation_recovered.get('total_checklist_items', 0)}")
+    
+    if checklist_validation_recovered:
+        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+        st.markdown("### 🔄 오탐지 복구 체크리스트 검증")
+        st.markdown("정방향 매칭에서 누락으로 판정되었으나, 역방향 재검증을 통해 복구된 조항의 체크리스트 검증 결과입니다.")
+        
+        # Primary A2와 동일한 함수 사용 (헤더만 이미 표시했으므로 제목 제외)
+        # display_checklist_results 함수를 재사용하되, 헤더는 건너뛰기 위해 직접 구현
+        total_items = checklist_validation_recovered.get('total_checklist_items', 0)
+        verified_items = checklist_validation_recovered.get('verified_items', 0)
+        passed_items = checklist_validation_recovered.get('passed_items', 0)
+        failed_items = checklist_validation_recovered.get('failed_items', 0)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("전체 항목", f"{total_items}개")
+        with col2:
+            st.metric("통과", f"{passed_items}개")
+        with col3:
+            st.metric("미충족", f"{failed_items}개")
+        
+        st.markdown("---")
+        
+        # 조항별 체크리스트 결과 표시 (Primary A2와 동일한 로직)
+        user_article_results = checklist_validation_recovered.get('user_article_results', [])
+        
+        if not user_article_results:
+            st.info("복구된 체크리스트 검증이 수행되지 않았습니다")
+        else:
+            for article_result in user_article_results:
+                user_article_no = article_result.get('user_article_no', 'N/A')
+                user_article_title = article_result.get('user_article_title', '')
+                matched_std_global_ids = article_result.get('matched_std_global_ids', [])
+                checklist_results = article_result.get('checklist_results', [])
+                
+                if not checklist_results:
+                    continue
+                
+                # 조항 헤더
+                if user_article_no == 0 or user_article_no == "preamble":
+                    st.markdown(f"<h4>서문</h4>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<h4>제{user_article_no}조 ({user_article_title})</h4>", unsafe_allow_html=True)
+                
+                # 매칭된 표준 조항 정보 표시
+                if matched_std_global_ids:
+                    std_refs = [_format_std_reference(gid) for gid in matched_std_global_ids]
+                    st.caption(f"매칭된 표준 조항: {', '.join(std_refs)}")
+                
+                # 각 체크리스트 항목 표시 (Primary A2와 동일)
+                for item in checklist_results:
+                    check_text = item.get('check_text', '')
+                    reference = item.get('reference', '')
+                    result = item.get('result', '')
+                    evidence = item.get('evidence', '')
+                    confidence = item.get('confidence', 0.0)
+                    requires_manual_review = item.get('requires_manual_review', False)
+                    
+                    # 매칭 정보 생성
+                    matching_info = _format_matching_info(user_article_no, reference)
+                    
+                    # 결과에 따라 다른 스타일 적용
+                    if result == 'YES':
+                        st.success(f"✅ {check_text}")
+                        if evidence:
+                            st.caption(f"근거: {evidence}")
+                        if matching_info:
+                            st.caption(f"매칭 정보: {matching_info}")
+                    
+                    elif result == 'NO':
+                        missing_explanation = item.get('missing_explanation', '')
+                        risk_level = item.get('risk_level', 'medium')
+                        risk_description = item.get('risk_description', '')
+                        recommendation = item.get('recommendation', '')
+                        
+                        st.error(f"❌ {check_text}")
+                        
+                        if matching_info:
+                            st.caption(f"매칭 정보: {matching_info}")
+                        
+                        if missing_explanation:
+                            st.markdown(f"**누락 상세**: {missing_explanation}")
+                        else:
+                            st.caption("해당 내용이 계약서에 명시되지 않았습니다")
+                        
+                        if risk_description:
+                            risk_labels = {'high': '높음', 'medium': '보통', 'low': '낮음'}
+                            risk_label = risk_labels.get(risk_level, '알 수 없음')
+                            st.markdown(f"위험도 {risk_label}: {risk_description}")
+                        
+                        if recommendation:
+                            st.markdown(f"권장사항: {recommendation}")
+                    
+                    elif result == 'UNCLEAR':
+                        st.warning(f"❓ {check_text}")
+                        st.caption(f"판단이 불명확합니다 (신뢰도: {confidence:.1%})")
+                        if requires_manual_review:
+                            st.caption("⚠️ 수동 검토가 필요합니다")
+                        if matching_info:
+                            st.caption(f"매칭 정보: {matching_info}")
+                    
+                    elif result == 'MANUAL_CHECK_REQUIRED':
+                        user_action = item.get('user_action', '')
+                        manual_check_reason = item.get('manual_check_reason', '')
+                        
+                        st.info(f"👤 {check_text}")
+                        st.caption("사용자 확인이 필요합니다")
+                        if manual_check_reason:
+                            st.caption(f"이유: {manual_check_reason}")
+                        if user_action:
+                            st.markdown(f"**확인 사항**: {user_action}")
+                        if matching_info:
+                            st.caption(f"매칭 정보: {matching_info}")
+                
+                st.markdown("---")
+            
+            processing_time = checklist_validation_recovered.get('processing_time', 0.0)
+            st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
 
 
 def _format_std_reference(global_id: str) -> str:
