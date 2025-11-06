@@ -472,7 +472,7 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
         validation = db.query(ValidationResult).filter(
             ValidationResult.contract_id == contract_id
         ).first()
-
+        
         if not validation:
             return {
                 "contract_id": contract_id,
@@ -480,29 +480,42 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
                 "message": "검증이 시작되지 않았습니다"
             }
 
-        # 각 노드 결과 확인
+        # 세션 캐시 새로고침 (최신 데이터 로드) - 병렬 처리 시 필수
+        # SQLite 트랜잭션 격리 문제 해결: 세션을 닫고 새로 열기
+        validation_id = validation.id
+        db.close()
+        
+        # 새 세션으로 다시 조회 (SessionLocal 직접 사용)
+        from backend.shared.database import SessionLocal
+        db = SessionLocal()
+        try:
+            validation = db.query(ValidationResult).filter(
+                ValidationResult.id == validation_id
+            ).first()
+            
+            if not validation:
+                return {
+                    "contract_id": contract_id,
+                    "status": "error",
+                    "message": "검증 결과를 다시 로드할 수 없습니다"
+                }
+        except Exception as e:
+            db.close()
+            raise
+
+        # 각 노드 결과 확인 (새 세션에서 읽음)
         completeness_check = validation.completeness_check
         checklist_validation = validation.checklist_validation
         content_analysis = validation.content_analysis
 
-        # 디버그: 실제 DB 값 출력 (100자 제한)
-        logger.info(f"[GET DEBUG] {contract_id} - completeness_check exists: {bool(completeness_check)}")
+        # 디버그: 실제 DB 값 출력 (간략화)
+        logger.info(f"[GET] {contract_id} - completeness_check: {bool(completeness_check)}, "
+                   f"checklist: {bool(checklist_validation)}, "
+                   f"content: {bool(content_analysis)}, "
+                   f"checklist_recovered: {bool(validation.checklist_validation_recovered)}, "
+                   f"content_recovered: {bool(validation.content_analysis_recovered)}")
 
-        checklist_str = str(checklist_validation)[:100] if checklist_validation else "None"
-        logger.info(f"[GET DEBUG] {contract_id} - checklist_validation: {checklist_str}...")
 
-        content_str = str(content_analysis)[:100] if content_analysis else "None"
-        logger.info(f"[GET DEBUG] {contract_id} - content_analysis: {content_str}...")
-
-        if completeness_check:
-            has_missing = 'missing_article_analysis' in completeness_check
-            logger.info(f"[GET DEBUG] {contract_id} - missing_article_analysis exists: {has_missing}")
-
-        if checklist_validation:
-            logger.info(f"[GET DEBUG] {contract_id} - total_checklist_items: {checklist_validation.get('total_checklist_items')}")
-
-        if content_analysis:
-            logger.info(f"[GET DEBUG] {contract_id} - total_articles: {content_analysis.get('total_articles')}")
 
         # 1. completeness_check 없음 → A1-Stage1도 완료 안됨
         if not completeness_check:
@@ -561,8 +574,10 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
                 "id": validation.id,
                 "overall_score": validation.overall_score,
                 "content_analysis": content_analysis,
+                "content_analysis_recovered": validation.content_analysis_recovered,
                 "completeness_check": completeness_check,
                 "checklist_validation": checklist_validation,
+                "checklist_validation_recovered": validation.checklist_validation_recovered,
                 "recommendations": validation.recommendations,
                 "created_at": validation.created_at.isoformat() if validation.created_at else None
             }
@@ -571,6 +586,11 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
     except Exception as e:
         logger.error(f"검증 결과 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # 세션 확실히 닫기 (커넥션 풀 고갈 방지)
+        if db:
+            db.close()
 
 
 @app.get("/api/token-usage/{contract_id}")
