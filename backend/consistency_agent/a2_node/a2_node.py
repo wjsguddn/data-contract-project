@@ -58,7 +58,7 @@ class ChecklistCheckNode:
         
         logger.info("ChecklistCheckNode 초기화 완료")
     
-    def check_checklist(self, contract_id: str) -> Dict[str, Any]:
+    def check_checklist(self, contract_id: str, matching_types: List[str] = None) -> Dict[str, Any]:
         """
         체크리스트 검증 메인 함수
         
@@ -67,6 +67,8 @@ class ChecklistCheckNode:
         
         Args:
             contract_id: 계약서 ID
+            matching_types: 처리할 매칭 유형 (["primary"], ["recovered"])
+                           None이면 ["primary"] 사용 (기본값, 하위 호환성)
         
         Returns:
             검증 결과 딕셔너리
@@ -97,14 +99,24 @@ class ChecklistCheckNode:
         Raises:
             ValueError: A1 결과 또는 계약 유형이 없는 경우
         """
-        logger.info(f"=== A2 노드 시작: 체크리스트 검증 (contract_id={contract_id}) ===")
+        if matching_types is None:
+            matching_types = ["primary"]
+        
+        logger.info(f"=== 체크리스트 검증 시작 (contract_id={contract_id}, matching_types={matching_types}) ===")
         start_time = time.time()
         
         # 1. A1 매칭 결과 로드
         logger.info("1. A1 매칭 결과 로드 중...")
         a1_results = self._load_a1_results(contract_id)
         
-        matching_details = a1_results.get('matching_details', [])
+        # matching_types에 따라 필터링
+        all_matching_details = []
+        if "primary" in matching_types:
+            all_matching_details.extend(a1_results.get('matching_details', []))
+        if "recovered" in matching_types:
+            all_matching_details.extend(a1_results.get('recovered_matching_details', []))
+        
+        matching_details = all_matching_details
         contract_type = a1_results.get('contract_type')
         
         logger.info(f"  - 계약 유형: {contract_type}")
@@ -243,7 +255,7 @@ class ChecklistCheckNode:
         
         # 7. DB 저장
         logger.info("5. DB 저장 중...")
-        self._save_to_db(contract_id, result)
+        self._save_to_db(contract_id, result, matching_types)
         
         logger.info(f"=== A2 노드 완료 (처리 시간: {processing_time:.2f}초) ===")
         logger.info("================================================================================")
@@ -500,19 +512,25 @@ class ChecklistCheckNode:
             "checklist_results": checklist_results
         }
     
-    def _save_to_db(self, contract_id: str, result: Dict[str, Any]):
+    def _save_to_db(self, contract_id: str, result: Dict[str, Any], matching_types: List[str] = None):
         """
         체크리스트 검증 결과 DB 저장
         
-        ValidationResult.checklist_validation 필드에 저장합니다.
+        matching_types에 따라 적절한 필드에 저장합니다:
+        - ["primary"]: checklist_validation
+        - ["recovered"]: checklist_validation_recovered
         
         Args:
             contract_id: 계약서 ID
             result: 검증 결과 딕셔너리
+            matching_types: 매칭 유형 (None이면 ["primary"])
         
         Raises:
             Exception: DB 저장 실패 시
         """
+        if matching_types is None:
+            matching_types = ["primary"]
+        
         try:
             validation_result = self.db.query(ValidationResult).filter(
                 ValidationResult.contract_id == contract_id
@@ -524,13 +542,18 @@ class ChecklistCheckNode:
                 self.db.add(validation_result)
                 logger.info(f"새로운 ValidationResult 생성: {contract_id}")
             
-            # checklist_validation 필드에 결과 저장
-            validation_result.checklist_validation = result
+            # matching_types에 따라 필드 선택
+            if "recovered" in matching_types:
+                field_name = "checklist_validation_recovered"
+                validation_result.checklist_validation_recovered = result
+            else:
+                field_name = "checklist_validation"
+                validation_result.checklist_validation = result
             
             # DB 커밋
             self.db.commit()
             
-            logger.info(f"DB 저장 완료: ValidationResult.checklist_validation")
+            logger.info(f"DB 저장 완료: ValidationResult.{field_name}")
         
         except Exception as e:
             logger.error(f"DB 저장 실패: {e}")
