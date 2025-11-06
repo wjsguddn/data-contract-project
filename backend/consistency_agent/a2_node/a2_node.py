@@ -543,19 +543,35 @@ class ChecklistCheckNode:
                 logger.info(f"새로운 ValidationResult 생성: {contract_id}")
             
             # matching_types에 따라 필드 선택
+            from sqlalchemy.orm.attributes import flag_modified
+            
             if "recovered" in matching_types:
                 field_name = "checklist_validation_recovered"
-                validation_result.checklist_validation_recovered = result
+                # dict() 생성자로 새 객체 생성하여 SQLAlchemy가 변경 감지하도록
+                validation_result.checklist_validation_recovered = dict(result)
+                flag_modified(validation_result, 'checklist_validation_recovered')
+                logger.info(f"recovered 필드 설정 완료: {len(result.get('user_article_results', []))}개 조항")
             else:
                 field_name = "checklist_validation"
-                validation_result.checklist_validation = result
+                validation_result.checklist_validation = dict(result)
+                flag_modified(validation_result, 'checklist_validation')
+                logger.info(f"primary 필드 설정 완료: {len(result.get('user_article_results', []))}개 조항")
             
-            # DB 커밋
+            # DB 커밋 전 확인
+            logger.info(f"DB 커밋 시도: {field_name}")
             self.db.commit()
             
-            logger.info(f"DB 저장 완료: ValidationResult.{field_name}")
+            # 커밋 후 재확인
+            self.db.refresh(validation_result)
+            saved_value = getattr(validation_result, field_name)
+            if saved_value:
+                logger.info(f"DB 저장 완료 확인: {field_name}, {len(saved_value.get('user_article_results', []))}개 조항")
+            else:
+                logger.error(f"DB 저장 실패: {field_name}이 None입니다")
         
         except Exception as e:
             logger.error(f"DB 저장 실패: {e}")
+            import traceback
+            logger.error(f"{traceback.format_exc()}")
             self.db.rollback()
             raise
