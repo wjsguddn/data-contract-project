@@ -145,7 +145,7 @@ JSON 형식:
         self,
         user_clause_text: str,
         checklist_items: List[Dict[str, Any]],
-        batch_size: int = 10
+        batch_size: int = 5
     ) -> List[Dict[str, Any]]:
         """
         여러 체크리스트 항목을 배치로 검증
