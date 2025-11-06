@@ -13,6 +13,7 @@ import os
 from typing import List
 from openai import AzureOpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
 
@@ -255,9 +256,11 @@ def analyze_content_task(self, contract_id: str, matching_types: List[str] = Non
         if existing_result:
             if "recovered" in matching_types:
                 existing_result.content_analysis_recovered = analysis_result.to_dict()
+                flag_modified(existing_result, 'content_analysis_recovered')
                 a3_logger.info(f"DB 저장: content_analysis_recovered")
             else:
                 existing_result.content_analysis = analysis_result.to_dict()
+                flag_modified(existing_result, 'content_analysis')
                 a3_logger.info(f"DB 저장: content_analysis")
             db.commit()
             result_id = existing_result.id
@@ -304,7 +307,8 @@ def analyze_content_task(self, contract_id: str, matching_types: List[str] = Non
             db.close()
 
 
-def check_checklist_task(contract_id: str, matching_types: List[str] = None):
+@celery_app.task(bind=True, name="consistency.check_checklist", queue="consistency_validation")
+def check_checklist_task(self, contract_id: str, matching_types: List[str] = None):
     """
     A2 노드: 체크리스트 검증 작업
     
@@ -739,7 +743,8 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
                 user_no = detail.get('user_article_no')
                 user_title = detail.get('user_article_title', 'N/A')
                 matched_ids = detail.get('matched_articles', [])
-                logger.info(f"[reA1-S2]   - 사용자 제{user_no}조 ({user_title}) → 표준 조문 {len(matched_ids)}개 매칭")
+                matched_global_ids = detail.get('matched_articles_global_ids', [])
+                logger.info(f"[reA1-S2]   - 사용자 제{user_no}조 ({user_title}) → 표준 조문 {matched_ids} (global_ids: {matched_global_ids})")
 
             # DB 저장
             success = update_completeness_check_partial_with_retry(
@@ -756,16 +761,20 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
                 def trigger_batch2():
                     try:
                         logger.info(f"[reA1-S2] ========== batch2 트리거 시작 ==========")
+                        
+                        # ThreadPoolExecutor로 병렬 실행 (래퍼 함수 사용)
+                        def run_a2():
+                            return check_checklist_task(contract_id, ["recovered"])
+                        
+                        def run_a3():
+                            return analyze_content_task(contract_id, ["recovered"],
+                                                        text_weight, title_weight, dense_weight)
+                        
                         with ThreadPoolExecutor(max_workers=2) as executor:
-                            future_a2 = executor.submit(
-                                check_checklist_task, contract_id, ["recovered"]
-                            )
-                            future_a3 = executor.submit(
-                                analyze_content_task, contract_id, ["recovered"],
-                                text_weight, title_weight, dense_weight
-                            )
-
-                            # 결과 대기 (에러 처리)
+                            future_a2 = executor.submit(run_a2)
+                            future_a3 = executor.submit(run_a3)
+                            
+                            # 결과 대기
                             try:
                                 a2_result = future_a2.result()
                                 if a2_result.get('status') == 'completed':
