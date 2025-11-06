@@ -51,6 +51,7 @@ class ContentAnalysisNode:
         contract_id: str,
         user_contract: Dict[str, Any],
         contract_type: str,
+        matching_types: List[str] = None,
         text_weight: float = 0.7,
         title_weight: float = 0.3,
         dense_weight: float = 0.85
@@ -62,6 +63,8 @@ class ContentAnalysisNode:
             contract_id: 계약서 ID
             user_contract: 사용자 계약서 파싱 결과
             contract_type: 분류된 계약 유형
+            matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                           None이면 ["primary"] 사용 (기본값, 하위 호환성)
             text_weight: 본문 가중치 (사용하지 않음, A1에서 이미 매칭 완료)
             title_weight: 제목 가중치 (사용하지 않음, A1에서 이미 매칭 완료)
             dense_weight: 시멘틱 가중치 (사용하지 않음, A1에서 이미 매칭 완료)
@@ -69,9 +72,11 @@ class ContentAnalysisNode:
         Returns:
             ContentAnalysisResult: 전체 분석 결과
         """
+        if matching_types is None:
+            matching_types = ["primary"]
         start_time = time.time()
 
-        logger.info(f"A3 분석 시작: {contract_id} (type={contract_type})")
+        logger.info(f"A3 분석 시작: {contract_id} (type={contract_type}, matching_types={matching_types})")
 
         # 결과 객체 초기화
         result = ContentAnalysisResult(
@@ -89,8 +94,8 @@ class ContentAnalysisNode:
             result.processing_time = time.time() - start_time
             return result
 
-        # A1 매칭 결과 로드
-        a1_matching_details = self._load_a1_matching_results(contract_id)
+        # A1 매칭 결과 로드 (matching_types에 따라 필터링)
+        a1_matching_details = self._load_a1_matching_results(contract_id, matching_types)
 
         if not a1_matching_details:
             logger.warning("  A1 매칭 결과를 찾을 수 없습니다")
@@ -394,16 +399,21 @@ class ContentAnalysisNode:
         logger.debug(f"    Loaded {len(article_chunks)} chunk(s) for {article_identifier}")
         return article_chunks
 
-    def _load_a1_matching_results(self, contract_id: str) -> List[Dict[str, Any]]:
+    def _load_a1_matching_results(self, contract_id: str, matching_types: List[str] = None) -> List[Dict[str, Any]]:
         """
         A1 노드의 매칭 결과를 DB에서 로드
 
         Args:
             contract_id: 계약서 ID
+            matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                           None이면 ["primary"] 사용
 
         Returns:
             A1 매칭 결과의 matching_details (조항별 매칭 정보 리스트)
         """
+        if matching_types is None:
+            matching_types = ["primary"]
+        
         try:
             from backend.shared.database import SessionLocal, ValidationResult
 
@@ -423,11 +433,16 @@ class ContentAnalysisNode:
                     logger.warning(f"  A1 완전성 검증 결과가 없음: {contract_id}")
                     return []
 
-                matching_details = completeness_check.get('matching_details', [])
+                # matching_types에 따라 결과 수집
+                all_matching_details = []
+                if "primary" in matching_types:
+                    all_matching_details.extend(completeness_check.get('matching_details', []))
+                if "recovered" in matching_types:
+                    all_matching_details.extend(completeness_check.get('recovered_matching_details', []))
 
-                logger.debug(f"  A1 매칭 결과 로드: {len(matching_details)}개 조항")
+                logger.debug(f"  A1 매칭 결과 로드: {len(all_matching_details)}개 조항 (types={matching_types})")
 
-                return matching_details
+                return all_matching_details
 
             finally:
                 db.close()
