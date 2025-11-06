@@ -29,16 +29,18 @@ engine = create_engine(
     json_deserializer=lambda obj: json.loads(obj)
 )
 
-# SQLite WAL 모드 활성화 (병렬 처리 안정성 향상)
+# SQLite 설정 (병렬 처리 안정성 향상)
+# WAL 모드는 비활성화하고 busy_timeout만 설정하여 오탐지 방지
 if "sqlite" in DATABASE_URL:
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_conn, connection_record):
-        """SQLite 연결 시 WAL 모드 및 busy_timeout 설정"""
+        """SQLite 연결 시 busy_timeout 설정"""
         cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # WAL 모드 비활성화 (오탐지 방지)
+        # cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=30000")  # 30초
         cursor.close()
-        logger.debug("SQLite WAL 모드 활성화 완료")
+        logger.debug("SQLite busy_timeout 설정 완료")
 
 # 세션 생성
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -85,11 +87,11 @@ class ValidationResult(Base):
     contract_id = Column(String, index=True, nullable=False)
     contract_type = Column(String, nullable=True)  # 계약 유형 (A3 노드에서 설정)
     completeness_check = Column(JSON, nullable=True)  # 완전성 검증 결과 (A1 노드)
-    checklist_validation = Column(JSON, nullable=True)  # 체크리스트 검증 결과 (A2 노드 - primary)
-    checklist_validation_recovered = Column(JSON, nullable=True)  # 체크리스트 검증 결과 (A2 노드 - recovered)
+    checklist_validation = Column(JSON, nullable=True)  # 체크리스트 검증 결과 (A2 노드, primary)
+    checklist_validation_recovered = Column(JSON, nullable=True)  # 체크리스트 검증 결과 (A2 노드, recovered)
     manual_checks = Column(JSON, nullable=True)  # 사용자 확인 항목 (A2 노드)
-    content_analysis = Column(JSON, nullable=True)  # 내용 분석 결과 (A3 노드 - primary)
-    content_analysis_recovered = Column(JSON, nullable=True)  # 내용 분석 결과 (A3 노드 - recovered)
+    content_analysis = Column(JSON, nullable=True)  # 내용 분석 결과 (A3 노드, primary)
+    content_analysis_recovered = Column(JSON, nullable=True)  # 내용 분석 결과 (A3 노드, recovered)
     overall_score = Column(Float, nullable=True)
     issues = Column(JSON, nullable=True)  # 이슈 리스트
     suggestions = Column(JSON, nullable=True)  # 개선 제안
