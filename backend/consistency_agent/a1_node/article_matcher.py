@@ -1168,13 +1168,34 @@ def extract_and_restructure_false_positives(
         return []
     
     # 2. 재구조화
-    recovered_matching_details = []
+    recovered_list = []
     
     for fp in false_positives:
         recovered = restructure_to_matching_details(fp)
         if recovered:
-            recovered_matching_details.append(recovered)
+            recovered_list.append(recovered)
     
-    logger.info(f"재구조화 완료: {len(recovered_matching_details)}개")
+    # 3. 같은 user_article_no를 가진 항목들을 합침
+    merged_dict = {}
+    
+    for item in recovered_list:
+        user_article_no = item['user_article_no']
+        
+        if user_article_no not in merged_dict:
+            # 첫 번째 항목: 그대로 추가
+            merged_dict[user_article_no] = item
+        else:
+            # 이미 존재: 매칭 정보를 배열에 추가
+            existing = merged_dict[user_article_no]
+            
+            # matched_articles 배열에 추가
+            existing['matched_articles'].extend(item['matched_articles'])
+            existing['matched_articles_global_ids'].extend(item['matched_articles_global_ids'])
+            existing['matched_articles_details'].extend(item['matched_articles_details'])
+            existing['verification_details'].extend(item['verification_details'])
+    
+    recovered_matching_details = list(merged_dict.values())
+    
+    logger.info(f"재구조화 완료: {len(recovered_list)}개 → 병합 후 {len(recovered_matching_details)}개")
     
     return recovered_matching_details
