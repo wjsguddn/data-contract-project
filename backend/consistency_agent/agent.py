@@ -164,7 +164,7 @@ def analyze_content_task(self, contract_id: str, matching_types: List[str] = Non
 
     Args:
         contract_id: 검증할 계약서 ID
-        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"])
                        None이면 ["primary"] 사용 (기본값, 하위 호환성)
         text_weight: 본문 가중치 (기본값 0.7)
         title_weight: 제목 가중치 (기본값 0.3)
