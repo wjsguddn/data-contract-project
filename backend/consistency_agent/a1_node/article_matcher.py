@@ -980,3 +980,201 @@ class ArticleMatcher:
         union = words1 | words2
         
         return len(intersection) / len(union) if union else 0.0
+
+
+# ============================================================================
+# 오탐지 복구 매칭 유틸리티
+# ============================================================================
+
+def extract_parent_id_from_global_id(global_id: str) -> str:
+    """
+    global_id에서 parent_id 추출
+    
+    Args:
+        global_id: URN 형식 (예: "urn:std:provide:art:012")
+    
+    Returns:
+        parent_id (예: "제12조")
+        추출 실패 시 원본 global_id 반환
+    
+    Examples:
+        >>> extract_parent_id_from_global_id("urn:std:provide:art:012")
+        "제12조"
+        >>> extract_parent_id_from_global_id("urn:std:provide:art:005")
+        "제5조"
+    """
+    try:
+        # ":art:(\d+)" 패턴으로 조항 번호 추출
+        match = re.search(r':art:(\d+)', global_id)
+        if match:
+            article_num = int(match.group(1))  # 앞의 0 제거
+            return f"제{article_num}조"
+        
+        logger.warning(f"parent_id 추출 실패 (패턴 불일치): {global_id}")
+        return global_id
+        
+    except Exception as e:
+        logger.error(f"parent_id 추출 중 오류: {global_id}, {e}")
+        return global_id
+
+
+def extract_false_positives(missing_article_analysis: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    missing_article_analysis에서 오탐지 항목만 추출
+    
+    Args:
+        missing_article_analysis: A1-Stage2 누락 재검증 결과
+    
+    Returns:
+        오탐지 항목 리스트 (is_truly_missing: false)
+    """
+    if not missing_article_analysis:
+        return []
+    
+    false_positives = [
+        item for item in missing_article_analysis
+        if not item.get('is_truly_missing', True)
+    ]
+    
+    logger.info(f"오탐지 추출: {len(false_positives)}개 / {len(missing_article_analysis)}개")
+    
+    return false_positives
+
+
+def restructure_to_matching_details(
+    false_positive: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    오탐지 항목을 matching_details 형식으로 재구조화
+    
+    Args:
+        false_positive: 오탐지 항목 (is_truly_missing: false)
+    
+    Returns:
+        matching_details 형식의 딕셔너리
+        재구조화 실패 시 None
+    """
+    try:
+        # 필수 필드 확인
+        standard_article_id = false_positive.get('standard_article_id')
+        standard_article_title = false_positive.get('standard_article_title', '')
+        matched_user_article = false_positive.get('matched_user_article')
+        confidence = false_positive.get('confidence', 0.0)
+        
+        if not standard_article_id:
+            logger.warning("standard_article_id 없음, 건너뜀")
+            return None
+        
+        if not matched_user_article:
+            logger.warning(f"matched_user_article 없음 (데이터 불일치): {standard_article_id}")
+            return None
+        
+        # 사용자 조항 정보 추출
+        user_article_no = matched_user_article.get('number')
+        user_article_id = matched_user_article.get('article_id')
+        user_article_title = matched_user_article.get('title', '')
+        
+        if not user_article_no or not user_article_id:
+            logger.warning(f"사용자 조항 정보 불완전: {matched_user_article}")
+            return None
+        
+        # parent_id 추출
+        parent_id = extract_parent_id_from_global_id(standard_article_id)
+        
+        # candidates_analysis를 verification_details로 변환
+        candidates_analysis = false_positive.get('candidates_analysis', [])
+        verification_details = []
+        
+        for candidate in candidates_analysis:
+            if candidate.get('is_match'):
+                verification_details.append({
+                    'candidate_article': parent_id,
+                    'is_match': True,
+                    'confidence': candidate.get('confidence', confidence),
+                    'reasoning': candidate.get('reasoning', '')
+                })
+        
+        # matching_details 형식으로 재구조화
+        recovered_matching = {
+            # 사용자 조항 정보
+            'user_article_no': user_article_no,
+            'user_article_id': user_article_id,
+            'user_article_title': user_article_title,
+            
+            # 매칭 상태
+            'matched': True,
+            
+            # 매칭된 표준 조항
+            'matched_articles': [parent_id],
+            'matched_articles_global_ids': [standard_article_id],
+            
+            # 매칭 상세 정보
+            'matched_articles_details': [
+                {
+                    'parent_id': parent_id,
+                    'global_id': standard_article_id,
+                    'title': standard_article_title,
+                    'combined_score': confidence,
+                    'matched_via': 'reverse_verification',
+                    
+                    # 하위항목 정보 (역방향 검증은 조 단위만)
+                    'num_sub_items': 0,
+                    'matched_sub_items': [],
+                    
+                    # 점수 정보 (역방향 검증은 상세 점수 없음)
+                    'avg_dense_score': 0.0,
+                    'avg_dense_score_raw': 0.0,
+                    'avg_sparse_score': 0.0,
+                    'avg_sparse_score_raw': 0.0,
+                    'sub_items_scores': []
+                }
+            ],
+            
+            # 하위항목별 매칭 (역방향 검증은 조 단위만)
+            'sub_item_results': [],
+            
+            # LLM 검증 결과
+            'verification_details': verification_details
+        }
+        
+        logger.debug(f"재구조화 완료: 제{user_article_no}조 → {parent_id}")
+        
+        return recovered_matching
+        
+    except Exception as e:
+        logger.error(f"재구조화 중 오류: {e}")
+        return None
+
+
+def extract_and_restructure_false_positives(
+    missing_article_analysis: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    오탐지 추출 및 재구조화 (통합 함수)
+    
+    Args:
+        missing_article_analysis: A1-Stage2 누락 재검증 결과
+    
+    Returns:
+        recovered_matching_details (matching_details 형식)
+    """
+    logger.info("오탐지 추출 및 재구조화 시작")
+    
+    # 1. 오탐지 추출
+    false_positives = extract_false_positives(missing_article_analysis)
+    
+    if not false_positives:
+        logger.info("오탐지 없음")
+        return []
+    
+    # 2. 재구조화
+    recovered_matching_details = []
+    
+    for fp in false_positives:
+        recovered = restructure_to_matching_details(fp)
+        if recovered:
+            recovered_matching_details.append(recovered)
+    
+    logger.info(f"재구조화 완료: {len(recovered_matching_details)}개")
+    
+    return recovered_matching_details
