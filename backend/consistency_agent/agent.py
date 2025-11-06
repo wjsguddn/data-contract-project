@@ -1,4 +1,4 @@
-﻿from celery import Celery, chain
+﻿from celery import Celery, chain, group
 from backend.shared.core.celery_app import celery_app
 from backend.shared.database import (
     get_db, ValidationResult, ContractDocument, ClassificationResult,
@@ -10,6 +10,7 @@ from .a2_node.a2_node import ChecklistCheckNode
 from .a3_node.a3_node import ContentAnalysisNode
 import logging
 import os
+from typing import List
 from openai import AzureOpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -155,7 +156,7 @@ def check_completeness_task(self, contract_id: str, text_weight: float = 0.7, ti
 
 
 @celery_app.task(bind=True, name="consistency.analyze_content", queue="consistency_validation")
-def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
+def analyze_content_task(self, contract_id: str, matching_types: List[str] = None, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
     """
     A3 노드: 내용 분석 작업
 
@@ -163,12 +164,19 @@ def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title
 
     Args:
         contract_id: 검증할 계약서 ID
+        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                       None이면 ["primary"] 사용 (기본값, 하위 호환성)
         text_weight: 본문 가중치 (기본값 0.7)
         title_weight: 제목 가중치 (기본값 0.3)
         dense_weight: 시멘틱 가중치 (기본값 0.85)
     """
-    a3_logger = NodeLoggerAdapter(logger, "A3")
-    a3_logger.info(f"내용 분석 시작: {contract_id}, weights: text={text_weight}, title={title_weight}, dense={dense_weight}")
+    if matching_types is None:
+        matching_types = ["primary"]
+    
+    # 로그 태그 설정
+    log_tag = "reA3" if "recovered" in matching_types else "A3"
+    a3_logger = NodeLoggerAdapter(logger, log_tag)
+    a3_logger.info(f"내용 분석 시작: {contract_id}, matching_types={matching_types}, weights: text={text_weight}, title={title_weight}, dense={dense_weight}")
 
     db = None
     try:
@@ -234,6 +242,7 @@ def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title
                 contract_id=contract_id,
                 user_contract=contract.parsed_data,
                 contract_type=contract_type,
+                matching_types=matching_types,
                 text_weight=text_weight,
                 title_weight=title_weight,
                 dense_weight=dense_weight
@@ -242,9 +251,14 @@ def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title
             # 원래 로거 복원
             a3_module.logger = original_a3_logger
 
-        # 결과 저장
+        # 결과 저장 (matching_types에 따라 필드 선택)
         if existing_result:
-            existing_result.content_analysis = analysis_result.to_dict()
+            if "recovered" in matching_types:
+                existing_result.content_analysis_recovered = analysis_result.to_dict()
+                a3_logger.info(f"DB 저장: content_analysis_recovered")
+            else:
+                existing_result.content_analysis = analysis_result.to_dict()
+                a3_logger.info(f"DB 저장: content_analysis")
             db.commit()
             result_id = existing_result.id
         else:
@@ -290,7 +304,7 @@ def analyze_content_task(self, contract_id: str, text_weight: float = 0.7, title
             db.close()
 
 
-def check_checklist_task(contract_id: str):
+def check_checklist_task(contract_id: str, matching_types: List[str] = None):
     """
     A2 노드: 체크리스트 검증 작업
     
@@ -298,12 +312,19 @@ def check_checklist_task(contract_id: str):
     
     Args:
         contract_id: 검증할 계약서 ID
+        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                       None이면 ["primary"] 사용 (기본값, 하위 호환성)
     
     Returns:
         체크리스트 검증 결과
     """
-    a2_logger = NodeLoggerAdapter(logger, "A2")
-    a2_logger.info(f"체크리스트 검증 시작: {contract_id}")
+    if matching_types is None:
+        matching_types = ["primary"]
+    
+    # 로그 태그 설정
+    log_tag = "reA2" if "recovered" in matching_types else "A2"
+    a2_logger = NodeLoggerAdapter(logger, log_tag)
+    a2_logger.info(f"체크리스트 검증 시작: {contract_id}, matching_types={matching_types}")
 
     db = None
     try:
@@ -333,7 +354,7 @@ def check_checklist_task(contract_id: str):
 
         try:
             # A2 체크리스트 검증 수행 (내부에서 DB 저장함)
-            checklist_result = a2_node.check_checklist(contract_id)
+            checklist_result = a2_node.check_checklist(contract_id, matching_types)
         finally:
             # 원래 로거 복원
             a2_module.logger = original_a2_logger
@@ -370,108 +391,6 @@ def check_checklist_task(contract_id: str):
     finally:
         if db:
             db.close()
-
-
-# ============================================================================
-# 독립 Celery Task (병렬처리용 - 현재 주석 처리)
-# ============================================================================
-# 
-# 병렬처리 리팩토링 시 아래 주석을 해제하고 사용하세요.
-# 
-# from celery import group
-# 
-# @celery_app.task(bind=True, name="consistency.check_checklist", queue="consistency_validation")
-# def check_checklist_celery_task(self, contract_id: str):
-#     """
-#     A2 노드: 체크리스트 검증 Celery Task (병렬처리용)
-#     
-#     병렬처리 시 사용:
-#     - A1 완료 후 A2, A3를 병렬로 실행
-#     - group(check_checklist_celery_task.s(contract_id), analyze_content_task.s(contract_id))
-#     
-#     Args:
-#         contract_id: 검증할 계약서 ID
-#     
-#     Returns:
-#         체크리스트 검증 결과
-#     """
-#     return check_checklist_task(contract_id)
-# 
-# 
-# @celery_app.task(bind=True, name="consistency.validate_contract_parallel", queue="consistency_validation")
-# def validate_contract_parallel_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
-#     """
-#     통합 검증 작업 (병렬처리 버전): A1 → (A2 || A3) 병렬 실행
-#     
-#     워크플로우:
-#     1. A1 완전성 검증 (순차)
-#     2. A2 체크리스트 검증 + A3 내용 분석 (병렬)
-#     3. 결과 통합
-#     
-#     Args:
-#         contract_id: 검증할 계약서 ID
-#         text_weight: 본문 가중치 (기본값 0.7)
-#         title_weight: 제목 가중치 (기본값 0.3)
-#         dense_weight: 시멘틱 가중치 (기본값 0.85)
-#     
-#     Returns:
-#         통합 검증 결과
-#     """
-#     logger.info(f"통합 검증 시작 (병렬처리): {contract_id}")
-#     
-#     try:
-#         # A1: 완전성 검증
-#         logger.info(f"  [1/2] A1 완전성 검증 실행 중...")
-#         a1_result = check_completeness_task(contract_id, text_weight, title_weight, dense_weight)
-#         
-#         if a1_result['status'] != 'completed':
-#             logger.error(f"  A1 검증 실패: {a1_result.get('error')}")
-#             return {
-#                 "status": "failed",
-#                 "contract_id": contract_id,
-#                 "error": f"A1 검증 실패: {a1_result.get('error')}",
-#                 "stage": "completeness_check"
-#             }
-#         
-#         logger.info(f"  [1/2] A1 완전성 검증 완료")
-#         
-#         # A2, A3 병렬 실행
-#         logger.info(f"  [2/2] A2, A3 병렬 실행 중...")
-#         parallel_tasks = group(
-#             check_checklist_celery_task.s(contract_id),
-#             analyze_content_task.s(contract_id, text_weight, title_weight, dense_weight)
-#         )
-#         
-#         results = parallel_tasks.apply_async().get()
-#         a2_result, a3_result = results
-#         
-#         logger.info(f"  [2/2] A2, A3 병렬 실행 완료")
-#         
-#         # 부분 실패 처리
-#         status = "completed"
-#         if a2_result.get('status') == 'failed' or a3_result.get('status') == 'failed':
-#             status = "partial"
-#         
-#         return {
-#             "status": status,
-#             "contract_id": contract_id,
-#             "a1_summary": a1_result.get('completeness_summary'),
-#             "a2_summary": a2_result.get('checklist_summary'),
-#             "a3_summary": a3_result.get('analysis_summary'),
-#             "result_id": a3_result.get('result_id')
-#         }
-#     
-#     except Exception as e:
-#         logger.error(f"통합 검증 실패 (병렬처리): {contract_id}, 오류: {e}")
-#         import traceback
-#         logger.error(traceback.format_exc())
-#         return {
-#             "status": "failed",
-#             "contract_id": contract_id,
-#             "error": str(e)
-#         }
-# 
-# ============================================================================
 
 
 @celery_app.task(bind=True, name="consistency.validate_contract", queue="consistency_validation")
@@ -792,23 +711,103 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
             dense_weight=dense_weight
         )
 
+        missing_article_analysis = missing_result['missing_article_analysis']
+
         # DB 업데이트 (부분 업데이트 - missing_article_analysis 추가)
         success = update_completeness_check_partial_with_retry(
             contract_id,
-            {"missing_article_analysis": missing_result['missing_article_analysis']}
+            {"missing_article_analysis": missing_article_analysis}
         )
 
         if not success:
             raise RuntimeError("DB 부분 업데이트 실패 (재시도 후)")
 
-        logger.info(f"[A1-S2] Task 완료: {contract_id} "
-                   f"(누락 재검증: {len(missing_result['missing_article_analysis'])}개)")
+        logger.info(f"[A1-S2] 누락 재검증 완료: {len(missing_article_analysis)}개")
+
+        # 오탐지 추출 및 재구조화
+        from backend.consistency_agent.a1_node.article_matcher import extract_and_restructure_false_positives
+
+        recovered_matching_details = extract_and_restructure_false_positives(missing_article_analysis)
+
+        # recovered_matching_details가 있으면 DB 저장 및 batch2 트리거
+        if recovered_matching_details:
+            logger.info(f"[reA1-S2] ========== 오탐지 복구 매칭 시작 ==========")
+            logger.info(f"[reA1-S2] 복구된 매칭: {len(recovered_matching_details)}개")
+            
+            # 복구된 조문 상세 로그
+            for detail in recovered_matching_details:
+                user_no = detail.get('user_article_no')
+                user_title = detail.get('user_article_title', 'N/A')
+                matched_ids = detail.get('matched_articles', [])
+                logger.info(f"[reA1-S2]   - 사용자 제{user_no}조 ({user_title}) → 표준 조문 {len(matched_ids)}개 매칭")
+
+            # DB 저장
+            success = update_completeness_check_partial_with_retry(
+                contract_id,
+                {"recovered_matching_details": recovered_matching_details}
+            )
+
+            if success:
+                logger.info(f"[reA1-S2] recovered_matching_details DB 저장 완료")
+
+                # batch2 트리거 (비동기)
+                from concurrent.futures import ThreadPoolExecutor
+
+                def trigger_batch2():
+                    try:
+                        logger.info(f"[reA1-S2] ========== batch2 트리거 시작 ==========")
+                        with ThreadPoolExecutor(max_workers=2) as executor:
+                            future_a2 = executor.submit(
+                                check_checklist_task, contract_id, ["recovered"]
+                            )
+                            future_a3 = executor.submit(
+                                analyze_content_task, contract_id, ["recovered"],
+                                text_weight, title_weight, dense_weight
+                            )
+
+                            # 결과 대기 (에러 처리)
+                            try:
+                                a2_result = future_a2.result()
+                                if a2_result.get('status') == 'completed':
+                                    logger.info(f"[reA1-S2] [reA2] batch2 완료: {a2_result.get('checklist_summary', {})}")
+                                else:
+                                    logger.error(f"[reA1-S2] [reA2] batch2 실패: {a2_result.get('error')}")
+                            except Exception as e:
+                                logger.error(f"[reA1-S2] [reA2] batch2 실패: {e}")
+
+                            try:
+                                a3_result = future_a3.result()
+                                if a3_result.get('status') == 'completed':
+                                    logger.info(f"[reA1-S2] [reA3] batch2 완료: {a3_result.get('analysis_summary', {})}")
+                                else:
+                                    logger.error(f"[reA1-S2] [reA3] batch2 실패: {a3_result.get('error')}")
+                            except Exception as e:
+                                logger.error(f"[reA1-S2] [reA3] batch2 실패: {e}")
+
+                        logger.info(f"[reA1-S2] ========== batch2 완료 ==========")
+
+                    except Exception as e:
+                        logger.error(f"[reA1-S2] batch2 트리거 실패: {e}")
+
+                # 비동기 실행 (A1-Stage2는 계속 진행)
+                import threading
+                batch2_thread = threading.Thread(target=trigger_batch2, daemon=True)
+                batch2_thread.start()
+
+                logger.info(f"[reA1-S2] batch2 트리거 완료 (비동기 실행)")
+            else:
+                logger.error(f"[reA1-S2] recovered_matching_details 저장 실패")
+        else:
+            logger.info(f"[A1-S2] 오탐지 없음, batch2 건너뜀")
+
+        logger.info(f"[A1-S2] Task 완료: {contract_id}")
 
         return {
             "status": "completed",
             "contract_id": contract_id,
             "missing_summary": {
-                "verified_missing": len(missing_result['missing_article_analysis']),
+                "verified_missing": len(missing_article_analysis),
+                "recovered_matching": len(recovered_matching_details),
                 "processing_time": missing_result['processing_time']
             }
         }
@@ -829,7 +828,7 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
 
 
 @celery_app.task(bind=True, name="consistency.check_checklist_parallel", queue="consistency_validation")
-def check_checklist_parallel_task(self, contract_id: str):
+def check_checklist_parallel_task(self, contract_id: str, matching_types: List[str] = None):
     """
     A2 노드: 체크리스트 검증 (병렬 실행용)
 
@@ -837,25 +836,28 @@ def check_checklist_parallel_task(self, contract_id: str):
 
     Args:
         contract_id: 검증할 계약서 ID
+        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                       None이면 ["primary"] 사용 (기본값)
 
     Returns:
         체크리스트 검증 결과
     """
-    logger.info(f"[A2] Task 시작: {contract_id}")
+    if matching_types is None:
+        matching_types = ["primary"]
 
-    # 기존 check_checklist_task 로직 재사용
-    result = check_checklist_task(contract_id)
+    logger.info(f"[A2] Task 시작: {contract_id}, matching_types={matching_types}")
 
-    # 재시도 로직으로 DB 저장
+    # A2 노드에 matching_types 파라미터 전달
+    result = check_checklist_task(contract_id, matching_types)
+
     if result.get('status') == 'completed':
-        # check_checklist_task 내부에서 이미 DB 저장하므로 여기서는 로그만
         logger.info(f"[A2] Task 완료: {contract_id}")
 
     return result
 
 
 @celery_app.task(bind=True, name="consistency.analyze_content_parallel", queue="consistency_validation")
-def analyze_content_parallel_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
+def analyze_content_parallel_task(self, contract_id: str, matching_types: List[str] = None, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
     """
     A3 노드: 내용 분석 (병렬 실행용)
 
@@ -863,6 +865,8 @@ def analyze_content_parallel_task(self, contract_id: str, text_weight: float = 0
 
     Args:
         contract_id: 검증할 계약서 ID
+        matching_types: 처리할 매칭 유형 (["primary"], ["recovered"], ["primary", "recovered"])
+                       None이면 ["primary"] 사용 (기본값)
         text_weight: 본문 가중치
         title_weight: 제목 가중치
         dense_weight: 시멘틱 가중치
@@ -870,10 +874,13 @@ def analyze_content_parallel_task(self, contract_id: str, text_weight: float = 0
     Returns:
         내용 분석 결과
     """
-    logger.info(f"[A3] Task 시작: {contract_id}")
+    if matching_types is None:
+        matching_types = ["primary"]
 
-    # 기존 analyze_content_task 로직 재사용
-    result = analyze_content_task(contract_id, text_weight, title_weight, dense_weight)
+    logger.info(f"[A3] Task 시작: {contract_id}, matching_types={matching_types}")
+
+    # A3 노드에 matching_types 파라미터 전달
+    result = analyze_content_task(contract_id, matching_types, text_weight, title_weight, dense_weight)
 
     if result.get('status') == 'completed':
         logger.info(f"[A3] Task 완료: {contract_id}")
@@ -924,17 +931,18 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
         # Step 2: A1-Stage2, A2, A3 병렬 실행
         logger.info(f"[PARALLEL] [2/2] A1-Stage2, A2, A3 병렬 실행 중...")
 
-        # ThreadPoolExecutor를 사용한 진짜 병렬 실행
+        # ThreadPoolExecutor를 사용한 병렬 실행
+        # 주의: 같은 worker 내에서 실행되므로 I/O 바운드 작업만 병렬화됨
         with ThreadPoolExecutor(max_workers=3) as executor:
             # 3개 태스크를 동시 제출
             future_a1_s2 = executor.submit(
                 check_missing_articles_task, contract_id, text_weight, title_weight, dense_weight
             )
             future_a2 = executor.submit(
-                check_checklist_parallel_task, contract_id
+                check_checklist_task, contract_id, ["primary"]
             )
             future_a3 = executor.submit(
-                analyze_content_parallel_task, contract_id, text_weight, title_weight, dense_weight
+                analyze_content_task, contract_id, ["primary"], text_weight, title_weight, dense_weight
             )
 
             # 결과 수집
