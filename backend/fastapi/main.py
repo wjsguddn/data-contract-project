@@ -523,11 +523,23 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
             if validation_for_recovered:
                 checklist_validation_recovered = validation_for_recovered.checklist_validation_recovered
                 content_analysis_recovered = validation_for_recovered.content_analysis_recovered
+                
+                # 디버그: 실제 DB 값 타입 확인
+                logger.info(f"[GET-DEBUG] Recovered 필드 조회 성공:")
+                logger.info(f"  checklist_recovered type: {type(checklist_validation_recovered)}, value: {checklist_validation_recovered is not None}")
+                logger.info(f"  content_recovered type: {type(content_analysis_recovered)}, value: {content_analysis_recovered is not None}")
+                if checklist_validation_recovered:
+                    logger.info(f"  checklist_recovered keys: {list(checklist_validation_recovered.keys())[:5]}")
+                if content_analysis_recovered:
+                    logger.info(f"  content_recovered keys: {list(content_analysis_recovered.keys())[:5]}")
             else:
+                logger.warning(f"[GET-DEBUG] validation_for_recovered를 찾을 수 없음: id={validation_id_for_recovered}")
                 checklist_validation_recovered = None
                 content_analysis_recovered = None
         except Exception as e:
             logger.error(f"Recovered 필드 조회 실패: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             checklist_validation_recovered = None
             content_analysis_recovered = None
 
