@@ -507,13 +507,36 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
         completeness_check = validation.completeness_check
         checklist_validation = validation.checklist_validation
         content_analysis = validation.content_analysis
+        
+        # Recovered 필드는 batch2에서 나중에 저장되므로
+        # 트랜잭션 격리 문제 해결을 위해 세션을 다시 닫고 새로 열기
+        validation_id_for_recovered = validation.id
+        db.close()
+        
+        # 새 세션으로 recovered 필드만 다시 조회
+        db = SessionLocal()
+        try:
+            validation_for_recovered = db.query(ValidationResult).filter(
+                ValidationResult.id == validation_id_for_recovered
+            ).first()
+            
+            if validation_for_recovered:
+                checklist_validation_recovered = validation_for_recovered.checklist_validation_recovered
+                content_analysis_recovered = validation_for_recovered.content_analysis_recovered
+            else:
+                checklist_validation_recovered = None
+                content_analysis_recovered = None
+        except Exception as e:
+            logger.error(f"Recovered 필드 조회 실패: {e}")
+            checklist_validation_recovered = None
+            content_analysis_recovered = None
 
         # 디버그: 실제 DB 값 출력 (간략화)
         logger.info(f"[GET] {contract_id} - completeness_check: {bool(completeness_check)}, "
                    f"checklist: {bool(checklist_validation)}, "
                    f"content: {bool(content_analysis)}, "
-                   f"checklist_recovered: {bool(validation.checklist_validation_recovered)}, "
-                   f"content_recovered: {bool(validation.content_analysis_recovered)}")
+                   f"checklist_recovered: {bool(checklist_validation_recovered)}, "
+                   f"content_recovered: {bool(content_analysis_recovered)}")
 
 
 
@@ -550,9 +573,10 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
             }
 
         # 5. 모든 필드가 실제 데이터를 가지고 있는지 확인
-        # A2 필수 필드: total_checklist_items
+        # A2 필수 필드: statistics.total_checklist_items
         # A3 필수 필드: total_articles
-        if not checklist_validation.get('total_checklist_items'):
+        checklist_stats = checklist_validation.get('statistics', {})
+        if not checklist_stats.get('total_checklist_items'):
             return {
                 "contract_id": contract_id,
                 "status": "processing",
@@ -574,10 +598,10 @@ async def get_validation_result(contract_id: str, db: Session = Depends(get_db))
                 "id": validation.id,
                 "overall_score": validation.overall_score,
                 "content_analysis": content_analysis,
-                "content_analysis_recovered": validation.content_analysis_recovered,
+                "content_analysis_recovered": content_analysis_recovered,
                 "completeness_check": completeness_check,
                 "checklist_validation": checklist_validation,
-                "checklist_validation_recovered": validation.checklist_validation_recovered,
+                "checklist_validation_recovered": checklist_validation_recovered,
                 "recommendations": validation.recommendations,
                 "created_at": validation.created_at.isoformat() if validation.created_at else None
             }
