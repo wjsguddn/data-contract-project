@@ -60,10 +60,10 @@ class ChecklistCheckNode:
     
     def check_checklist(self, contract_id: str, matching_types: List[str] = None) -> Dict[str, Any]:
         """
-        체크리스트 검증 메인 함수
+        체크리스트 검증 메인 함수 (표준 조항 기준)
         
-        체크리스트 항목을 검증하고 결과를 반환합니다.
-        MANUAL_CHECK_REQUIRED 항목은 user_article_results 내에 포함됩니다.
+        표준 조항별로 체크리스트를 검증하고 결과를 반환합니다.
+        Preamble 검증은 제외됩니다.
         
         Args:
             contract_id: 계약서 ID
@@ -73,25 +73,18 @@ class ChecklistCheckNode:
         Returns:
             검증 결과 딕셔너리
             {
-                "total_checklist_items": int,
-                "verified_items": int,
-                "passed_items": int,
-                "failed_items": int,
-                "user_article_results": [
+                "std_article_results": [
                     {
-                        "user_article_no": int,
-                        "checklist_results": [
-                            {
-                                "check_text": str,
-                                "reference": str,
-                                "result": "YES" | "NO" | "UNCLEAR" | "MANUAL_CHECK_REQUIRED",
-                                "evidence": str | None,
-                                "user_action": str (MANUAL_CHECK_REQUIRED인 경우),
-                                "manual_check_reason": str (MANUAL_CHECK_REQUIRED인 경우)
-                            }
-                        ]
+                        "std_article_id": str,
+                        "std_article_title": str,
+                        "std_article_number": str,
+                        "matched_user_articles": [...],
+                        "checklist_results": [...],
+                        "statistics": {...}
                     }
                 ],
+                "unmatched_std_articles": [...],
+                "statistics": {...},
                 "processing_time": float,
                 "verification_date": str
             }
@@ -102,7 +95,8 @@ class ChecklistCheckNode:
         if matching_types is None:
             matching_types = ["primary"]
         
-        logger.info(f"=== 체크리스트 검증 시작 (contract_id={contract_id}, matching_types={matching_types}) ===")
+        logger.info(f"=== 체크리스트 검증 시작 (표준 조항 기준) ===")
+        logger.info(f"  contract_id={contract_id}, matching_types={matching_types}")
         start_time = time.time()
         
         # 1. A1 매칭 결과 로드
@@ -122,139 +116,93 @@ class ChecklistCheckNode:
         logger.info(f"  - 계약 유형: {contract_type}")
         logger.info(f"  - 매칭된 조항 수: {len(matching_details)}개")
         
-        # 2. Preamble 존재 여부 확인 및 텍스트 로드
-        preamble_text = self._get_preamble_text(contract_id)
-        has_preamble = bool(preamble_text)
-        logger.info(f"  - Preamble 존재 여부: {has_preamble}")
-        if has_preamble:
-            logger.info(f"  - Preamble 길이: {len(preamble_text)} 문자")
+        # 2. 표준 조항 → 사용자 조항 매핑 생성
+        logger.info("2. 표준 조항 → 사용자 조항 매핑 생성 중...")
+        std_to_user_map = self._build_std_to_user_mapping(matching_details)
+        logger.info(f"  - 매핑된 표준 조항: {len(std_to_user_map)}개")
         
-        # 3. 체크리스트 로드 (preamble 정보 전달)
-        logger.info(f"2. 체크리스트 로드 중 (contract_type={contract_type})...")
-        all_checklists = self.checklist_loader.load_checklist(contract_type, has_preamble)
+        # 3. 전체 체크리스트 로드 (preamble 제외)
+        logger.info(f"3. 체크리스트 로드 중 (contract_type={contract_type})...")
+        all_checklists = self.checklist_loader.load_checklist(contract_type, has_preamble=False)
         logger.info(f"  - 전체 체크리스트 항목: {len(all_checklists)}개")
         
-        # 3. Preamble 체크리스트 검증 (있는 경우)
-        user_article_results = []
-        verified_yes_items = set()  # YES인 체크리스트 추적 (중복 방지)
+        # 4. 표준 조항별로 그룹화
+        logger.info("4. 체크리스트를 표준 조항별로 그룹화 중...")
+        checklist_by_std = {}
+        for item in all_checklists:
+            std_id = item['global_id']
+            if std_id not in checklist_by_std:
+                checklist_by_std[std_id] = []
+            checklist_by_std[std_id].append(item)
         
-        if has_preamble:
-            logger.info("3-1. Preamble 체크리스트 검증 시작...")
-            preamble_result = self._verify_preamble_checklist(
-                contract_id,
-                preamble_text,
-                all_checklists,
-                contract_type
-            )
-            if preamble_result:
-                user_article_results.append(preamble_result)
-                logger.info(f"  Preamble 검증 완료: {len(preamble_result.get('checklist_results', []))}개 항목")
-                
-                # YES인 항목 추적
-                for result in preamble_result.get('checklist_results', []):
-                    if result.get('result') == 'YES':
-                        verified_yes_items.add(result.get('check_text', ''))
-                
-                logger.info(f"  YES 항목: {len(verified_yes_items)}개 (다음 조항에서 제외)")
+        logger.info(f"  - 그룹화된 표준 조항: {len(checklist_by_std)}개")
         
-        # 4. 사용자 조항별 검증
-        logger.info("3-2. 사용자 조항별 체크리스트 검증 시작...")
-        article_start_idx = len(user_article_results) + 1
+        # 5. 표준 조항 기준으로 검증
+        logger.info("5. 표준 조항별 체크리스트 검증 시작...")
+        std_article_results = []
         
-        for idx, detail in enumerate(matching_details, article_start_idx):
-            if not detail.get('matched', False):
-                logger.info(f"  [{idx}/{len(matching_details)}] 조항 {detail.get('user_article_no')}: 매칭 없음, 건너뜀")
+        for idx, (std_global_id, checklist_items) in enumerate(checklist_by_std.items(), 1):
+            # 매칭된 사용자 조항들
+            matched_users = std_to_user_map.get(std_global_id, [])
+            
+            if not matched_users:
+                logger.debug(f"  [{idx}/{len(checklist_by_std)}] {std_global_id}: 매칭 없음, 건너뜀")
                 continue
             
-            # 사용자 조항 정보
-            user_article_no = detail['user_article_no']
-            user_article_id = detail['user_article_id']
-            user_article_title = detail['user_article_title']
+            logger.info(f"  [{idx}/{len(checklist_by_std)}] {std_global_id} 검증 중...")
+            logger.info(f"    - 매칭된 사용자 조항: {len(matched_users)}개")
+            logger.info(f"    - 체크리스트 항목: {len(checklist_items)}개")
             
-            # 매칭된 표준 조항 global_id
-            matched_global_ids = detail.get('matched_articles_global_ids', [])
+            # 사용자 조항 텍스트 합치기
+            combined_text = self._combine_user_article_texts(contract_id, matched_users)
             
-            logger.info(
-                f"  [{idx}/{len(matching_details)}] 조항 {user_article_no} ({user_article_title}) 검증 중... "
-                f"(매칭된 표준 조항: {len(matched_global_ids)}개)"
-            )
-            
-            # 관련 체크리스트 필터링
-            relevant_checklists = self.checklist_loader.filter_by_global_ids(
-                all_checklists,
-                matched_global_ids
-            )
-            
-            if not relevant_checklists:
-                logger.info(f"    관련 체크리스트 없음, 건너뜀")
+            if not combined_text:
+                logger.warning(f"    사용자 조항 텍스트를 로드할 수 없음, 건너뜀")
                 continue
             
-            # 이미 YES인 항목 제외
-            new_checklists = [
-                item for item in relevant_checklists
-                if item.get('check_text', '') not in verified_yes_items
-            ]
-            
-            if not new_checklists:
-                logger.info(f"    모든 체크리스트 항목이 이미 검증됨 (YES), 건너뜀")
-                continue
-            
-            logger.info(f"    관련 체크리스트: {len(relevant_checklists)}개 (이미 YES: {len(relevant_checklists) - len(new_checklists)}개, 검증 필요: {len(new_checklists)}개)")
-            
-            # 사용자 조항 텍스트 로드
-            user_clause_text = self._get_user_clause_text(contract_id, user_article_id)
-            
-            if not user_clause_text:
-                logger.warning(f"    사용자 조항 텍스트를 찾을 수 없음, 건너뜀")
-                continue
-            
-            # LLM 검증 (새로운 항목만)
+            # LLM 검증
             checklist_results = self.verifier.verify_batch(
-                user_clause_text,
-                new_checklists
+                combined_text,
+                checklist_items
             )
             
-            # YES인 항목 추적
-            for result in checklist_results:
-                if result.get('result') == 'YES':
-                    verified_yes_items.add(result.get('check_text', ''))
+            logger.info(f"    검증 완료: {len(checklist_results)}개 결과")
             
-            logger.info(f"    검증 완료: {len(checklist_results)}개 결과 (누적 YES: {len(verified_yes_items)}개)")
+            # 표준 조항 정보 추출
+            std_article_title = checklist_items[0].get('reference', '') if checklist_items else ''
+            std_article_number = std_article_title  # "제3조" 형식
+            
+            # 조항별 통계 계산
+            article_stats = self._calculate_article_statistics(checklist_results)
             
             # 결과 수집
-            user_article_results.append({
-                "user_article_no": user_article_no,
-                "user_article_id": user_article_id,
-                "user_article_title": user_article_title,
-                "matched_std_global_ids": matched_global_ids,
-                "checklist_results": checklist_results
+            std_article_results.append({
+                "std_article_id": std_global_id,
+                "std_article_title": std_article_title,
+                "std_article_number": std_article_number,
+                "matched_user_articles": matched_users,
+                "checklist_results": checklist_results,
+                "statistics": article_stats
             })
             
-            # 조항별 체크리스트 검증 완료 구분선
             logger.info("--------------------------------------------------------------------------------")
         
-        # 5. 통계 계산
-        logger.info("4. 통계 계산 중...")
-        statistics = self._calculate_statistics(user_article_results)
-        logger.info(
-            f"  - 전체 항목: {statistics['total_checklist_items']}개\n"
-            f"  - 검증 완료: {statistics['verified_items']}개\n"
-            f"  - 통과: {statistics['passed_items']}개\n"
-            f"  - 미충족: {statistics['failed_items']}개"
-        )
+        # 6. 전체 통계 계산
+        logger.info("6. 전체 통계 계산 중...")
+        overall_statistics = self._calculate_overall_statistics(std_article_results)
         
-        # 6. 최종 결과 구성
+        # 8. 최종 결과 구성
         processing_time = time.time() - start_time
         
         result = {
-            **statistics,
-            "user_article_results": user_article_results,
+            "std_article_results": std_article_results,
+            "statistics": overall_statistics,
             "processing_time": processing_time,
             "verification_date": datetime.now().isoformat()
         }
         
         # 7. DB 저장
-        logger.info("5. DB 저장 중...")
+        logger.info("7. DB 저장 중...")
         self._save_to_db(contract_id, result, matching_types)
         
         logger.info(f"=== A2 노드 완료 (처리 시간: {processing_time:.2f}초) ===")
@@ -375,143 +323,358 @@ class ChecklistCheckNode:
         return ""
 
     
-    def _calculate_statistics(self, user_article_results: List[Dict[str, Any]]) -> Dict[str, int]:
+    def _calculate_article_statistics(self, checklist_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        통계 계산
+        표준 조항별 체크리스트 통계 계산
         
         Args:
-            user_article_results: 사용자 조항별 검증 결과 리스트
+            checklist_results: 해당 표준 조항의 체크리스트 검증 결과
         
         Returns:
             {
-                "total_checklist_items": int,    # 전체 체크리스트 항목 수
-                "verified_items": int,           # 검증 완료된 항목 수
-                "passed_items": int,             # 통과한 항목 수 (YES)
-                "failed_items": int              # 미충족 항목 수 (NO)
+                "total_items": int,
+                "passed_items": int,
+                "failed_items": int,
+                "unclear_items": int,
+                "manual_check_items": int,
+                "pass_rate": float
             }
         """
-        total_items = 0
-        verified_items = 0
+        total_items = len(checklist_results)
         passed_items = 0
         failed_items = 0
+        unclear_items = 0
+        manual_check_items = 0
         
-        for result in user_article_results:
-            checklist_results = result.get('checklist_results', [])
+        for item in checklist_results:
+            result_value = item.get('result', 'NO')
             
-            for item in checklist_results:
-                total_items += 1
-                verified_items += 1
-                
-                result_value = item.get('result', 'NO')
-                
-                if result_value == 'YES':
-                    passed_items += 1
-                elif result_value == 'NO':
-                    failed_items += 1
-                # UNCLEAR는 failed_items에 포함하지 않음
+            if result_value == 'YES':
+                passed_items += 1
+            elif result_value == 'NO':
+                failed_items += 1
+            elif result_value == 'UNCLEAR':
+                unclear_items += 1
+            elif result_value == 'MANUAL_CHECK_REQUIRED':
+                manual_check_items += 1
+        
+        pass_rate = passed_items / total_items if total_items > 0 else 0.0
         
         return {
-            "total_checklist_items": total_items,
-            "verified_items": verified_items,
+            "total_items": total_items,
             "passed_items": passed_items,
-            "failed_items": failed_items
+            "failed_items": failed_items,
+            "unclear_items": unclear_items,
+            "manual_check_items": manual_check_items,
+            "pass_rate": round(pass_rate, 2)
         }
-
     
-    def _get_preamble_text(self, contract_id: str) -> str:
+    def _calculate_overall_statistics(
+        self,
+        std_article_results: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        사용자 계약서의 preamble 텍스트 로드
+        전체 통계 계산
         
         Args:
-            contract_id: 계약서 ID
+            std_article_results: 표준 조항별 검증 결과
         
         Returns:
-            preamble 전문 (줄바꿈으로 결합)
-            빈 문자열: preamble이 없는 경우
+            {
+                "matched_std_articles": int,
+                "total_checklist_items": int,
+                "passed_items": int,
+                "failed_items": int,
+                "unclear_items": int,
+                "manual_check_items": int,
+                "overall_pass_rate": float
+            }
         """
-        contract = self.db.query(ContractDocument).filter(
-            ContractDocument.contract_id == contract_id
-        ).first()
+        matched_std_articles = len(std_article_results)
         
-        if not contract or not contract.parsed_data:
-            return ""
+        # 체크리스트 통계 합산
+        total_checklist_items = 0
+        passed_items = 0
+        failed_items = 0
+        unclear_items = 0
+        manual_check_items = 0
         
-        parsed_data = contract.parsed_data
-        preamble = parsed_data.get('preamble', [])
+        for result in std_article_results:
+            stats = result.get('statistics', {})
+            total_checklist_items += stats.get('total_items', 0)
+            passed_items += stats.get('passed_items', 0)
+            failed_items += stats.get('failed_items', 0)
+            unclear_items += stats.get('unclear_items', 0)
+            manual_check_items += stats.get('manual_check_items', 0)
         
-        if not preamble:
-            return ""
+        overall_pass_rate = passed_items / total_checklist_items if total_checklist_items > 0 else 0.0
         
-        # 리스트를 줄바꿈으로 결합
-        if isinstance(preamble, list):
-            return '\n'.join(str(line) for line in preamble if line)
-        else:
-            return str(preamble) if preamble else ""
+        return {
+            "matched_std_articles": matched_std_articles,
+            "total_checklist_items": total_checklist_items,
+            "passed_items": passed_items,
+            "failed_items": failed_items,
+            "unclear_items": unclear_items,
+            "manual_check_items": manual_check_items,
+            "overall_pass_rate": round(overall_pass_rate, 2)
+        }
     
-    def _verify_preamble_checklist(
+    def _identify_unmatched_std_articles(
         self,
-        contract_id: str,
-        preamble_text: str,
-        all_checklists: List[Dict[str, Any]],
+        a1_results: Dict[str, Any],
+        checklist_by_std: Dict[str, List[Dict[str, Any]]],
         contract_type: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         """
-        Preamble 체크리스트 검증
+        미매칭 표준 조항 식별 및 위험도 평가
         
-        제1조 관련 체크리스트 중 preamble에서 확인해야 하는 항목들을 검증합니다.
+        A1의 missing_standard_articles를 활용하여 미매칭 표준 조항의
+        체크리스트 정보와 위험도를 생성합니다.
         
         Args:
-            contract_id: 계약서 ID
-            preamble_text: preamble 전문
-            all_checklists: 전체 체크리스트 항목
+            a1_results: A1 검증 결과
+            checklist_by_std: 표준 조항별 체크리스트 그룹
             contract_type: 계약 유형
         
         Returns:
-            preamble 검증 결과 또는 None (관련 체크리스트가 없는 경우)
+            미매칭 표준 조항 리스트
+            [
+                {
+                    "std_article_id": str,
+                    "std_article_title": str,
+                    "std_article_number": str,
+                    "checklist_items": [...],
+                    "risk_assessment": {
+                        "severity": "high" | "medium" | "low",
+                        "description": str,
+                        "recommendation": str,
+                        "legal_risk": str
+                    }
+                }
+            ]
         """
-        # 제1조 global_id
-        art1_global_id = f"urn:std:{contract_type}:art:001"
+        unmatched_articles = []
         
-        # 제1조 관련 체크리스트 필터링
-        art1_checklists = self.checklist_loader.filter_by_global_ids(
-            all_checklists,
-            [art1_global_id]
-        )
+        # A1의 missing_article_analysis 활용
+        missing_analysis = a1_results.get('missing_article_analysis', [])
         
-        if not art1_checklists:
-            logger.warning("  제1조 관련 체크리스트가 없음")
-            return None
+        for missing in missing_analysis:
+            # 실제로 누락된 조항만 처리
+            if not missing.get('is_truly_missing', True):
+                continue
+            
+            std_article_id = missing.get('standard_article_id', '')
+            std_article_title = missing.get('standard_article_title', '')
+            
+            # 해당 표준 조항의 체크리스트 가져오기
+            checklist_items = checklist_by_std.get(std_article_id, [])
+            
+            # 체크리스트를 간단한 형식으로 변환
+            simple_checklist = [
+                {
+                    "check_text": item.get('check_text', ''),
+                    "reference": item.get('reference', '')
+                }
+                for item in checklist_items
+            ]
+            
+            # 위험도 평가 (A1의 정보 활용 + 체크리스트 개수 고려)
+            risk_assessment = self._assess_missing_article_risk(
+                std_article_id,
+                std_article_title,
+                len(simple_checklist),
+                missing
+            )
+            
+            unmatched_articles.append({
+                "std_article_id": std_article_id,
+                "std_article_title": std_article_title,
+                "std_article_number": std_article_title,  # "제5조" 형식
+                "checklist_items": simple_checklist,
+                "risk_assessment": risk_assessment
+            })
         
-        logger.info(f"  제1조 관련 체크리스트: {len(art1_checklists)}개")
+        return unmatched_articles
+    
+    def _assess_missing_article_risk(
+        self,
+        std_article_id: str,
+        std_article_title: str,
+        checklist_count: int,
+        missing_info: Dict[str, Any]
+    ) -> Dict[str, str]:
+        """
+        미매칭 표준 조항의 위험도 평가
         
-        # 제1조 조문 텍스트도 함께 로드 (있는 경우)
-        art1_text = self._get_user_clause_text(contract_id, "user_article_001")
+        Args:
+            std_article_id: 표준 조항 global_id
+            std_article_title: 표준 조항 제목
+            checklist_count: 체크리스트 항목 수
+            missing_info: A1의 missing_article_analysis 정보
         
-        # Preamble + 제1조 결합
-        combined_text = preamble_text
-        if art1_text:
-            combined_text = f"{preamble_text}\n\n{art1_text}"
+        Returns:
+            {
+                "severity": "high" | "medium" | "low",
+                "description": str,
+                "recommendation": str,
+                "legal_risk": str
+            }
+        """
+        # 필수 조항 리스트 (하드코딩)
+        critical_articles = [
+            "urn:std:provide:art:001",  # 목적
+            "urn:std:provide:art:003",  # 제공 목적
+            "urn:std:provide:art:005",  # 보유 기간
+            "urn:std:process:art:001",
+            "urn:std:process:art:003",
+            "urn:std:transfer:art:001",
+            "urn:std:transfer:art:003",
+        ]
         
-        # LLM 검증
-        checklist_results = self.verifier.verify_batch(
-            combined_text,
-            art1_checklists
-        )
+        # 위험도 판단
+        if std_article_id in critical_articles:
+            severity = "high"
+        elif checklist_count >= 5:  # 체크리스트가 많으면 중요한 조항
+            severity = "medium"
+        else:
+            severity = "low"
         
-        # reference에 "서문 + " 추가 (서문 검증이므로)
-        for result in checklist_results:
-            reference = result.get('reference', '')
-            if reference and '제1조' in reference:
-                result['reference'] = f"서문 + {reference}"
+        # A1의 정보 활용
+        description = missing_info.get('reasoning', f"필수 조항 '{std_article_title}' 누락")
+        recommendation = missing_info.get('recommendation', f"'{std_article_title}' 조항 추가 필요")
+        legal_risk = missing_info.get('risk_assessment', "계약 유효성 및 법적 리스크 존재")
         
         return {
-            "user_article_no": 0,  # preamble은 0번으로 표시
-            "user_article_id": "preamble",
-            "user_article_title": "서문",
-            "matched_std_global_ids": [art1_global_id],
-            "checklist_results": checklist_results
+            "severity": severity,
+            "description": description,
+            "recommendation": recommendation,
+            "legal_risk": legal_risk
         }
+
     
+    def _build_std_to_user_mapping(self, matching_details: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        A1 매칭 결과를 표준 조항 → 사용자 조항 매핑으로 재조립
+        
+        Args:
+            matching_details: A1의 matching_details (사용자 조항 기준)
+        
+        Returns:
+            표준 조항 global_id를 키로 하는 매핑
+            {
+                "urn:std:provide:art:003": [
+                    {
+                        "user_article_no": 7,
+                        "user_article_id": "user_article_007",
+                        "user_article_title": "제공 목적 및 범위"
+                    },
+                    ...
+                ]
+            }
+        """
+        std_to_user_map = {}
+        
+        for detail in matching_details:
+            if not detail.get('matched', False):
+                continue
+            
+            # 사용자 조항 정보
+            user_info = {
+                'user_article_no': detail['user_article_no'],
+                'user_article_id': detail['user_article_id'],
+                'user_article_title': detail['user_article_title']
+            }
+            
+            # 매칭된 표준 조항들
+            matched_global_ids = detail.get('matched_articles_global_ids', [])
+            
+            for std_global_id in matched_global_ids:
+                if std_global_id not in std_to_user_map:
+                    std_to_user_map[std_global_id] = []
+                
+                # 중복 방지 (같은 사용자 조항이 여러 번 추가되지 않도록)
+                if user_info not in std_to_user_map[std_global_id]:
+                    std_to_user_map[std_global_id].append(user_info)
+        
+        logger.info(f"표준 조항 → 사용자 조항 매핑 생성 완료: {len(std_to_user_map)}개 표준 조항")
+        
+        return std_to_user_map
+    
+    def _combine_user_article_texts(
+        self,
+        contract_id: str,
+        matched_users: List[Dict[str, Any]]
+    ) -> str:
+        """
+        여러 사용자 조항 텍스트를 합침
+        
+        Args:
+            contract_id: 계약서 ID
+            matched_users: 매칭된 사용자 조항 정보 리스트
+                [
+                    {"user_article_no": 7, "user_article_id": "user_article_007", ...},
+                    {"user_article_no": 8, "user_article_id": "user_article_008", ...}
+                ]
+        
+        Returns:
+            합쳐진 텍스트
+            "[사용자 제7조: ...]\n...\n\n[사용자 제8조: ...]\n..."
+        """
+        texts = []
+        
+        for user in matched_users:
+            article_no = user['user_article_no']
+            article_title = user['user_article_title']
+            article_text = self._get_user_clause_text(
+                contract_id,
+                user['user_article_id']
+            )
+            
+            if article_text:
+                texts.append(f"[사용자 제{article_no}조: {article_title}]\n{article_text}")
+        
+        combined = "\n\n".join(texts)
+        logger.debug(f"사용자 조항 텍스트 합치기 완료: {len(matched_users)}개 조항, {len(combined)} 문자")
+        
+        return combined
+    
+    def _enrich_with_article_info(
+        self,
+        llm_results: List[Dict[str, Any]],
+        matched_users: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        LLM 결과에 사용자 조항 전체 정보 추가
+        
+        LLM이 반환한 조항 번호를 전체 정보로 변환합니다.
+        
+        Args:
+            llm_results: LLM 검증 결과 (조항 번호만 포함)
+            matched_users: 매칭된 사용자 조항 전체 정보
+        
+        Returns:
+            전체 정보가 포함된 체크리스트 결과
+        """
+        # 조항 번호 → 전체 정보 매핑
+        article_map = {
+            article['user_article_no']: {
+                'user_article_no': article['user_article_no'],
+                'user_article_id': article['user_article_id'],
+                'user_article_title': article['user_article_title']
+            }
+            for article in matched_users
+        }
+        
+        enriched_results = []
+        
+        for result in llm_results:
+            # ChecklistVerifier가 이미 전체 정보를 반환하므로
+            # 여기서는 추가 처리 없이 그대로 사용
+            enriched_results.append(result)
+        
+        return enriched_results
+    
+
     def _save_to_db(self, contract_id: str, result: Dict[str, Any], matching_types: List[str] = None):
         """
         체크리스트 검증 결과 DB 저장
@@ -522,7 +685,7 @@ class ChecklistCheckNode:
         
         Args:
             contract_id: 계약서 ID
-            result: 검증 결과 딕셔너리
+            result: 검증 결과 딕셔너리 (표준 조항 기준)
             matching_types: 매칭 유형 (None이면 ["primary"])
         
         Raises:
@@ -550,12 +713,12 @@ class ChecklistCheckNode:
                 # dict() 생성자로 새 객체 생성하여 SQLAlchemy가 변경 감지하도록
                 validation_result.checklist_validation_recovered = dict(result)
                 flag_modified(validation_result, 'checklist_validation_recovered')
-                logger.info(f"recovered 필드 설정 완료: {len(result.get('user_article_results', []))}개 조항")
+                logger.info(f"recovered 필드 설정 완료: {len(result.get('std_article_results', []))}개 표준 조항")
             else:
                 field_name = "checklist_validation"
                 validation_result.checklist_validation = dict(result)
                 flag_modified(validation_result, 'checklist_validation')
-                logger.info(f"primary 필드 설정 완료: {len(result.get('user_article_results', []))}개 조항")
+                logger.info(f"primary 필드 설정 완료: {len(result.get('std_article_results', []))}개 표준 조항")
             
             # DB 커밋 전 확인
             logger.info(f"DB 커밋 시도: {field_name}")
@@ -565,7 +728,7 @@ class ChecklistCheckNode:
             self.db.refresh(validation_result)
             saved_value = getattr(validation_result, field_name)
             if saved_value:
-                logger.info(f"DB 저장 완료 확인: {field_name}, {len(saved_value.get('user_article_results', []))}개 조항")
+                logger.info(f"DB 저장 완료 확인: {field_name}, {len(saved_value.get('std_article_results', []))}개 표준 조항")
             else:
                 logger.error(f"DB 저장 실패: {field_name}이 None입니다")
         
