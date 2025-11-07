@@ -34,13 +34,15 @@ engine = create_engine(
 if "sqlite" in DATABASE_URL:
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_conn, connection_record):
-        """SQLite 연결 시 busy_timeout 설정"""
+        """SQLite 연결 시 busy_timeout 및 격리 레벨 설정"""
         cursor = dbapi_conn.cursor()
         # WAL 모드 비활성화 (오탐지 방지)
         # cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=30000")  # 30초
+        # READ UNCOMMITTED 격리 레벨 설정 (다른 트랜잭션의 변경사항 즉시 읽기)
+        cursor.execute("PRAGMA read_uncommitted=1")
         cursor.close()
-        logger.debug("SQLite busy_timeout 설정 완료")
+        logger.debug("SQLite busy_timeout 및 read_uncommitted 설정 완료")
 
 # 세션 생성
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
