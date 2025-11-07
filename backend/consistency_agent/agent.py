@@ -258,11 +258,23 @@ def analyze_content_task(self, contract_id: str, matching_types: List[str] = Non
                 existing_result.content_analysis_recovered = analysis_result.to_dict()
                 flag_modified(existing_result, 'content_analysis_recovered')
                 a3_logger.info(f"DB 저장: content_analysis_recovered")
+                field_name = 'content_analysis_recovered'
             else:
                 existing_result.content_analysis = analysis_result.to_dict()
                 flag_modified(existing_result, 'content_analysis')
                 a3_logger.info(f"DB 저장: content_analysis")
+                field_name = 'content_analysis'
+            
             db.commit()
+            
+            # 저장 확인 (A2와 동일한 패턴)
+            db.refresh(existing_result)
+            saved_value = getattr(existing_result, field_name)
+            if saved_value:
+                a3_logger.info(f"DB 저장 완료 확인: {field_name}, {saved_value.get('analyzed_articles', 0)}개 조항")
+            else:
+                a3_logger.error(f"DB 저장 실패: {field_name}이 None입니다")
+            
             result_id = existing_result.id
         else:
             validation_result = ValidationResult(
@@ -363,21 +375,24 @@ def check_checklist_task(self, contract_id: str, matching_types: List[str] = Non
             # 원래 로거 복원
             a2_module.logger = original_a2_logger
 
+        # statistics 필드에서 통계 읽기
+        stats = checklist_result.get('statistics', {})
+        
         a2_logger.info(
             f"검증 완료: {contract_id} "
-            f"(전체: {checklist_result.get('total_checklist_items', 0)}개, "
-            f"통과: {checklist_result.get('passed_items', 0)}개, "
-            f"미충족: {checklist_result.get('failed_items', 0)}개)"
+            f"(전체: {stats.get('total_checklist_items', 0)}개, "
+            f"통과: {stats.get('passed_items', 0)}개, "
+            f"미충족: {stats.get('failed_items', 0)}개)"
         )
 
         return {
             "status": "completed",
             "contract_id": contract_id,
             "checklist_summary": {
-                "total_checklist_items": checklist_result.get('total_checklist_items', 0),
-                "verified_items": checklist_result.get('verified_items', 0),
-                "passed_items": checklist_result.get('passed_items', 0),
-                "failed_items": checklist_result.get('failed_items', 0),
+                "total_checklist_items": stats.get('total_checklist_items', 0),
+                "verified_items": stats.get('verified_items', 0),
+                "passed_items": stats.get('passed_items', 0),
+                "failed_items": stats.get('failed_items', 0),
                 "processing_time": checklist_result.get('processing_time', 0.0)
             }
         }
