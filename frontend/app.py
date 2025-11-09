@@ -881,119 +881,10 @@ def display_validation_result(validation_data: dict):
         st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
         st.markdown("### 🔄 오탐지 복구 체크리스트 검증")
         st.markdown("정방향 매칭에서 누락으로 판정되었으나, 역방향 재검증을 통해 복구된 조항의 체크리스트 검증 결과입니다.")
+        st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
         
-        # Primary A2와 동일한 함수 사용 (헤더만 이미 표시했으므로 제목 제외)
-        # display_checklist_results 함수를 재사용하되, 헤더는 건너뛰기 위해 직접 구현
-        total_items = checklist_validation_recovered.get('total_checklist_items', 0)
-        verified_items = checklist_validation_recovered.get('verified_items', 0)
-        passed_items = checklist_validation_recovered.get('passed_items', 0)
-        failed_items = checklist_validation_recovered.get('failed_items', 0)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("전체 항목", f"{total_items}개")
-        with col2:
-            st.metric("통과", f"{passed_items}개")
-        with col3:
-            st.metric("미충족", f"{failed_items}개")
-        
-        st.markdown("---")
-        
-        # 조항별 체크리스트 결과 표시 (Primary A2와 동일한 로직)
-        user_article_results = checklist_validation_recovered.get('user_article_results', [])
-        
-        if not user_article_results:
-            st.info("복구된 체크리스트 검증이 수행되지 않았습니다")
-        else:
-            for article_result in user_article_results:
-                user_article_no = article_result.get('user_article_no', 'N/A')
-                user_article_title = article_result.get('user_article_title', '')
-                matched_std_global_ids = article_result.get('matched_std_global_ids', [])
-                checklist_results = article_result.get('checklist_results', [])
-                
-                if not checklist_results:
-                    continue
-                
-                # 조항 헤더
-                if user_article_no == 0 or user_article_no == "preamble":
-                    st.markdown(f"<h4>서문</h4>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<h4>제{user_article_no}조 ({user_article_title})</h4>", unsafe_allow_html=True)
-                
-                # 매칭된 표준 조항 정보 표시
-                if matched_std_global_ids:
-                    std_refs = [_format_std_reference(gid) for gid in matched_std_global_ids]
-                    st.caption(f"매칭된 표준 조항: {', '.join(std_refs)}")
-                
-                # 각 체크리스트 항목 표시 (Primary A2와 동일)
-                for item in checklist_results:
-                    check_text = item.get('check_text', '')
-                    reference = item.get('reference', '')
-                    result = item.get('result', '')
-                    evidence = item.get('evidence', '')
-                    confidence = item.get('confidence', 0.0)
-                    requires_manual_review = item.get('requires_manual_review', False)
-                    
-                    # 매칭 정보 생성
-                    matching_info = _format_matching_info(user_article_no, reference)
-                    
-                    # 결과에 따라 다른 스타일 적용
-                    if result == 'YES':
-                        st.success(f"✅ {check_text}")
-                        if evidence:
-                            st.caption(f"근거: {evidence}")
-                        if matching_info:
-                            st.caption(f"매칭 정보: {matching_info}")
-                    
-                    elif result == 'NO':
-                        missing_explanation = item.get('missing_explanation', '')
-                        risk_level = item.get('risk_level', 'medium')
-                        risk_description = item.get('risk_description', '')
-                        recommendation = item.get('recommendation', '')
-                        
-                        st.error(f"❌ {check_text}")
-                        
-                        if matching_info:
-                            st.caption(f"매칭 정보: {matching_info}")
-                        
-                        if missing_explanation:
-                            st.markdown(f"**누락 상세**: {missing_explanation}")
-                        else:
-                            st.caption("해당 내용이 계약서에 명시되지 않았습니다")
-                        
-                        if risk_description:
-                            risk_labels = {'high': '높음', 'medium': '보통', 'low': '낮음'}
-                            risk_label = risk_labels.get(risk_level, '알 수 없음')
-                            st.markdown(f"위험도 {risk_label}: {risk_description}")
-                        
-                        if recommendation:
-                            st.markdown(f"권장사항: {recommendation}")
-                    
-                    elif result == 'UNCLEAR':
-                        st.warning(f"❓ {check_text}")
-                        st.caption(f"판단이 불명확합니다 (신뢰도: {confidence:.1%})")
-                        if requires_manual_review:
-                            st.caption("⚠️ 수동 검토가 필요합니다")
-                        if matching_info:
-                            st.caption(f"매칭 정보: {matching_info}")
-                    
-                    elif result == 'MANUAL_CHECK_REQUIRED':
-                        user_action = item.get('user_action', '')
-                        manual_check_reason = item.get('manual_check_reason', '')
-                        
-                        st.info(f"👤 {check_text}")
-                        st.caption("사용자 확인이 필요합니다")
-                        if manual_check_reason:
-                            st.caption(f"이유: {manual_check_reason}")
-                        if user_action:
-                            st.markdown(f"**확인 사항**: {user_action}")
-                        if matching_info:
-                            st.caption(f"매칭 정보: {matching_info}")
-                
-                st.markdown("---")
-            
-            processing_time = checklist_validation_recovered.get('processing_time', 0.0)
-            st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
+        # Primary A2와 동일한 함수 재사용 (헤더만 제외)
+        display_checklist_results_body(checklist_validation_recovered)
 
 
 def _format_std_reference(global_id: str) -> str:
@@ -1066,6 +957,20 @@ def display_checklist_results(checklist_validation: dict):
     # 체크리스트 검증 결과 헤더
     st.markdown("### 📋 체크리스트 검증 결과")
     st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
+    
+    # 본문 표시
+    display_checklist_results_body(checklist_validation)
+
+
+def display_checklist_results_body(checklist_validation: dict):
+    """
+    체크리스트 검증 결과 본문 표시 (헤더 제외)
+    
+    Args:
+        checklist_validation: 체크리스트 검증 결과 딕셔너리
+    """
+    if not checklist_validation:
+        return
     
     # 통계 표시 (표준 조항 기준)
     statistics = checklist_validation.get('statistics', {})
