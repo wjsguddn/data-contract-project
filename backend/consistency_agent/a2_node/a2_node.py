@@ -120,6 +120,8 @@ class ChecklistCheckNode:
         logger.info("2. 표준 조항 → 사용자 조항 매핑 생성 중...")
         std_to_user_map = self._build_std_to_user_mapping(matching_details)
         logger.info(f"  - 매핑된 표준 조항: {len(std_to_user_map)}개")
+        if std_to_user_map:
+            logger.info(f"  - 매핑된 표준 조항 ID 목록: {list(std_to_user_map.keys())[:5]}...")
         
         # 3. 전체 체크리스트 로드 (preamble 제외)
         logger.info(f"3. 체크리스트 로드 중 (contract_type={contract_type})...")
@@ -136,10 +138,24 @@ class ChecklistCheckNode:
             checklist_by_std[std_id].append(item)
         
         logger.info(f"  - 그룹화된 표준 조항: {len(checklist_by_std)}개")
+        if checklist_by_std:
+            logger.info(f"  - 체크리스트 표준 조항 ID 목록: {list(checklist_by_std.keys())[:5]}...")
         
         # 5. 표준 조항 기준으로 검증
         logger.info("5. 표준 조항별 체크리스트 검증 시작...")
         std_article_results = []
+        
+        # 디버그: 매칭 교집합 확인
+        matched_std_ids = set(std_to_user_map.keys())
+        checklist_std_ids = set(checklist_by_std.keys())
+        intersection = matched_std_ids & checklist_std_ids
+        logger.info(f"  - 매칭된 표준 조항: {len(matched_std_ids)}개")
+        logger.info(f"  - 체크리스트 표준 조항: {len(checklist_std_ids)}개")
+        logger.info(f"  - 교집합 (검증 대상): {len(intersection)}개")
+        if len(intersection) == 0:
+            logger.warning(f"  - 매칭 조항과 체크리스트 조항이 겹치지 않음!")
+            logger.warning(f"  - 매칭 조항 샘플: {list(matched_std_ids)[:3]}")
+            logger.warning(f"  - 체크리스트 조항 샘플: {list(checklist_std_ids)[:3]}")
         
         for idx, (std_global_id, checklist_items) in enumerate(checklist_by_std.items(), 1):
             # 매칭된 사용자 조항들
