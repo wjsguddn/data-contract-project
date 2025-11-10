@@ -200,12 +200,13 @@ class UserContractIndexer:
             with open(mapping_path, 'w', encoding='utf-8') as f:
                 json.dump(mapping, f, ensure_ascii=False, indent=2)
 
+            preamble_count = len([c for c in chunks if c['unit_type'].startswith('preamble')])
             articles_count = len([c for c in chunks if c['unit_type'].startswith('article')])
             exhibits_count = len([c for c in chunks if c['unit_type'].startswith('exhibit')])
 
             logger.info(
                 f"인덱싱 완료: {self.contract_id} "
-                f"(총 {len(chunks)}개 청크, {articles_count}개 조항, {exhibits_count}개 별지)"
+                f"(총 {len(chunks)}개 청크, 전문 {preamble_count}개, {articles_count}개 조항, {exhibits_count}개 별지)"
             )
 
             return {
@@ -215,6 +216,7 @@ class UserContractIndexer:
                 "faiss_title_index_path": str(self.faiss_title_index_path),
                 "whoosh_index_dir": str(self.whoosh_index_dir),
                 "total_chunks": len(chunks),
+                "preamble_count": preamble_count,
                 "articles_count": articles_count,
                 "exhibits_count": exhibits_count
             }
@@ -262,22 +264,61 @@ class UserContractIndexer:
 
         Returns:
             (chunks, text_vectors, title_vectors, mapping)
-            - chunks: Whoosh용 청크 리스트
-            - text_vectors: FAISS용 텍스트 벡터 배열
-            - title_vectors: FAISS용 타이틀 벡터 배열
+            - chunks: Whoosh용 청크 리스트 (모든 청크)
+            - text_vectors: FAISS용 텍스트 벡터 배열 (content만!)
+            - title_vectors: FAISS용 타이틀 벡터 배열 (title만!)
             - mapping: 인덱스 번호 -> 원본 데이터 참조
+            
+        핵심 원칙:
+            - text.faiss: preambleContent, articleContent, exhibitContent만
+            - title.faiss: articleTitle, exhibitTitle만
+            - content 청크는 parent_article_no/parent_exhibit_no로 title과 매칭
         """
         chunks = []
         text_vectors = []
         title_vectors = []
         mapping = []
 
+        preamble = parsed_data.get("preamble", [])
         articles = parsed_data.get("articles", [])
         exhibits = parsed_data.get("exhibits", [])
         embeddings = parsed_data.get("embeddings", {})
 
+        preamble_embeddings = embeddings.get("preamble_embeddings")
         article_embeddings = embeddings.get("article_embeddings", [])
         exhibit_embeddings = embeddings.get("exhibit_embeddings", [])
+
+        # Preamble 처리 (전문)
+        # 전문은 title이 없으므로 text 인덱스에만 추가
+        if preamble_embeddings and preamble_embeddings.get("sub_items"):
+            for preamble_item, preamble_emb in zip(preamble, preamble_embeddings.get("sub_items", [])):
+                sub_idx = preamble_emb["index"]
+                sub_text = preamble_item if isinstance(preamble_item, str) else str(preamble_item)
+
+                chunk_id = f"전문 내용{sub_idx}"
+                global_id = f"urn:user:{self.contract_id}:preamble:{sub_idx:03d}"
+
+                chunks.append({
+                    "id": chunk_id,
+                    "global_id": global_id,
+                    "unit_type": "preambleContent",
+                    "parent_id": "전문",
+                    "title": "",  # 전문은 제목이 없음
+                    "order_index": -1000 + sub_idx,  # 음수로 Articles 앞에 배치
+                    "text_raw": sub_text,
+                    "text_norm": self._normalize_text(sub_text),
+                    "contract_id": self.contract_id
+                })
+
+                # text 인덱스에만 추가 (전문은 content)
+                text_vectors.append(preamble_emb["text_embedding"])
+
+                mapping.append({
+                    "text_index": len(text_vectors) - 1,
+                    "title_index": None,  # 전문은 title 인덱스 없음
+                    "type": "preamble_content",
+                    "content_index": sub_idx
+                })
 
         # Articles 처리
         for article, article_emb in zip(articles, article_embeddings):
@@ -286,15 +327,16 @@ class UserContractIndexer:
             title = article.get("title", "")
             text = article.get("text", "")
 
-            # Title 청크 (조 본문 - articleText)
+            # 조 타이틀 청크 (예: "제1조(목적)")
+            # title 인덱스에만 추가
             if article_emb.get("title_embedding"):
-                chunk_id = f"제{article_no}조 조본문"
-                global_id = f"urn:user:{self.contract_id}:art:{article_no:03d}:att"
+                chunk_id = f"제{article_no}조"
+                global_id = f"urn:user:{self.contract_id}:art:{article_no:03d}:title"
 
                 chunks.append({
                     "id": chunk_id,
                     "global_id": global_id,
-                    "unit_type": "articleText",
+                    "unit_type": "articleTitle",
                     "parent_id": f"제{article_no}조",
                     "title": title,
                     "order_index": article_no,
@@ -303,32 +345,32 @@ class UserContractIndexer:
                     "contract_id": self.contract_id
                 })
 
-                # text 벡터: 본문 내용 (text)
-                text_vectors.append(article_emb["title_embedding"])
-                # title 벡터: 조 제목 (title)
+                # title 인덱스에만 추가
                 title_vectors.append(article_emb["title_embedding"])
 
                 mapping.append({
-                    "text_index": len(text_vectors) - 1,
+                    "text_index": None,  # title 청크는 text 인덱스 없음
                     "title_index": len(title_vectors) - 1,
                     "type": "article_title",
                     "article_no": article_no,
                     "article_id": article_id
                 })
 
-            # Sub-items (하위 항목 - subClause)
+            # 조의 하위 항목들 (content 배열 - 본문/항/호/목 구분 없음)
+            # text 인덱스에만 추가
             for sub_item, sub_emb in zip(article.get("content", []), article_emb.get("sub_items", [])):
                 sub_idx = sub_emb["index"]
                 sub_text = sub_item if isinstance(sub_item, str) else str(sub_item)
 
-                chunk_id = f"제{article_no}조 제{sub_idx}항"
-                global_id = f"urn:user:{self.contract_id}:art:{article_no:03d}:sub:{sub_idx:03d}"
+                chunk_id = f"제{article_no}조 내용{sub_idx}"
+                global_id = f"urn:user:{self.contract_id}:art:{article_no:03d}:content:{sub_idx:03d}"
 
                 chunks.append({
                     "id": chunk_id,
                     "global_id": global_id,
-                    "unit_type": "subClause",
+                    "unit_type": "articleContent",
                     "parent_id": f"제{article_no}조",
+                    "parent_article_no": article_no,  # 매칭용 추가
                     "title": title,
                     "order_index": article_no * 1000 + sub_idx,
                     "text_raw": sub_text,
@@ -336,18 +378,16 @@ class UserContractIndexer:
                     "contract_id": self.contract_id
                 })
 
-                # text 벡터: 하위 항목 내용 (sub_text)
+                # text 인덱스에만 추가
                 text_vectors.append(sub_emb["text_embedding"])
-                # title 벡터: 조 제목 (상위 조의 제목 사용)
-                title_vectors.append(article_emb.get("title_embedding") or sub_emb["text_embedding"])
 
                 mapping.append({
                     "text_index": len(text_vectors) - 1,
-                    "title_index": len(title_vectors) - 1,
-                    "type": "article_sub_item",
+                    "title_index": None,  # content 청크는 title 인덱스 없음
+                    "type": "article_content",
                     "article_no": article_no,
                     "article_id": article_id,
-                    "sub_item_index": sub_idx
+                    "content_index": sub_idx
                 })
 
         # Exhibits 처리
@@ -357,15 +397,16 @@ class UserContractIndexer:
             title = exhibit.get("title", "")
             text = exhibit.get("text", "")
 
-            # Title 청크 (별지 본문 - exhibitText)
+            # Title 청크 (별지 제목 - exhibitTitle)
+            # title 인덱스에만 추가
             if exhibit_emb.get("title_embedding"):
-                chunk_id = f"별지{exhibit_no} 본문"
+                chunk_id = f"별지{exhibit_no}"
                 global_id = f"urn:user:{self.contract_id}:exh:{exhibit_no:03d}:att"
 
                 chunks.append({
                     "id": chunk_id,
                     "global_id": global_id,
-                    "unit_type": "exhibitText",
+                    "unit_type": "exhibitTitle",
                     "parent_id": f"별지{exhibit_no}",
                     "title": title,
                     "order_index": 10000 + exhibit_no,  # Articles 뒤에 배치
@@ -374,32 +415,32 @@ class UserContractIndexer:
                     "contract_id": self.contract_id
                 })
 
-                # text 벡터: 본문 내용 (text)
-                text_vectors.append(exhibit_emb["title_embedding"])
-                # title 벡터: 별지 제목 (title)
+                # title 인덱스에만 추가
                 title_vectors.append(exhibit_emb["title_embedding"])
 
                 mapping.append({
-                    "text_index": len(text_vectors) - 1,
+                    "text_index": None,  # title 청크는 text 인덱스 없음
                     "title_index": len(title_vectors) - 1,
                     "type": "exhibit_title",
                     "exhibit_no": exhibit_no,
                     "exhibit_id": exhibit_id
                 })
 
-            # Sub-items (하위 항목 - exhibitSubItem)
+            # Sub-items (하위 내용 - exhibitContent)
+            # text 인덱스에만 추가
             for sub_item, sub_emb in zip(exhibit.get("content", []), exhibit_emb.get("sub_items", [])):
                 sub_idx = sub_emb["index"]
                 sub_text = sub_item if isinstance(sub_item, str) else str(sub_item)
 
-                chunk_id = f"별지{exhibit_no} 제{sub_idx}항"
+                chunk_id = f"별지{exhibit_no} 내용{sub_idx}"
                 global_id = f"urn:user:{self.contract_id}:exh:{exhibit_no:03d}:sub:{sub_idx:03d}"
 
                 chunks.append({
                     "id": chunk_id,
                     "global_id": global_id,
-                    "unit_type": "exhibitSubItem",
+                    "unit_type": "exhibitContent",
                     "parent_id": f"별지{exhibit_no}",
+                    "parent_exhibit_no": exhibit_no,  # 매칭용 추가
                     "title": title,
                     "order_index": 10000 + exhibit_no * 1000 + sub_idx,
                     "text_raw": sub_text,
@@ -407,18 +448,16 @@ class UserContractIndexer:
                     "contract_id": self.contract_id
                 })
 
-                # text 벡터: 하위 항목 내용 (sub_text)
+                # text 인덱스에만 추가
                 text_vectors.append(sub_emb["text_embedding"])
-                # title 벡터: 별지 제목 (상위 별지의 제목 사용)
-                title_vectors.append(exhibit_emb.get("title_embedding") or sub_emb["text_embedding"])
 
                 mapping.append({
                     "text_index": len(text_vectors) - 1,
-                    "title_index": len(title_vectors) - 1,
-                    "type": "exhibit_sub_item",
+                    "title_index": None,  # content 청크는 title 인덱스 없음
+                    "type": "exhibit_content",
                     "exhibit_no": exhibit_no,
                     "exhibit_id": exhibit_id,
-                    "sub_item_index": sub_idx
+                    "content_index": sub_idx
                 })
 
         # numpy 배열로 변환
@@ -432,32 +471,34 @@ class UserContractIndexer:
         FAISS 인덱스 구축 (text와 title 별도 인덱스)
 
         Args:
-            text_vectors: 텍스트 임베딩 벡터 배열 (N x 3072)
-            title_vectors: 타이틀 임베딩 벡터 배열 (N x 3072)
+            text_vectors: 텍스트 임베딩 벡터 배열 (content만, M x 3072)
+            title_vectors: 타이틀 임베딩 벡터 배열 (title만, N x 3072)
+            
+        주의: text와 title 벡터 개수는 다를 수 있음!
         """
         try:
             import faiss
 
-            # Text 인덱스 생성
+            # Text 인덱스 생성 (content만: preambleContent, articleContent, exhibitContent)
             if len(text_vectors) > 0:
                 text_index = faiss.IndexFlatL2(self.EMBEDDING_DIMENSION)
                 text_index.add(text_vectors)
                 faiss.write_index(text_index, str(self.faiss_text_index_path))
                 logger.info(
                     f"FAISS text 인덱스 생성 완료: {self.faiss_text_index_path} "
-                    f"({len(text_vectors)}개 벡터, {self.EMBEDDING_DIMENSION}차원)"
+                    f"({len(text_vectors)}개 content 벡터, {self.EMBEDDING_DIMENSION}차원)"
                 )
             else:
                 logger.warning(f"text 벡터가 없어 FAISS text 인덱스를 생성하지 않습니다: {self.contract_id}")
 
-            # Title 인덱스 생성
+            # Title 인덱스 생성 (title만: articleTitle, exhibitTitle)
             if len(title_vectors) > 0:
                 title_index = faiss.IndexFlatL2(self.EMBEDDING_DIMENSION)
                 title_index.add(title_vectors)
                 faiss.write_index(title_index, str(self.faiss_title_index_path))
                 logger.info(
                     f"FAISS title 인덱스 생성 완료: {self.faiss_title_index_path} "
-                    f"({len(title_vectors)}개 벡터, {self.EMBEDDING_DIMENSION}차원)"
+                    f"({len(title_vectors)}개 title 벡터, {self.EMBEDDING_DIMENSION}차원)"
                 )
             else:
                 logger.warning(f"title 벡터가 없어 FAISS title 인덱스를 생성하지 않습니다: {self.contract_id}")
