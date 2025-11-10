@@ -11,21 +11,38 @@
 ### 백엔드 (`backend/`)
 ```
 backend/
-├── fastapi/           # FastAPI 웹 서버
-│   ├── main.py       # 메인 애플리케이션 엔트리포인트
-│   └── pdf_parser.py # PDF 파싱 유틸리티
-├── classification_agent/  # 문서 분류 에이전트
-│   ├── agent.py      # 분류 로직
-│   └── nodes/        # 분류 노드 구현
-├── consistency_agent/     # 정합성 검증 에이전트
-│   ├── agent.py      # 검증 로직
-│   └── nodes/        # 검증 노드 구현
-├── report_agent/          # 보고서 생성 에이전트
-│   ├── agent.py      # 보고서 생성 로직
-│   └── nodes/        # 보고서 노드 구현
-└── shared/               # 공통 모듈
-    ├── core/            # 핵심 비즈니스 로직
-    └── services/        # 공통 서비스
+├── fastapi/                    # FastAPI 웹 서버
+│   ├── main.py                # 메인 애플리케이션 엔트리포인트
+│   └── user_contract_parser.py # 사용자 계약서 파싱
+├── classification_agent/       # 문서 분류 에이전트
+│   └── agent.py               # RAG + LLM 분류 로직
+├── consistency_agent/          # 정합성 검증 에이전트
+│   ├── agent.py               # 통합 검증 워크플로우
+│   ├── a1_node/               # 완전성 검증 노드
+│   │   ├── a1_node.py        # A1 메인 로직
+│   │   ├── article_matcher.py # 조항 매칭
+│   │   └── matching_verifier.py # LLM 매칭 검증
+│   ├── a2_node/               # 체크리스트 검증 노드
+│   │   ├── a2_node.py        # A2 메인 로직
+│   │   ├── checklist_loader.py # 체크리스트 로드
+│   │   └── checklist_verifier.py # LLM 체크리스트 검증
+│   ├── a3_node/               # 내용 분석 노드
+│   │   ├── a3_node.py        # A3 메인 로직
+│   │   └── content_comparator.py # 내용 비교
+│   ├── models.py              # 데이터 모델
+│   └── hybrid_searcher.py     # 하이브리드 검색
+├── report_agent/               # 보고서 생성 에이전트 (계획)
+│   └── agent.py               # 보고서 생성 로직
+└── shared/                     # 공통 모듈
+    ├── core/                  # 핵심 비즈니스 로직
+    │   └── celery_app.py     # Celery 설정
+    ├── database.py            # SQLAlchemy 모델
+    ├── services/              # 공통 서비스
+    │   ├── knowledge_base_loader.py # 지식베이스 로드
+    │   ├── embedding_service.py     # 임베딩 생성
+    │   └── whoosh_searcher.py       # Whoosh 검색
+    └── utils/                 # 유틸리티
+        └── korean_analyzer.py # 한국어 분석
 ```
 
 ### 프론트엔드 (`frontend/`)
@@ -58,12 +75,12 @@ data/
 ### 인프라 (`docker/`)
 ```
 docker/
-├── docker-compose.yml    # 멀티 컨테이너 오케스트레이션
-├── Dockerfile.backend    # FastAPI 컨테이너
+├── docker-compose.yml         # 멀티 컨테이너 오케스트레이션
+├── Dockerfile.backend         # FastAPI 컨테이너
 ├── Dockerfile.classification  # 분류 에이전트 컨테이너
-├── Dockerfile.consistency    # 정합성 에이전트 컨테이너
-├── Dockerfile.report         # 보고서 에이전트 컨테이너
-└── Dockerfile.ingestion      # 문서 처리 컨테이너
+├── Dockerfile.consistency     # 정합성 에이전트 컨테이너
+├── Dockerfile.report          # 보고서 에이전트 컨테이너 (계획)
+└── Dockerfile.ingestion       # 문서 처리 컨테이너
 ```
 
 ### 의존성 (`requirements/`)
@@ -94,10 +111,13 @@ tests/
 - Docker 컨테이너로 격리된 실행 환경
 
 ### 데이터 플로우
-1. **업로드**: Streamlit → FastAPI → 파일 저장
-2. **처리**: 문서 파싱 → 청킹 → 임베딩 → 인덱싱
-3. **분석**: 분류 에이전트 → 정합성 에이전트 → 보고서 에이전트
-4. **결과**: 분석 보고서 생성 및 반환
+1. **업로드**: Streamlit → FastAPI → DOCX 파싱 → 임베딩 생성
+2. **분류**: Classification Agent (RAG + LLM) → 유형 결정
+3. **검증**: Consistency Agent 
+   - A1: 조항 매칭 및 완전성 검증
+   - A2: 체크리스트 검증 (병렬)
+   - A3: 내용 분석 (병렬)
+4. **보고서**: Report Agent → 통합 분석 보고서 생성
 
 ### 명명 규칙
 - **파일명**: snake_case (예: `pdf_parser.py`)
