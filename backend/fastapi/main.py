@@ -172,6 +172,26 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         except Exception as embed_err:
             logger.error(f"Embedding generation failed: {contract_id}, {embed_err}")
 
+        # 사용자 계약서 인덱싱 (임베딩 생성 직후 실행)
+        try:
+            from backend.fastapi.user_contract_indexer import index_user_contract
+
+            indexing_result = index_user_contract(contract_id)
+            if indexing_result.get("success"):
+                logger.info(
+                    f"User contract indexing completed: {contract_id} "
+                    f"({indexing_result.get('total_chunks', 0)} chunks indexed)"
+                )
+            else:
+                logger.error(
+                    f"User contract indexing failed: {contract_id}, "
+                    f"{indexing_result.get('error', 'Unknown error')}"
+                )
+        except Exception as index_err:
+            logger.error(f"User contract indexing failed: {contract_id}, {index_err}")
+            import traceback
+            logger.error(traceback.format_exc())
+
         logger.info(f"Contract saved: {contract_id}")
 
         # 임시 파일 삭제
@@ -180,7 +200,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         except Exception as e:
             logger.warning(f"임시 파일 삭제 실패: {e}")
 
-        # Celery를 통해 분류 작업을 큐에 전송
+        # Celery를 통해 분류 작업을 큐에 전송 (인덱싱과 병렬 실행)
         try:
             task = classify_contract_task.delay(contract_id)
             logger.info(f"분류 작업 큐에 전송: {contract_id}, Task ID: {task.id}")
