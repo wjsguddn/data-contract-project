@@ -226,14 +226,22 @@ class HybridSearcher:
                 )
 
                 for idx, distance in zip(indices[0], distances[0]):
-                    # mapping 사용 (사용자 계약서) 또는 직접 인덱싱 (표준계약서)
                     chunk = self._get_chunk_by_text_index(int(idx))
                     if chunk:
                         chunk_id = chunk['id']
                         similarity = 1.0 / (1.0 + float(distance))
+                        
+                        # mapping에서 article_no 추출 (사용자 계약서)
+                        article_no = None
+                        if self.mapping:
+                            map_item = self.text_index_map.get(int(idx))
+                            if map_item:
+                                article_no = map_item.get('article_no')
+                        
                         text_results[chunk_id] = {
                             'chunk': chunk,
-                            'text_score': similarity
+                            'text_score': similarity,
+                            'article_no': article_no
                         }
 
             title_results = {}
@@ -254,37 +262,29 @@ class HybridSearcher:
                 )
 
                 for idx, distance in zip(indices[0], distances[0]):
-                    # mapping 사용 (사용자 계약서) 또는 직접 인덱싱 (표준계약서)
                     chunk = self._get_chunk_by_title_index(int(idx))
                     if chunk:
                         chunk_id = chunk['id']
                         similarity = 1.0 / (1.0 + float(distance))
+                        
+                        # mapping에서 article_no 추출 (사용자 계약서)
+                        article_no = None
+                        if self.mapping:
+                            map_item = self.title_index_map.get(int(idx))
+                            if map_item:
+                                article_no = map_item.get('article_no')
+                        
                         title_results[chunk_id] = {
                             'chunk': chunk,
-                            'title_score': similarity
+                            'title_score': similarity,
+                            'article_no': article_no
                         }
 
-            all_chunk_ids = set(text_results.keys()) | set(title_results.keys())
-
-            if not all_chunk_ids:
-                logger.warning("Dense 검색결과 없음 (제목/본문 모두)")
-                return []
-
-            results = []
-            for chunk_id in all_chunk_ids:
-                text_score = text_results.get(chunk_id, {}).get('text_score', 0.0)
-                title_score = title_results.get(chunk_id, {}).get('title_score', 0.0)
-
-                chunk = text_results.get(chunk_id, title_results.get(chunk_id))['chunk']
-                weighted_score = self.text_weight * text_score + self.title_weight * title_score
-
-                results.append({
-                    'chunk': chunk,
-                    'score': weighted_score,
-                    'text_score': text_score,
-                    'title_score': title_score,
-                    'source': 'dense'
-                })
+            # article_no 기준으로 융합 (사용자 계약서) 또는 chunk_id 기준 (표준계약서)
+            if self.mapping:
+                results = self._fuse_by_article_no(text_results, title_results)
+            else:
+                results = self._fuse_by_chunk_id(text_results, title_results)
 
             results.sort(key=lambda x: x['score'], reverse=True)
             top_results = results[:top_k]
@@ -302,6 +302,97 @@ class HybridSearcher:
             import traceback
             logger.error(traceback.format_exc())
             return []
+    
+    def _fuse_by_article_no(
+        self,
+        text_results: Dict[str, Dict],
+        title_results: Dict[str, Dict]
+    ) -> List[Dict[str, Any]]:
+        """
+        article_no 기준으로 text와 title 점수 융합 (사용자 계약서)
+        
+        같은 article_no를 가진 text_score와 title_score를 융합하여
+        각 content 청크에 대해 최종 점수를 계산합니다.
+        
+        Args:
+            text_results: text 검색 결과 (article_no 포함)
+            title_results: title 검색 결과 (article_no 포함)
+            
+        Returns:
+            융합된 결과 리스트
+        """
+        # article_no별 title_score 맵 생성
+        article_title_scores = {}
+        for chunk_id, data in title_results.items():
+            article_no = data.get('article_no')
+            if article_no is not None:
+                # 같은 조항에 여러 title 결과가 있으면 최고 점수 사용
+                if article_no not in article_title_scores or data['title_score'] > article_title_scores[article_no]:
+                    article_title_scores[article_no] = data['title_score']
+        
+        results = []
+        
+        # text 결과 처리 (content 청크)
+        for chunk_id, data in text_results.items():
+            article_no = data.get('article_no')
+            text_score = data['text_score']
+            
+            # 같은 article_no의 title_score 찾기
+            title_score = article_title_scores.get(article_no, 0.0) if article_no is not None else 0.0
+            
+            weighted_score = self.text_weight * text_score + self.title_weight * title_score
+            
+            results.append({
+                'chunk': data['chunk'],
+                'score': weighted_score,
+                'text_score': text_score,
+                'title_score': title_score,
+                'source': 'dense'
+            })
+        
+        logger.debug(
+            f"  article_no 기준 융합: {len(text_results)}개 text + {len(title_results)}개 title → "
+            f"{len(results)}개 content 청크 (title 점수 융합됨)"
+        )
+        
+        return results
+    
+    def _fuse_by_chunk_id(
+        self,
+        text_results: Dict[str, Dict],
+        title_results: Dict[str, Dict]
+    ) -> List[Dict[str, Any]]:
+        """
+        chunk_id 기준으로 text와 title 점수 융합 (표준계약서)
+        
+        표준계약서는 mapping이 없으므로 chunk_id가 정확히 일치하는 경우만 융합합니다.
+        
+        Args:
+            text_results: text 검색 결과
+            title_results: title 검색 결과
+            
+        Returns:
+            융합된 결과 리스트
+        """
+        all_chunk_ids = set(text_results.keys()) | set(title_results.keys())
+        
+        results = []
+        for chunk_id in all_chunk_ids:
+            text_score = text_results.get(chunk_id, {}).get('text_score', 0.0)
+            title_score = title_results.get(chunk_id, {}).get('title_score', 0.0)
+            
+            chunk = text_results.get(chunk_id, title_results.get(chunk_id))['chunk']
+            weighted_score = self.text_weight * text_score + self.title_weight * title_score
+            
+            results.append({
+                'chunk': chunk,
+                'score': weighted_score,
+                'text_score': text_score,
+                'title_score': title_score,
+                'source': 'dense'
+            })
+        
+        return results
 
     def sparse_search(
         self,
