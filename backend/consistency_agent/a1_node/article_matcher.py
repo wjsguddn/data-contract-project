@@ -571,7 +571,19 @@ class ArticleMatcher:
         ))
 
         logger.debug(f"    조 단위 집계 완료: {len(article_scores)}개 조")
-        for i, article in enumerate(article_scores, 1):
+        
+        # 임계값 필터링 (낮은 점수 제거)
+        filtered_scores = []
+        for article in article_scores:
+            if article['score'] >= 0.5:  # 후보 최소 점수 0.5
+                filtered_scores.append(article)
+            else:
+                logger.debug(f"      임계값 미달로 제외: {article['parent_id']} (점수: {article['score']:.3f})")
+        
+        if len(filtered_scores) < len(article_scores):
+            logger.info(f"    임계값 필터링: {len(article_scores)}개 → {len(filtered_scores)}개 (0.5 미만 제거)")
+        
+        for i, article in enumerate(filtered_scores, 1):
             # Dense/Sparse 평균 점수 계산
             chunks = article['matched_chunks']
             if chunks:
@@ -581,7 +593,7 @@ class ArticleMatcher:
             else:
                 logger.debug(f"      {i}. {article['parent_id']}: {article['score']:.3f} (하위항목: {article['num_sub_items']}개)")
 
-        return article_scores
+        return filtered_scores
 
     def _extract_article_number(self, parent_id: str) -> int:
         """
