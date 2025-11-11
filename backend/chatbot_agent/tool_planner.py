@@ -94,7 +94,15 @@ class ToolPlanner:
     "args": {{"article_numbers": [5]}}
   }}
 
-- "데이터 제공 조항 찾아줘" → get_article_by_title (제목 명시)
+- "별지2에 정의되어있는..." → get_article_by_index (별지 번호 명시)
+  {{
+    "topic_name": "별지2",
+    "tool": "get_article_by_index",
+    "purpose": "사용자가 명시한 별지 번호 조회",
+    "args": {{"exhibit_numbers": [2]}}
+  }}
+
+- "데이터 제공 조항에서..." → get_article_by_title (제목 명시)
   {{
     "topic_name": "데이터 제공",
     "tool": "get_article_by_title",
