@@ -109,7 +109,24 @@ class HybridSearcher:
             mapping: 매핑 정보 리스트
         """
         self.mapping = mapping
-        logger.info(f"매핑 정보 설정: {len(mapping)}개 항목")
+        
+        # 성능 최적화: 인덱스 기반 딕셔너리 생성 (O(1) 조회)
+        self.text_index_map = {}
+        self.title_index_map = {}
+        
+        for map_item in mapping:
+            text_idx = map_item.get('text_index')
+            if text_idx is not None:
+                self.text_index_map[text_idx] = map_item
+            
+            title_idx = map_item.get('title_index')
+            if title_idx is not None:
+                self.title_index_map[title_idx] = map_item
+        
+        # chunks도 딕셔너리로 변환 (O(1) 조회)
+        self.chunks_map = {chunk['id']: chunk for chunk in self.chunks}
+        
+        logger.info(f"매핑 정보 설정: {len(mapping)}개 항목 (text: {len(self.text_index_map)}, title: {len(self.title_index_map)})")
     
     @property
     def dense_weight(self) -> float:
@@ -189,11 +206,16 @@ class HybridSearcher:
             return []
 
         try:
+            import time
+            
             text_results = {}
             if text_embedding is not None:
                 text_vector = self._ensure_vector(text_embedding)
             elif text_query and str(text_query).strip():
+                embed_start = time.time()
                 text_vector = self.embed_query(text_query, contract_id)
+                embed_time = (time.time() - embed_start) * 1000
+                logger.debug(f"      본문 임베딩 생성: {embed_time:.2f}ms")
             else:
                 text_vector = None
 
@@ -218,7 +240,10 @@ class HybridSearcher:
             if title_embedding is not None:
                 title_vector = self._ensure_vector(title_embedding)
             elif title_query and str(title_query).strip():
+                embed_start = time.time()
                 title_vector = self.embed_query(title_query, contract_id)
+                embed_time = (time.time() - embed_start) * 1000
+                logger.debug(f"      제목 임베딩 생성: {embed_time:.2f}ms")
             else:
                 title_vector = None
 
@@ -529,6 +554,9 @@ class HybridSearcher:
         Returns:
             융합된 검색 결과 리스트
         """
+        import time
+        start_time = time.time()
+        
         # 1. 순위 맵 생성 (1-based ranking)
         dense_ranks = {r['chunk']['id']: idx + 1 for idx, r in enumerate(dense_results)}
         sparse_ranks = {r['chunk']['id']: idx + 1 for idx, r in enumerate(sparse_results)}
@@ -586,9 +614,11 @@ class HybridSearcher:
         # 6. RRF 점수로 정렬
         fused_results.sort(key=lambda x: x['score'], reverse=True)
         
+        elapsed_time = (time.time() - start_time) * 1000  # ms
+        
         # 로깅
         if fused_results:
-            logger.info(f"  RRF 융합 완료: {len(fused_results)}개 청크")
+            logger.info(f"  RRF 융합 완료: {len(fused_results)}개 청크 ({elapsed_time:.2f}ms)")
             logger.info(f"    Dense 기여: {len(dense_ranks)}개, Sparse 기여: {len(sparse_ranks)}개")
             
             # 상위 3개 샘플 로깅
@@ -661,11 +691,14 @@ class HybridSearcher:
             return []
 
         try:
+            import time
+            
             logger.debug("하이브리드 검색(제목/본문 분리)")
             logger.debug(f"  본문 쿼리: {text_query[:100]}...")
             logger.debug(f"  제목 쿼리: {title_query[:100]}...")
             logger.info(f"가중치 - 본문:제목 = {self.text_weight:.2f}:{self.title_weight:.2f}, Dense:Sparse = {self.dense_weight:.2f}:{self.sparse_weight:.2f}")
 
+            dense_start = time.time()
             dense_results = self._dense_search_internal(
                 text_query=text_query,
                 title_query=title_query,
@@ -674,17 +707,22 @@ class HybridSearcher:
                 text_embedding=text_embedding,
                 title_embedding=title_embedding,
             )
-            logger.debug(f"  Dense: {len(dense_results)}건")
+            dense_time = (time.time() - dense_start) * 1000
+            logger.info(f"  Dense: {len(dense_results)}건 ({dense_time:.2f}ms)")
 
+            sparse_start = time.time()
             sparse_results = self.sparse_search(
                 text_query=text_query,
                 title_query=title_query,
                 top_k=sparse_top_k
             )
-            logger.debug(f"  Sparse: {len(sparse_results)}건")
+            sparse_time = (time.time() - sparse_start) * 1000
+            logger.info(f"  Sparse: {len(sparse_results)}건 ({sparse_time:.2f}ms)")
 
+            fusion_start = time.time()
             fused_results = self.fuse_scores(dense_results, sparse_results)
-            logger.debug(f"  Fusion: {len(fused_results)}건")
+            fusion_time = (time.time() - fusion_start) * 1000
+            logger.info(f"  Fusion: {len(fused_results)}건 ({fusion_time:.2f}ms)")
 
             final_results = fused_results[:top_k]
             return final_results
@@ -725,16 +763,11 @@ class HybridSearcher:
             청크 딕셔너리 또는 None
         """
         if self.mapping:
-            # 사용자 계약서: mapping 사용
-            for map_item in self.mapping:
-                if map_item.get('text_index') == text_index:
-                    # mapping에서 청크 정보 재구성
-                    chunk_id = self._build_chunk_id_from_mapping(map_item)
-                    # chunks에서 해당 ID 찾기
-                    for chunk in self.chunks:
-                        if chunk['id'] == chunk_id:
-                            return chunk
-                    return None
+            # 사용자 계약서: mapping 사용 (O(1) 조회)
+            map_item = self.text_index_map.get(text_index)
+            if map_item:
+                chunk_id = self._build_chunk_id_from_mapping(map_item)
+                return self.chunks_map.get(chunk_id)
             return None
         else:
             # 표준계약서: 직접 인덱싱
@@ -753,16 +786,11 @@ class HybridSearcher:
             청크 딕셔너리 또는 None
         """
         if self.mapping:
-            # 사용자 계약서: mapping 사용
-            for map_item in self.mapping:
-                if map_item.get('title_index') == title_index:
-                    # mapping에서 청크 정보 재구성
-                    chunk_id = self._build_chunk_id_from_mapping(map_item)
-                    # chunks에서 해당 ID 찾기
-                    for chunk in self.chunks:
-                        if chunk['id'] == chunk_id:
-                            return chunk
-                    return None
+            # 사용자 계약서: mapping 사용 (O(1) 조회)
+            map_item = self.title_index_map.get(title_index)
+            if map_item:
+                chunk_id = self._build_chunk_id_from_mapping(map_item)
+                return self.chunks_map.get(chunk_id)
             return None
         else:
             # 표준계약서: 직접 인덱싱
