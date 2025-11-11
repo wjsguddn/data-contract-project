@@ -510,6 +510,9 @@ class UserContractIndexer:
     def _build_whoosh_index(self, chunks: List[Dict[str, Any]]) -> None:
         """
         Whoosh 인덱스 구축
+        
+        articleTitle/exhibitTitle 청크는 제외하고 content 청크만 인덱싱합니다.
+        (FAISS 융합 결과와 동일하게 content 청크만 최종 결과에 포함)
 
         Args:
             chunks: 청크 리스트
@@ -541,11 +544,23 @@ class UserContractIndexer:
 
             # 문서 추가
             writer = ix.writer()
+            
+            indexed_count = 0
+            skipped_count = 0
 
             for chunk in chunks:
+                unit_type = chunk.get('unit_type', '')
+                
+                # Title 청크는 인덱싱하지 않음 (FAISS 융합 결과와 일치)
+                if unit_type in ['articleTitle', 'exhibitTitle']:
+                    skipped_count += 1
+                    logger.debug(f"  Title 청크 '{chunk['id']}' 스킵 (인덱싱 제외)")
+                    continue
+                
+                # Content 청크만 인덱싱
                 # 메타데이터 JSON 직렬화
                 metadata = {
-                    'unit_type': chunk.get('unit_type', ''),
+                    'unit_type': unit_type,
                     'parent_id': chunk.get('parent_id', ''),
                     'contract_id': chunk.get('contract_id', ''),
                     'order_index': chunk.get('order_index', 0)
@@ -564,10 +579,15 @@ class UserContractIndexer:
                     text_raw=chunk['text_raw'],
                     metadata=metadata_json
                 )
+                
+                indexed_count += 1
 
             writer.commit()
 
-            logger.info(f"Whoosh 인덱스 생성 완료: {self.whoosh_index_dir} ({len(chunks)}개 청크)")
+            logger.info(
+                f"Whoosh 인덱스 생성 완료: {self.whoosh_index_dir} "
+                f"(인덱싱: {indexed_count}개, 스킵: {skipped_count}개, 총: {len(chunks)}개)"
+            )
 
         except Exception as e:
             logger.error(f"Whoosh 인덱스 생성 실패: {e}")
