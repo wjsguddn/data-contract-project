@@ -168,6 +168,26 @@ class CompletenessCheckNode:
                    f"표준 {len(matched_standard_articles)}/{total_standard_articles}")
         logger.info(f"[A1-S1] 누락 조문 식별: {len(missing_articles)}개 (재검증은 Stage 2에서 수행)")
 
+        # 3단계: 매칭 안된 사용자 조항 분석
+        unmatched_user_articles = [
+            article for article in user_articles
+            if article.get('number') not in matched_user_articles
+        ]
+
+        unmatched_analysis = []
+        if unmatched_user_articles:
+            logger.info(f"[A1-S1] 매칭 안된 사용자 조항 분석: {len(unmatched_user_articles)}개")
+            try:
+                unmatched_analysis = self._analyze_unmatched_articles(
+                    unmatched_user_articles,
+                    contract_type,
+                    contract_id
+                )
+            except Exception as e:
+                logger.error(f"[A1-S1] 매칭 안된 조항 분석 실패: {e}")
+        else:
+            logger.info(f"[A1-S1] 모든 사용자 조항이 표준계약서와 매칭되었습니다")
+
         # 결과 생성 (missing_article_analysis 없음)
         processing_time = time.time() - start_time
 
@@ -176,9 +196,11 @@ class CompletenessCheckNode:
             "contract_type": contract_type,
             "total_user_articles": total_user_articles,
             "matched_user_articles": len(matched_user_articles),
+            "unmatched_user_articles_count": len(unmatched_user_articles),  # 추가: 매칭 안된 조항 개수
             "total_standard_articles": total_standard_articles,
             "matched_standard_articles": len(matched_standard_articles),
             "missing_standard_articles": missing_articles,
+            "unmatched_user_articles": unmatched_analysis,  # 분석 결과
             "matching_details": matching_details,
             "processing_time": processing_time,
             "verification_date": datetime.now().isoformat()
@@ -735,3 +757,190 @@ class CompletenessCheckNode:
         logger.info(f"[A1-S2] 재검증 요약: 실제 누락 {truly_missing_count}개, 오탐지 {false_positive_count}개")
 
         return analysis_results
+
+    def _analyze_unmatched_articles(
+        self,
+        unmatched_articles: List[Dict[str, Any]],
+        contract_type: str,
+        contract_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        매칭되지 않은 사용자 조항 분석
+        
+        정방향 매칭에서 0.7 이상 점수를 받지 못한 조항들을 분석하여:
+        1. additional (추가 조항): 표준에 없는 새로운 조항
+        2. modified (변형 조항): 표준과 유사하지만 매칭 실패
+        3. irrelevant (불필요 조항): 계약과 무관한 내용
+        
+        Args:
+            unmatched_articles: 매칭 실패한 사용자 조항 리스트
+            contract_type: 계약 유형
+            contract_id: 계약서 ID
+        
+        Returns:
+            분석 결과 리스트
+        """
+        if not unmatched_articles:
+            return []
+        
+        logger.info(f"[Unmatched] 매칭 안된 조항 분석 시작: {len(unmatched_articles)}개")
+        
+        analysis_results = []
+        
+        for article in unmatched_articles:
+            try:
+                result = self._analyze_single_unmatched_article(
+                    article, contract_type, contract_id
+                )
+                analysis_results.append(result)
+                
+                logger.info(f"[Unmatched] 제{article.get('number')}조: {result['category']} "
+                          f"(신뢰도: {result['confidence']:.2f}, 위험도: {result['risk_level']})")
+            
+            except Exception as e:
+                logger.error(f"[Unmatched] 제{article.get('number')}조 분석 실패: {e}")
+                # 실패 시 기본 결과
+                analysis_results.append({
+                    "user_article_no": article.get('number'),
+                    "user_article_title": article.get('title', ''),
+                    "user_article_text": article.get('text', ''),
+                    "category": "unknown",
+                    "confidence": 0.0,
+                    "reasoning": f"분석 중 오류 발생: {str(e)}",
+                    "recommendation": "수동 검토 필요",
+                    "risk_level": "medium"
+                })
+        
+        # 통계
+        categories = {}
+        for result in analysis_results:
+            cat = result['category']
+            categories[cat] = categories.get(cat, 0) + 1
+        
+        logger.info(f"[Unmatched] 분석 완료: {categories}")
+        
+        return analysis_results
+    
+    def _analyze_single_unmatched_article(
+        self,
+        article: Dict[str, Any],
+        contract_type: str,
+        contract_id: str
+    ) -> Dict[str, Any]:
+        """단일 매칭 안된 조항 분석"""
+        
+        article_no = article.get('number')
+        article_title = article.get('title', '')
+        article_text = article.get('text', '')
+        
+        # LLM 프롬프트
+        prompt = self._build_unmatched_analysis_prompt(
+            article_no, article_title, article_text, contract_type
+        )
+        
+        # LLM 호출
+        response = self.azure_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "당신은 데이터 계약서 분석 전문가입니다."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1
+        )
+        
+        # 응답 파싱
+        content = response.choices[0].message.content
+        parsed = self._parse_unmatched_llm_response(content)
+        
+        return {
+            "user_article_no": article_no,
+            "user_article_title": article_title,
+            "user_article_text": article_text,
+            **parsed
+        }
+    
+    def _build_unmatched_analysis_prompt(
+        self,
+        article_no: int,
+        article_title: str,
+        article_text: str,
+        contract_type: str
+    ) -> str:
+        """매칭 안된 조항 분석 프롬프트 생성"""
+        
+        return f"""
+다음은 {contract_type} 유형의 사용자 계약서에서 표준계약서와 매칭되지 않은 조항입니다.
+
+**제{article_no}조 ({article_title})**
+{article_text}
+
+**분석 목적**: 
+이 조항이 표준계약서에 없는 이유를 파악하고, 사용자에게 적절한 가이드를 제공합니다.
+
+**분류 기준**:
+
+1. **additional (추가 조항)**: 
+   - 표준계약서에는 없지만 사용자가 의도적으로 추가한 조항
+   - 특수한 요구사항이나 추가 의무사항
+   - 예: "데이터 품질 보증", "정기 보고 의무", "감사 협조", "특수 보안 요구사항"
+   - **판단 기준**: 내용이 계약 이행에 도움이 되는가?
+
+2. **modified (변형 조항)**: 
+   - 표준계약서의 특정 조항과 내용은 유사하지만 제목/구조가 달라서 자동 매칭 실패
+   - 예: 표준 "제3조(데이터 제공 범위 및 방식)" → 사용자 "제3조(제공 데이터의 범위)"
+   - **판단 기준**: 표준 조항의 일부 내용이 누락되었을 가능성이 있는가?
+
+3. **irrelevant (불필요 조항)**: 
+   - 계약 내용과 직접 관련 없는 형식적 요소
+   - 예: 목차, 부록, 서식, 일반적인 법률 조항(관할법원, 준거법)
+   - **판단 기준**: 계약 이행에 실질적 영향이 없는가?
+
+**응답 형식 (JSON):**
+```json
+{{
+  "category": "additional|modified|irrelevant",
+  "confidence": 0.0-1.0,
+  "reasoning": "분류 근거 (1-2문장)",
+  "recommendation": "권장 조치 (1-2문장)",
+  "risk_level": "low|medium|high"
+}}
+```
+
+**위험도 기준:**
+- **high**: 중요한 표준 조항이 변형되어 필수 내용이 누락되었을 가능성
+- **medium**: 검토가 필요한 추가 조항 또는 변형 조항
+- **low**: 문제없는 추가 조항 또는 불필요한 조항
+
+**중요**: 
+- "additional"은 표준에 없는 **새로운** 내용
+- "modified"는 표준에 있는 조항의 **변형**
+- "irrelevant"는 계약과 **무관**한 내용
+"""
+    
+    def _parse_unmatched_llm_response(self, content: str) -> Dict[str, Any]:
+        """LLM 응답 파싱"""
+        import json
+        import re
+        
+        try:
+            # JSON 블록 추출
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                parsed = json.loads(json_str)
+                return parsed
+            
+            # JSON 블록 없이 직접 JSON인 경우
+            parsed = json.loads(content)
+            return parsed
+        
+        except Exception as e:
+            logger.warning(f"LLM 응답 파싱 실패: {e}")
+            # 기본값 반환
+            return {
+                "category": "unknown",
+                "confidence": 0.5,
+                "reasoning": "응답 파싱 실패",
+                "recommendation": "수동 검토 필요",
+                "risk_level": "medium"
+            }
