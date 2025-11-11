@@ -129,11 +129,16 @@ class ChatbotOrchestrator:
             conversation_history = self.context_manager.load_history(contract_id, session_id)
             
             # 3. 도구 계획 수립
+            planner_start = time.time()
             tool_plan = self.tool_planner.plan(user_message, conversation_history)
-            logger.info(f"도구 계획: {tool_plan.intent}, {len(tool_plan.topics)}개 주제")
+            planner_time = time.time() - planner_start
+            logger.info(f"도구 계획: {tool_plan.intent}, {len(tool_plan.topics)}개 주제 ({planner_time:.2f}초)")
             
             # 4. 도구 실행
+            tools_start = time.time()
             tool_results = self._execute_tools(contract_id, tool_plan, user_message)
+            tools_time = time.time() - tools_start
+            logger.info(f"도구 실행 완료 ({tools_time:.2f}초)")
             
             if not tool_results:
                 logger.warning("도구 실행 결과 없음")
@@ -144,40 +149,53 @@ class ChatbotOrchestrator:
                 )
             
             # 5. 참조 해결
+            ref_start = time.time()
             additional_results = self.reference_resolver.resolve_references(
                 contract_id=contract_id,
                 tool_results=tool_results,
                 user_message=user_message,
                 max_depth=2
             )
+            ref_time = time.time() - ref_start
             
             if additional_results:
                 tool_results.extend(additional_results)
-                logger.info(f"참조 해결: {len(additional_results)}개 추가")
+                logger.info(f"참조 해결: {len(additional_results)}개 추가 ({ref_time:.2f}초)")
+            else:
+                logger.info(f"참조 해결 완료 ({ref_time:.2f}초)")
             
             # 6. 응답 생성
+            gen_start = time.time()
             response_text, sources = self._generate_response(
                 user_message=user_message,
                 tool_results=tool_results,
                 conversation_history=conversation_history
             )
+            gen_time = time.time() - gen_start
+            logger.info(f"응답 생성 완료 ({gen_time:.2f}초)")
             
             # 7. 응답 품질 평가
+            val_start = time.time()
             validation_result = self.response_validator.validate(
                 user_message=user_message,
                 response=response_text,
                 tool_results=tool_results
             )
+            val_time = time.time() - val_start
+            logger.info(f"응답 품질 평가 완료 ({val_time:.2f}초)")
             
             if not validation_result.is_valid:
                 logger.warning(f"응답 품질 불량: {validation_result.reason}, 재생성 시도")
                 # 재생성 (1회만)
+                regen_start = time.time()
                 response_text, sources = self._generate_response(
                     user_message=user_message,
                     tool_results=tool_results,
                     conversation_history=conversation_history,
                     retry=True
                 )
+                regen_time = time.time() - regen_start
+                logger.info(f"응답 재생성 완료 ({regen_time:.2f}초)")
             
             # 8. 대화 히스토리 저장
             self.context_manager.save_message(
@@ -499,10 +517,16 @@ class ChatbotOrchestrator:
             conversation_history = self.context_manager.load_history(contract_id, session_id)
             
             # 3. 도구 계획 수립
+            planner_start = time.time()
             tool_plan = self.tool_planner.plan(user_message, conversation_history)
+            planner_time = time.time() - planner_start
+            logger.info(f"도구 계획 수립 완료: {tool_plan.intent}, {len(tool_plan.topics)}개 주제 ({planner_time:.2f}초)")
             
             # 4. 도구 실행
+            tools_start = time.time()
             tool_results = self._execute_tools(contract_id, tool_plan, user_message)
+            tools_time = time.time() - tools_start
+            logger.info(f"도구 실행 완료 ({tools_time:.2f}초)")
             
             if not tool_results:
                 error_msg = "관련 정보를 찾을 수 없습니다. 다른 방식으로 질문해주세요."
@@ -511,17 +535,23 @@ class ChatbotOrchestrator:
                 return
             
             # 5. 참조 해결
+            ref_start = time.time()
             additional_results = self.reference_resolver.resolve_references(
                 contract_id=contract_id,
                 tool_results=tool_results,
                 user_message=user_message,
                 max_depth=2
             )
+            ref_time = time.time() - ref_start
             
             if additional_results:
                 tool_results.extend(additional_results)
+                logger.info(f"참조 해결: {len(additional_results)}개 추가 ({ref_time:.2f}초)")
+            else:
+                logger.info(f"참조 해결 완료 ({ref_time:.2f}초)")
             
             # 6. 스트리밍 응답 생성
+            gen_start = time.time()
             full_response = ""
             async for chunk in self._generate_response_stream(
                 user_message=user_message,
@@ -530,6 +560,8 @@ class ChatbotOrchestrator:
             ):
                 full_response += chunk
                 yield {"token": chunk}
+            gen_time = time.time() - gen_start
+            logger.info(f"응답 생성 완료 ({gen_time:.2f}초, {len(full_response)}자)")
             
             # 7. 출처 정보 전송
             sources = self._extract_sources_from_tools(tool_results)

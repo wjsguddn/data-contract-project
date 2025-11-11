@@ -10,6 +10,8 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional
+from functools import lru_cache
+import hashlib
 
 from openai import AzureOpenAI
 
@@ -35,6 +37,7 @@ class EmbeddingService:
         azure_endpoint: Optional[str] = None,
         embedding_model: Optional[str] = None,
         api_version: str = "2024-02-01",
+        cache_size: int = 1000,
     ):
         """Azure OpenAI Client 초기화"""
         self.api_key = api_key or os.getenv("AZURE_OPENAI_API_KEY")
@@ -51,6 +54,12 @@ class EmbeddingService:
             api_version=api_version,
             azure_endpoint=self.azure_endpoint,
         )
+        
+        # 임베딩 캐시 (메모리 기반 LRU)
+        self._embedding_cache: Dict[str, List[float]] = {}
+        self._cache_size = cache_size
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def get_embedding(
         self,
@@ -59,7 +68,7 @@ class EmbeddingService:
         component: str = "embedding_service"
     ) -> List[float]:
         """
-        단일 텍스트 임베딩 생성
+        단일 텍스트 임베딩 생성 (캐싱 지원)
 
         Args:
             text: 임베딩할 텍스트
@@ -72,6 +81,19 @@ class EmbeddingService:
         normalized = self._normalize_text(text)
         if not normalized:
             raise ValueError("유효한 텍스트가 없습니다")
+
+        # 캐시 키 생성 (텍스트 해시)
+        cache_key = hashlib.md5(normalized.encode('utf-8')).hexdigest()
+        
+        # 캐시 확인
+        if cache_key in self._embedding_cache:
+            self._cache_hits += 1
+            hit_rate = self._cache_hits / (self._cache_hits + self._cache_misses) * 100
+            logger.info(f"임베딩 캐시 HIT: {text[:30]}... (적중률: {hit_rate:.1f}%, hits: {self._cache_hits}, misses: {self._cache_misses})")
+            return self._embedding_cache[cache_key]
+        
+        self._cache_misses += 1
+        logger.info(f"임베딩 캐시 MISS: {text[:30]}... (적중률: {self._cache_misses / (self._cache_hits + self._cache_misses) * 100:.1f}%, hits: {self._cache_hits}, misses: {self._cache_misses})")
 
         try:
             response = self.client.embeddings.create(
@@ -89,7 +111,17 @@ class EmbeddingService:
                     purpose="single_embedding"
                 )
 
-            return response.data[0].embedding
+            embedding = response.data[0].embedding
+            
+            # 캐시 저장 (LRU 방식)
+            if len(self._embedding_cache) >= self._cache_size:
+                # 가장 오래된 항목 제거 (간단한 구현)
+                oldest_key = next(iter(self._embedding_cache))
+                del self._embedding_cache[oldest_key]
+            
+            self._embedding_cache[cache_key] = embedding
+            
+            return embedding
 
         except Exception as e:
             logger.error(f"임베딩 생성 실패: {e}")
