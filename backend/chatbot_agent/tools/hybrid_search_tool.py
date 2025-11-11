@@ -49,6 +49,9 @@ class HybridSearchTool(BaseTool):
         self.dense_top_k = 20  # Dense 검색 개수
         self.sparse_top_k = 20  # Sparse 검색 개수
         
+        # 인덱스 캐시 (계약서별)
+        self._searcher_cache = {}
+        
         logger.info(f"HybridSearchTool 초기화 (RRF 모드, 본문:제목 = {self.text_weight}:{self.title_weight})")
     
     @property
@@ -126,15 +129,21 @@ class HybridSearchTool(BaseTool):
         try:
             logger.info(f"하이브리드 검색 시작: {contract_id}, {len(topics)}개 주제")
             
-            # 사용자 계약서 인덱스 로드
-            searcher = self._load_user_contract_indexes(contract_id)
-            if not searcher:
-                return ToolResult(
-                    success=False,
-                    tool_name=self.name,
-                    data=None,
-                    error="사용자 계약서 인덱스를 로드할 수 없습니다"
-                )
+            # 사용자 계약서 인덱스 로드 (캐시 사용)
+            if contract_id in self._searcher_cache:
+                searcher = self._searcher_cache[contract_id]
+                logger.debug(f"인덱스 캐시 히트: {contract_id}")
+            else:
+                searcher = self._load_user_contract_indexes(contract_id)
+                if not searcher:
+                    return ToolResult(
+                        success=False,
+                        tool_name=self.name,
+                        data=None,
+                        error="사용자 계약서 인덱스를 로드할 수 없습니다"
+                    )
+                self._searcher_cache[contract_id] = searcher
+                logger.info(f"인덱스 캐시 저장: {contract_id}")
             
             # 주제별 검색 수행
             results_by_topic = {}
