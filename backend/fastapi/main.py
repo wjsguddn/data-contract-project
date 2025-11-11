@@ -763,7 +763,7 @@ async def chatbot_message(
     db: Session = Depends(get_db)
 ):
     """
-    챗봇 메시지 전송
+    챗봇 메시지 전송 (스트리밍)
     
     Args:
         contract_id: 계약서 ID
@@ -772,52 +772,69 @@ async def chatbot_message(
         db: 데이터베이스 세션
         
     Returns:
-        챗봇 응답
+        챗봇 응답 (Server-Sent Events 스트리밍)
     """
-    try:
-        # 계약서 존재 확인
-        contract = db.query(ContractDocument).filter(
-            ContractDocument.contract_id == contract_id
-        ).first()
-        
-        if not contract:
-            raise HTTPException(status_code=404, detail="계약서를 찾을 수 없습니다")
-        
-        # 분류 완료 확인
-        classification = db.query(ClassificationResult).filter(
-            ClassificationResult.contract_id == contract_id
-        ).first()
-        
-        if not classification:
-            raise HTTPException(status_code=400, detail="계약서 분류가 완료되지 않았습니다")
-        
-        # ChatbotOrchestrator 초기화
-        from backend.chatbot_agent.agent import ChatbotOrchestrator
-        from openai import AzureOpenAI
-        import os
-        
-        azure_client = AzureOpenAI(
-            api_key=os.getenv('AZURE_OPENAI_API_KEY'),
-            azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-            api_version="2024-02-01"
-        )
-        
-        orchestrator = ChatbotOrchestrator(azure_client=azure_client)
-        
-        # 메시지 처리
-        response = orchestrator.process_message(
-            contract_id=contract_id,
-            user_message=message,
-            session_id=session_id
-        )
-        
-        return response.to_dict()
+    from fastapi.responses import StreamingResponse
+    import json
+    import asyncio
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"챗봇 메시지 처리 중 오류: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    async def generate_stream():
+        try:
+            # 계약서 존재 확인
+            contract = db.query(ContractDocument).filter(
+                ContractDocument.contract_id == contract_id
+            ).first()
+            
+            if not contract:
+                yield f"data: {json.dumps({'error': '계약서를 찾을 수 없습니다'})}\n\n"
+                return
+            
+            # 분류 완료 확인
+            classification = db.query(ClassificationResult).filter(
+                ClassificationResult.contract_id == contract_id
+            ).first()
+            
+            if not classification:
+                yield f"data: {json.dumps({'error': '계약서 분류가 완료되지 않았습니다'})}\n\n"
+                return
+            
+            # ChatbotOrchestrator 초기화
+            from backend.chatbot_agent.agent import ChatbotOrchestrator
+            from openai import AzureOpenAI
+            import os
+            
+            azure_client = AzureOpenAI(
+                api_key=os.getenv('AZURE_OPENAI_API_KEY'),
+                azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
+                api_version="2024-02-01"
+            )
+            
+            orchestrator = ChatbotOrchestrator(azure_client=azure_client)
+            
+            # 스트리밍 메시지 처리
+            async for chunk in orchestrator.process_message_stream(
+                contract_id=contract_id,
+                user_message=message,
+                session_id=session_id
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+                await asyncio.sleep(0)  # 이벤트 루프에 제어권 양보
+            
+            # 완료 신호
+            yield "data: [DONE]\n\n"
+        
+        except Exception as e:
+            logger.exception(f"챗봇 메시지 처리 중 오류: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.get("/api/chatbot/{contract_id}/status")
