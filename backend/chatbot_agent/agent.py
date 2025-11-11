@@ -426,11 +426,19 @@ class ChatbotOrchestrator:
                     if isinstance(topic_results, list):
                         for item in topic_results:
                             if isinstance(item, dict):
+                                parent_id = item.get("parent_id", "")
                                 parent_title = item.get("parent_title", "")
                                 chunk_text = item.get("chunk_text", "")
-                                context_parts.append(f"[{parent_title}]\n{chunk_text}")
+                                
+                                # parent_id에서 조 번호 포함 (예: "제5조 대가 및 지급조건")
+                                if parent_id and parent_title:
+                                    context_parts.append(f"[{parent_id} {parent_title}]\n{chunk_text}")
+                                elif parent_title:
+                                    context_parts.append(f"[{parent_title}]\n{chunk_text}")
+                                else:
+                                    context_parts.append(chunk_text)
                 
-                # ArticleIndexTool, ArticleTitleTool 결과
+                # ArticleIndexTool, ArticleTitleTool 결과 - 조항
                 matched_articles = result.data.get("matched_articles", [])
                 for article in matched_articles:
                     if isinstance(article, dict):
@@ -441,6 +449,18 @@ class ChatbotOrchestrator:
                         if isinstance(content, list):
                             content_text = "\n".join(content)
                             context_parts.append(f"[제{article_no}조 {title}]\n{content_text}")
+                
+                # ArticleIndexTool 결과 - 별지
+                matched_exhibits = result.data.get("matched_exhibits", [])
+                for exhibit in matched_exhibits:
+                    if isinstance(exhibit, dict):
+                        title = exhibit.get("title", "")
+                        exhibit_no = exhibit.get("exhibit_no", "")
+                        content = exhibit.get("content", [])
+                        
+                        if isinstance(content, list):
+                            content_text = "\n".join(content)
+                            context_parts.append(f"[별지{exhibit_no} {title}]\n{content_text}")
         
         return "\n\n".join(context_parts)
     
@@ -464,6 +484,7 @@ class ChatbotOrchestrator:
                 continue
             
             if isinstance(result.data, dict):
+                # 조항 출처
                 matched_articles = result.data.get("matched_articles", [])
                 for article in matched_articles:
                     if isinstance(article, dict):
@@ -473,6 +494,20 @@ class ChatbotOrchestrator:
                         
                         sources.append({
                             "article_title": f"제{article_no}조 {title}" if article_no else title,
+                            "article_content": content if isinstance(content, list) else [],
+                            "tool": result.tool_name
+                        })
+                
+                # 별지 출처
+                matched_exhibits = result.data.get("matched_exhibits", [])
+                for exhibit in matched_exhibits:
+                    if isinstance(exhibit, dict):
+                        exhibit_no = exhibit.get("exhibit_no", "")
+                        title = exhibit.get("title", "")
+                        content = exhibit.get("content", [])
+                        
+                        sources.append({
+                            "article_title": f"별지{exhibit_no} {title}" if title else f"별지{exhibit_no}",
                             "article_content": content if isinstance(content, list) else [],
                             "tool": result.tool_name
                         })
