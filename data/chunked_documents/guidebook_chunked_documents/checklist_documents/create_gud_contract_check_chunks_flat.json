@@ -60,7 +60,7 @@
     "global_id": "urn:std:create:art:005"
   },
   {
-    "check_text": "대상데이터의 취득･수집방법이 구체적으로 기재되어 있는가?",
+    "check_text": "대상데이터의 취득수집방법이 구체적으로 기재되어 있는가?",
     "reference": "제5조 (72쪽)",
     "global_id": "urn:std:create:art:005"
   },
@@ -115,7 +115,7 @@
     "global_id": "urn:std:create:art:011"
   },
   {
-    "check_text": "대상데이터등의 관리상황에 대한 서면통지를 요구하거나 대상데이터의 관리방법･보관방법의 개선을 요구하고 있는가?",
+    "check_text": "대상데이터등의 관리상황에 대한 서면통지를 요구하거나 대상데이터의 관리방법보관방법의 개선을 요구하고 있는가?",
     "reference": "제11조 (80쪽)",
     "global_id": "urn:std:create:art:011"
   },
@@ -135,17 +135,17 @@
     "global_id": "urn:std:create:art:012"
   },
   {
-    "check_text": "해제･해지사유는 명확히 기재하고 있는가?",
+    "check_text": "해제해지사유는 명확히 기재하고 있는가?",
     "reference": "제13조 (81쪽)",
     "global_id": "urn:std:create:art:013"
   },
   {
-    "check_text": "해제･해지절차는 즉시해지, 자동해지, 최고 후 해지 등 그 사유에 따라 절차가 명확히 기재되어 있는가?",
+    "check_text": "해제해지절차는 즉시해지, 자동해지, 최고 후 해지 등 그 사유에 따라 절차가 명확히 기재되어 있는가?",
     "reference": "제13조 (81쪽)",
     "global_id": "urn:std:create:art:013"
   },
   {
-    "check_text": "해제･해지의 효과를 명확히 정하고 있는가?",
+    "check_text": "해제해지의 효과를 명확히 정하고 있는가?",
     "reference": "제13조 (81쪽)",
     "global_id": "urn:std:create:art:013"
   },
@@ -215,12 +215,12 @@
     "global_id": "urn:std:create:art:019"
   },
   {
-    "check_text": "계약상 지위 또는 권리･의무를 제3자에게 양도, 이전, 담보제공 등 처분의 금지에 대해 규정하고 있는가?",
+    "check_text": "계약상 지위 또는 권리의무를 제3자에게 양도, 이전, 담보제공 등 처분의 금지에 대해 규정하고 있는가?",
     "reference": "제22조 (84쪽)",
     "global_id": "urn:std:create:art:022"
   },
   {
-    "check_text": "계약상 지위 또는 권리･의무를 제3자에게 양도, 이전, 담보제공 등 처분할 수 있는 방법에 대해 규정하고 있는가?",
+    "check_text": "계약상 지위 또는 권리의무를 제3자에게 양도, 이전, 담보제공 등 처분할 수 있는 방법에 대해 규정하고 있는가?",
     "reference": "제22조 (84쪽)",
     "global_id": "urn:std:create:art:022"
   },
