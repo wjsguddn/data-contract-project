@@ -449,10 +449,178 @@ class ChatbotOrchestrator:
                 matched_articles = result.data.get("matched_articles", [])
                 for article in matched_articles:
                     if isinstance(article, dict):
+                        article_no = article.get("article_no", "")
+                        title = article.get("title", "")
+                        content = article.get("content", [])
+                        
                         sources.append({
-                            "article_no": article.get("article_no"),
-                            "title": article.get("title", ""),
+                            "article_title": f"제{article_no}조 {title}" if article_no else title,
+                            "article_content": content if isinstance(content, list) else [],
                             "tool": result.tool_name
                         })
         
         return sources
+    
+    async def process_message_stream(
+        self,
+        contract_id: str,
+        user_message: str,
+        session_id: str = None
+    ):
+        """
+        사용자 메시지 처리 (스트리밍)
+        
+        Args:
+            contract_id: 계약서 ID
+            user_message: 사용자 메시지
+            session_id: 세션 ID (선택)
+            
+        Yields:
+            dict: 스트리밍 청크 {'token': str} 또는 {'sources': list}
+        """
+        start_time = time.time()
+        
+        try:
+            # 세션 ID 생성
+            if not session_id:
+                session_id = self.context_manager.create_session_id(contract_id)
+            
+            logger.info(f"스트리밍 메시지 처리 시작: {contract_id}, session={session_id}")
+            
+            # 1. 질문 범위 검증
+            scope_result = self.scope_validator.validate(user_message)
+            if not scope_result.is_valid:
+                error_msg = "죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서 조항, 내용, 권리, 의무 등에 대해 질문해주세요."
+                for char in error_msg:
+                    yield {"token": char}
+                return
+            
+            # 2. 대화 컨텍스트 로드
+            conversation_history = self.context_manager.load_history(contract_id, session_id)
+            
+            # 3. 도구 계획 수립
+            tool_plan = self.tool_planner.plan(user_message, conversation_history)
+            
+            # 4. 도구 실행
+            tool_results = self._execute_tools(contract_id, tool_plan, user_message)
+            
+            if not tool_results:
+                error_msg = "관련 정보를 찾을 수 없습니다. 다른 방식으로 질문해주세요."
+                for char in error_msg:
+                    yield {"token": char}
+                return
+            
+            # 5. 참조 해결
+            additional_results = self.reference_resolver.resolve_references(
+                contract_id=contract_id,
+                tool_results=tool_results,
+                user_message=user_message,
+                max_depth=2
+            )
+            
+            if additional_results:
+                tool_results.extend(additional_results)
+            
+            # 6. 스트리밍 응답 생성
+            full_response = ""
+            async for chunk in self._generate_response_stream(
+                user_message=user_message,
+                tool_results=tool_results,
+                conversation_history=conversation_history
+            ):
+                full_response += chunk
+                yield {"token": chunk}
+            
+            # 7. 출처 정보 전송
+            sources = self._extract_sources_from_tools(tool_results)
+            yield {"sources": sources}
+            
+            # 8. 대화 히스토리 저장
+            self.context_manager.save_message(
+                contract_id=contract_id,
+                session_id=session_id,
+                role="user",
+                content=user_message
+            )
+            
+            self.context_manager.save_message(
+                contract_id=contract_id,
+                session_id=session_id,
+                role="assistant",
+                content=full_response
+            )
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"스트리밍 메시지 처리 완료: {elapsed_time:.2f}초")
+        
+        except Exception as e:
+            logger.error(f"스트리밍 메시지 처리 실패: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            error_msg = "죄송합니다. 처리 중 오류가 발생했습니다. 다시 시도해주세요."
+            for char in error_msg:
+                yield {"token": char}
+    
+    async def _generate_response_stream(
+        self,
+        user_message: str,
+        tool_results: List[ToolResult],
+        conversation_history: List[Dict[str, str]]
+    ):
+        """
+        LLM으로 스트리밍 응답 생성
+        
+        Args:
+            user_message: 사용자 메시지
+            tool_results: 도구 실행 결과
+            conversation_history: 대화 히스토리
+            
+        Yields:
+            str: 응답 토큰
+        """
+        # 도구 결과를 컨텍스트로 변환
+        context = self._build_context_from_tools(tool_results)
+        
+        # 시스템 프롬프트
+        system_prompt = """당신은 계약서 질의응답 전문가입니다.
+
+규칙:
+1. 제공된 계약서 내용만을 기반으로 답변하세요
+2. 계약서에 없는 내용은 추측하지 마세요
+3. 참조한 조항의 출처를 명시하세요 (예: "제5조에 따르면...")
+4. 명확하고 이해하기 쉽게 답변하세요
+5. 불확실한 경우 솔직히 말하세요"""
+        
+        # 사용자 프롬프트
+        user_prompt = f"""계약서 내용:
+{context}
+
+질문: {user_message}
+
+위 계약서 내용을 바탕으로 질문에 답변해주세요."""
+
+        # LLM 호출 (스트리밍)
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
+        
+        # 대화 히스토리 추가 (최근 5개만)
+        if conversation_history:
+            messages.extend(conversation_history[-5:])
+        
+        messages.append({"role": "user", "content": user_prompt})
+        
+        stream = self.azure_client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.3,
+            max_tokens=1000,
+            stream=True
+        )
+        
+        for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield delta.content
