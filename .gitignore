@@ -85,6 +85,14 @@ logs/*
 !data/README.md
 !data/.gitkeep
 data/parsed_user_contracts/*.json
+data/user_contract_indexes/*
+!data/user_contract_indexes/faiss
+data/user_contract_indexes/faiss/*
+!data/user_contract_indexes/faiss/.gitkeep
+!data/user_contract_indexes/whoosh
+data/user_contract_indexes/whoosh/*
+!data/user_contract_indexes/whoosh/.gitkeep
+
 
 # Docker
 .dockerignore

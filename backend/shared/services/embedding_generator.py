@@ -283,18 +283,58 @@ class EmbeddingGenerator:
             logger.info("임베딩이 최신 버전이므로 재생성을 건너뜁니다.")
             return existing
 
+        preamble = parsed_data.get("preamble", [])
         articles = parsed_data.get("articles", [])
-        if not articles:
-            logger.warning("조항 정보가 없어 임베딩을 생성하지 않습니다.")
+        exhibits = parsed_data.get("exhibits", [])
+
+        if not preamble and not articles and not exhibits:
+            logger.warning("전문, 조항 및 별지 정보가 없어 임베딩을 생성하지 않습니다.")
             metadata = self._build_metadata()
-            return {"metadata": metadata, "article_embeddings": []}
+            return {"metadata": metadata, "preamble_embeddings": None, "article_embeddings": [], "exhibit_embeddings": []}
+
+        # Preamble 임베딩 생성
+        preamble_embeddings = self._generate_preamble_embeddings(contract_id, preamble)
+
+        # Articles 임베딩 생성
+        article_embeddings = self._generate_article_embeddings(contract_id, articles)
+
+        # Exhibits 임베딩 생성
+        exhibit_embeddings = self._generate_exhibit_embeddings(contract_id, exhibits)
+
+        embeddings = {
+            "metadata": self._build_metadata(),
+            "preamble_embeddings": preamble_embeddings,
+            "article_embeddings": article_embeddings,
+            "exhibit_embeddings": exhibit_embeddings,
+        }
+
+        return embeddings
+
+    def _generate_article_embeddings(
+        self,
+        contract_id: str,
+        articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Articles 임베딩 생성 (기존 로직 분리)
+
+        Args:
+            contract_id: 계약서 ID
+            articles: Articles 배열
+
+        Returns:
+            Article embeddings 배열
+        """
+        if not articles:
+            logger.info("조항 정보가 없어 article 임베딩을 생성하지 않습니다.")
+            return []
 
         title_infos: List[Tuple[int, str]] = []
         sub_item_infos: List[Tuple[int, int, str]] = []
 
         for article in articles:
             article_no = self._safe_int(article.get("number"))
-            title_text = EmbeddingService._normalize_text(article.get("text"))
+            title_text = EmbeddingService._normalize_text(article.get("title"))
 
             if article_no is None:
                 logger.debug("조항 번호가 없어 임베딩 생성을 건너뜁니다: %s", article)
@@ -358,12 +398,159 @@ class EmbeddingGenerator:
                 entry["title_embedding"] = None
             article_embeddings.append(entry)
 
-        embeddings = {
-            "metadata": self._build_metadata(),
-            "article_embeddings": article_embeddings,
-        }
+        return article_embeddings
 
-        return embeddings
+    def _generate_exhibit_embeddings(
+        self,
+        contract_id: str,
+        exhibits: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Exhibits 임베딩 생성 (Articles와 동일한 구조)
+
+        Args:
+            contract_id: 계약서 ID
+            exhibits: Exhibits 배열
+
+        Returns:
+            Exhibit embeddings 배열
+        """
+        if not exhibits:
+            logger.info("별지 정보가 없어 exhibit 임베딩을 생성하지 않습니다.")
+            return []
+
+        title_infos: List[Tuple[int, str]] = []
+        sub_item_infos: List[Tuple[int, int, str]] = []
+
+        for exhibit in exhibits:
+            exhibit_no = self._safe_int(exhibit.get("number"))
+            title_text = EmbeddingService._normalize_text(exhibit.get("title"))
+
+            if exhibit_no is None:
+                logger.debug("별지 번호가 없어 임베딩 생성을 건너뜁니다: %s", exhibit)
+                continue
+
+            if title_text:
+                title_infos.append((exhibit_no, title_text))
+
+            contents = exhibit.get("content", [])
+            if not isinstance(contents, list):
+                continue
+
+            for idx, sub_item in enumerate(contents, start=1):
+                sub_text = self._extract_content_text(sub_item)
+                normalized = EmbeddingService._normalize_text(sub_text)
+                if not normalized:
+                    continue
+                sub_item_infos.append((exhibit_no, idx, normalized))
+
+        exhibit_map: Dict[int, Dict[str, Any]] = {}
+
+        if title_infos:
+            title_vectors = self.embedding_service.get_embeddings_batch(
+                texts=[info[1] for info in title_infos],
+                contract_id=contract_id,
+                component="embedding_generator",
+                batch_size=self._BATCH_SIZE,
+                purpose="exhibit_title",
+            )
+            for info, vector in zip(title_infos, title_vectors):
+                exhibit_no = info[0]
+                entry = exhibit_map.setdefault(
+                    exhibit_no, {"exhibit_no": exhibit_no, "sub_items": []}
+                )
+                entry["title_embedding"] = vector
+
+        if sub_item_infos:
+            sub_vectors = self.embedding_service.get_embeddings_batch(
+                texts=[info[2] for info in sub_item_infos],
+                contract_id=contract_id,
+                component="embedding_generator",
+                batch_size=self._BATCH_SIZE,
+                purpose="exhibit_sub_item",
+            )
+            for info, vector in zip(sub_item_infos, sub_vectors):
+                exhibit_no, sub_idx, _ = info
+                entry = exhibit_map.setdefault(
+                    exhibit_no, {"exhibit_no": exhibit_no, "sub_items": []}
+                )
+                entry["sub_items"].append(
+                    {"index": sub_idx, "text_embedding": vector}
+                )
+
+        # 정렬 및 후처리
+        exhibit_embeddings = []
+        for exhibit_no in sorted(exhibit_map.keys()):
+            entry = exhibit_map[exhibit_no]
+            entry["sub_items"].sort(key=lambda item: item["index"])
+            # title_embedding이 없는 경우 None으로 명시
+            if "title_embedding" not in entry:
+                entry["title_embedding"] = None
+            exhibit_embeddings.append(entry)
+
+        return exhibit_embeddings
+
+    def _generate_preamble_embeddings(
+        self,
+        contract_id: str,
+        preamble: List[Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Preamble 임베딩 생성
+
+        Preamble은 title이 없고, 하위 항목들만 임베딩
+
+        Args:
+            contract_id: 계약서 ID
+            preamble: Preamble 배열 (content items)
+
+        Returns:
+            Preamble embeddings 또는 None
+            {
+                "title_embedding": None,
+                "sub_items": [
+                    {"index": 1, "text_embedding": [...]},
+                    ...
+                ]
+            }
+        """
+        if not preamble:
+            logger.info("전문 정보가 없어 preamble 임베딩을 생성하지 않습니다.")
+            return None
+
+        sub_item_infos: List[Tuple[int, str]] = []
+
+        for idx, sub_item in enumerate(preamble, start=1):
+            sub_text = self._extract_content_text(sub_item)
+            normalized = EmbeddingService._normalize_text(sub_text)
+            if not normalized:
+                continue
+            sub_item_infos.append((idx, normalized))
+
+        if not sub_item_infos:
+            logger.info("전문에 유효한 텍스트가 없어 preamble 임베딩을 생성하지 않습니다.")
+            return None
+
+        # 하위 항목들 임베딩
+        sub_vectors = self.embedding_service.get_embeddings_batch(
+            texts=[info[1] for info in sub_item_infos],
+            contract_id=contract_id,
+            component="embedding_generator",
+            batch_size=self._BATCH_SIZE,
+            purpose="preamble_item",
+        )
+
+        sub_items = []
+        for info, vector in zip(sub_item_infos, sub_vectors):
+            sub_idx = info[0]
+            sub_items.append(
+                {"index": sub_idx, "text_embedding": vector}
+            )
+
+        return {
+            "title_embedding": None,  # preamble은 title이 없음
+            "sub_items": sub_items
+        }
 
     def _build_metadata(self) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
