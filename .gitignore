@@ -102,3 +102,7 @@ data/user_contract_indexes/whoosh/*
 
 # pyenv
 .python-version
+
+# .kiro
+.kiro/specs/contract-chatbot
+.kiro/hooks
