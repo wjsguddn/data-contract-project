@@ -132,6 +132,19 @@ class TokenUsage(Base):
     extra_info = Column(JSON, nullable=True)  # 추가 정보 (예: 작업 상세 내용)
 
 
+class ChatbotSession(Base):
+    """챗봇 대화 세션"""
+    __tablename__ = "chatbot_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, index=True, nullable=False)
+    contract_id = Column(String, index=True, nullable=False)
+    role = Column(String, nullable=False)  # 'user' | 'assistant' | 'system'
+    content = Column(Text, nullable=False)
+    tool_calls = Column(JSON, nullable=True)  # Function Calling 정보
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 # 데이터베이스 초기화 함수
 def init_db():
     """데이터베이스 테이블 생성"""
