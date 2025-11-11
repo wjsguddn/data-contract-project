@@ -30,7 +30,7 @@ class ArticleIndexTool(BaseTool):
         조 번호나 별지 번호로 계약서 조항을 조회합니다.
         
         사용 시기:
-        - 사용자가 "2조", "제5조", "별지2" 등 명확한 인덱스를 언급한 경우
+        - 사용자가 사용자 계약서의 내용에 있어서 "2조", "제5조", "별지2" 등 명확한 "조"나 "별지"에 대한 인덱스 정보를 명시한 경우
         
         입력:
         - article_numbers: 조 번호 목록 (예: [1, 5, 10])
@@ -137,7 +137,7 @@ class ArticleIndexTool(BaseTool):
                             "reason": "조항을 찾을 수 없습니다"
                         })
             
-            # 별지 번호 조회 (현재 parsed_data에 별지 구조 없음 - 향후 확장)
+            # 별지 번호 조회
             if exhibit_numbers:
                 exhibits = parsed_data.get("exhibits", [])
                 
