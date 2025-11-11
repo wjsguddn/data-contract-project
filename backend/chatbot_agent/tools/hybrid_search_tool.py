@@ -8,7 +8,7 @@ HybridSearchTool - 하이브리드 검색 도구
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from backend.chatbot_agent.tools.base import BaseTool
 from backend.chatbot_agent.models import ToolResult
@@ -40,16 +40,16 @@ class HybridSearchTool(BaseTool):
         self.kb_loader = get_knowledge_base_loader()
         
         # 챗봇용 가중치 설정
-        self.dense_weight = 0.85  # Dense 검색 가중치
-        self.text_weight = 0.8    # 본문 가중치 (제목보다 높게)
-        self.title_weight = 0.2   # 제목 가중치
+        self.dense_weight = 0.85  # Dense 검색 가중치 (RRF에서는 미사용)
+        self.text_weight = 0.6    # 본문 가중치
+        self.title_weight = 0.4   # 제목 가중치
         
         # 챗봇용 top_k 설정
         self.top_k = 5  # 최종 반환 개수
         self.dense_top_k = 20  # Dense 검색 개수
         self.sparse_top_k = 20  # Sparse 검색 개수
         
-        logger.info(f"HybridSearchTool 초기화 (Dense: {self.dense_weight}, Text: {self.text_weight})")
+        logger.info(f"HybridSearchTool 초기화 (RRF 모드, 본문:제목 = {self.text_weight}:{self.title_weight})")
     
     @property
     def name(self) -> str:
@@ -152,7 +152,9 @@ class HybridSearchTool(BaseTool):
                 # 쿼리별 검색 결과 수집
                 topic_results = []
                 
-                for query in queries:
+                for query_idx, query in enumerate(queries, 1):
+                    logger.info(f"  쿼리 {query_idx}/{len(queries)}: '{query[:50]}...'")
+                    
                     # 하이브리드 검색 (제목/본문 분리)
                     search_results = searcher.search(
                         text_query=query,
@@ -162,6 +164,26 @@ class HybridSearchTool(BaseTool):
                         sparse_top_k=self.sparse_top_k,
                         contract_id=contract_id
                     )
+                    
+                    # 쿼리별 결과 로깅
+                    if search_results:
+                        logger.info(f"    → {len(search_results)}개 청크 매칭")
+                        for rank, result in enumerate(search_results[:3], 1):  # 상위 3개만
+                            chunk = result.get("chunk", {})
+                            chunk_id = chunk.get("id", "unknown")
+                            score = result.get("score", 0.0)
+                            
+                            # RRF 모드인 경우 순위 정보 표시
+                            if "dense_rank" in result and "sparse_rank" in result:
+                                d_rank = result.get("dense_rank", 0)
+                                s_rank = result.get("sparse_rank", 0)
+                                logger.info(f"      {rank}. {chunk_id}: RRF={score:.4f} (Dense:{d_rank}위, Sparse:{s_rank}위)")
+                            else:
+                                dense_score = result.get("dense_score", 0.0)
+                                sparse_score = result.get("sparse_score", 0.0)
+                                logger.info(f"      {rank}. {chunk_id}: {score:.4f} (D:{dense_score:.3f}, S:{sparse_score:.3f})")
+                    else:
+                        logger.warning(f"    → 매칭 결과 없음")
                     
                     # 결과 변환 (청크 정보 + 부모 조항 정보)
                     for result in search_results:
@@ -180,14 +202,27 @@ class HybridSearchTool(BaseTool):
                             "parent_title": parent_info.get("title", ""),
                             "score": result.get("score", 0.0),
                             "dense_score": result.get("dense_score", 0.0),
-                            "sparse_score": result.get("sparse_score", 0.0)
+                            "sparse_score": result.get("sparse_score", 0.0),
+                            "dense_rank": result.get("dense_rank", 0),
+                            "sparse_rank": result.get("sparse_rank", 0)
                         })
                 
                 # 중복 제거 및 점수 순 정렬
                 unique_results = self._deduplicate_results(topic_results)
-                results_by_topic[topic_name] = unique_results[:self.top_k]
+                final_results = unique_results[:self.top_k]
+                results_by_topic[topic_name] = final_results
+                
+                # 최종 결과 로깅
+                logger.info(f"  주제 '{topic_name}' 최종 결과: {len(topic_results)}개 → 중복제거 {len(unique_results)}개 → Top-{self.top_k} {len(final_results)}개")
+                if final_results:
+                    logger.info(f"  최종 Top-{len(final_results)} 청크:")
+                    for rank, result in enumerate(final_results, 1):
+                        chunk_id = result.get("chunk_id", "unknown")
+                        parent_id = result.get("parent_id", "unknown")
+                        score = result.get("score", 0.0)
+                        logger.info(f"    {rank}. {chunk_id} ({parent_id}): {score:.4f}")
             
-            logger.info(f"하이브리드 검색 완료: {len(results_by_topic)}개 주제")
+            logger.info(f"하이브리드 검색 완료: {len(results_by_topic)}개 주제, 총 {sum(len(r) for r in results_by_topic.values())}개 청크 반환")
             
             return ToolResult(
                 success=True,
@@ -242,10 +277,17 @@ class HybridSearchTool(BaseTool):
                 logger.error(f"청크 메타데이터를 로드할 수 없습니다: {contract_id}")
                 return None
             
-            # HybridSearcher 초기화
+            # mapping.json 로드
+            mapping = self._load_mapping(contract_id)
+            if not mapping:
+                logger.warning(f"mapping.json을 로드할 수 없습니다: {contract_id}")
+                # mapping 없이도 동작하도록 (하위 호환성)
+            
+            # HybridSearcher 초기화 (RRF 사용)
             searcher = HybridSearcher(
                 azure_client=self.azure_client,
-                dense_weight=self.dense_weight
+                dense_weight=self.dense_weight,  # RRF에서는 사용 안 함
+                fusion_method="rrf"  # 챗봇은 RRF 사용
             )
             
             # 필드 가중치 설정
@@ -263,11 +305,43 @@ class HybridSearchTool(BaseTool):
                 whoosh_indexer=whoosh_indexer
             )
             
-            logger.info(f"사용자 계약서 인덱스 로드 완료: {contract_id}")
+            # mapping 설정
+            if mapping:
+                searcher.set_mapping(mapping)
+            
+            logger.info(f"사용자 계약서 인덱스 로드 완료 (RRF 모드): {contract_id}")
             return searcher
         
         except Exception as e:
             logger.error(f"인덱스 로드 실패: {e}")
+            return None
+    
+    def _load_mapping(self, contract_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        mapping.json 로드
+        
+        Args:
+            contract_id: 계약서 ID
+            
+        Returns:
+            mapping 리스트 또는 None
+        """
+        try:
+            import json
+            mapping_path = Path("data/user_contract_indexes/faiss") / f"{contract_id}_mapping.json"
+            
+            if not mapping_path.exists():
+                logger.warning(f"mapping 파일이 존재하지 않습니다: {mapping_path}")
+                return None
+            
+            with open(mapping_path, 'r', encoding='utf-8') as f:
+                mapping = json.load(f)
+            
+            logger.info(f"mapping 로드 완료: {len(mapping)}개 항목")
+            return mapping
+        
+        except Exception as e:
+            logger.error(f"mapping 로드 실패: {e}")
             return None
     
     def _load_chunks_from_db(self, contract_id: str) -> List[Dict[str, Any]]:
@@ -298,24 +372,24 @@ class HybridSearchTool(BaseTool):
                 article_no = article.get("number")
                 title = article.get("title", "")
                 content = article.get("content", [])
-                
-                # 조 본문 청크
+
+                # 조 본문 청크 (Whoosh 인덱스와 동일한 형식으로 변경)
                 chunks.append({
-                    "id": f"{article_id}_title",
+                    "id": f"제{article_no}조",  # 변경: article_id_title → 제N조
                     "parent_id": f"제{article_no}조",
                     "title": title,
                     "text_norm": article.get("text", ""),
-                    "unit_type": "articleText"
+                    "unit_type": "articleTitle"  # 변경: articleText → articleTitle
                 })
-                
-                # 하위항목 청크
+
+                # 하위항목 청크 (Whoosh 인덱스와 동일한 형식으로 변경)
                 for idx, sub_item in enumerate(content, 1):
                     chunks.append({
-                        "id": f"{article_id}_sub_{idx}",
+                        "id": f"제{article_no}조 내용{idx}",  # 변경: article_id_sub_idx → 제N조 내용M
                         "parent_id": f"제{article_no}조",
                         "title": title,
                         "text_norm": sub_item,
-                        "unit_type": "clause"
+                        "unit_type": "articleContent"  # 변경: clause → articleContent
                     })
             
             return chunks
@@ -385,14 +459,18 @@ class HybridSearchTool(BaseTool):
         Returns:
             중복 제거된 결과 (점수 순 정렬)
         """
+        original_count = len(results)
+        
         # chunk_id 기준으로 중복 제거 (최고 점수 유지)
         unique_map = {}
+        duplicates_removed = 0
         
         for result in results:
             chunk_id = result.get("chunk_id")
             if chunk_id not in unique_map:
                 unique_map[chunk_id] = result
             else:
+                duplicates_removed += 1
                 # 기존 점수와 비교하여 높은 점수 유지
                 if result.get("score", 0) > unique_map[chunk_id].get("score", 0):
                     unique_map[chunk_id] = result
@@ -403,5 +481,8 @@ class HybridSearchTool(BaseTool):
             key=lambda x: x.get("score", 0),
             reverse=True
         )
+        
+        if duplicates_removed > 0:
+            logger.debug(f"    중복 제거: {original_count}개 → {len(sorted_results)}개 ({duplicates_removed}개 제거)")
         
         return sorted_results

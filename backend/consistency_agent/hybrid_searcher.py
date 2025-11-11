@@ -5,7 +5,7 @@ FAISS + Whoosh 하이브리드 검색 (0.85 / 0.15 가중치)
 
 import logging
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 from openai import AzureOpenAI
 from backend.shared.database import SessionLocal, TokenUsage
@@ -26,17 +26,25 @@ class HybridSearcher:
         self,
         azure_client: AzureOpenAI,
         embedding_model: str = "text-embedding-3-large",
-        dense_weight: float = 0.85
+        dense_weight: float = 0.85,
+        fusion_method: str = "weighted"
     ):
         """
         Args:
             azure_client: Azure OpenAI 클라이언트
             embedding_model: 임베딩 모델명
-            dense_weight: Dense 검색 가중치 (기본 0.85)
+            dense_weight: Dense 검색 가중치 (기본 0.85, fusion_method="weighted"일 때만 사용)
+            fusion_method: 융합 방법 ("weighted" 또는 "rrf")
+                - "weighted": 정규화 후 가중합 (기본값, A1 노드용)
+                - "rrf": Reciprocal Rank Fusion (챗봇용)
         """
         self.client = azure_client
         self.embedding_model = embedding_model
         self._dense_weight = dense_weight
+        self.fusion_method = fusion_method
+        
+        # RRF 파라미터
+        self.rrf_k = 60  # RRF 상수 (일반적으로 60이 최적)
         
         # 필드 가중치 (본문:제목 = 7:3)
         self.text_weight = 0.7
@@ -49,8 +57,12 @@ class HybridSearcher:
         self.chunks = None
         self.whoosh_indexer = None
         
-        logger.info(f"HybridSearcher 초기화 (Dense: {self.dense_weight:.2f}, Sparse: {self.sparse_weight:.2f})")
-        logger.info(f"필드 가중치 (본문: {self.text_weight:.2f}, 제목: {self.title_weight:.2f})")
+        logger.info(f"HybridSearcher 초기화 (Fusion: {self.fusion_method})")
+        if fusion_method == "weighted":
+            logger.info(f"  가중치 - Dense: {self.dense_weight:.2f}, Sparse: {self.sparse_weight:.2f}")
+        else:
+            logger.info(f"  RRF 파라미터 - k: {self.rrf_k}")
+        logger.info(f"  필드 가중치 - 본문: {self.text_weight:.2f}, 제목: {self.title_weight:.2f}")
     
     def load_indexes(
         self,
@@ -80,6 +92,7 @@ class HybridSearcher:
         self.faiss_index_title = faiss_index_title
         self.chunks = chunks
         self.whoosh_indexer = whoosh_indexer
+        self.mapping = None  # 매핑 정보 (사용자 계약서용)
         
         # 하위 호환성을 위해 faiss_index도 설정 (deprecated)
         self.faiss_index = faiss_index_text
@@ -87,6 +100,16 @@ class HybridSearcher:
         logger.info(f"인덱스 로드 완료: {len(chunks)} chunks")
         logger.info(f"  - text_norm 인덱스: {faiss_index_text.ntotal if faiss_index_text else 0} vectors")
         logger.info(f"  - title 인덱스: {faiss_index_title.ntotal if faiss_index_title else 0} vectors")
+    
+    def set_mapping(self, mapping: List[Dict]):
+        """
+        FAISS 인덱스 → 청크 매핑 정보 설정 (사용자 계약서용)
+        
+        Args:
+            mapping: 매핑 정보 리스트
+        """
+        self.mapping = mapping
+        logger.info(f"매핑 정보 설정: {len(mapping)}개 항목")
     
     @property
     def dense_weight(self) -> float:
@@ -181,11 +204,13 @@ class HybridSearcher:
                 )
 
                 for idx, distance in zip(indices[0], distances[0]):
-                    if idx < len(self.chunks):
-                        chunk_id = self.chunks[idx]['id']
+                    # mapping 사용 (사용자 계약서) 또는 직접 인덱싱 (표준계약서)
+                    chunk = self._get_chunk_by_text_index(int(idx))
+                    if chunk:
+                        chunk_id = chunk['id']
                         similarity = 1.0 / (1.0 + float(distance))
                         text_results[chunk_id] = {
-                            'chunk': self.chunks[idx],
+                            'chunk': chunk,
                             'text_score': similarity
                         }
 
@@ -204,11 +229,13 @@ class HybridSearcher:
                 )
 
                 for idx, distance in zip(indices[0], distances[0]):
-                    if idx < len(self.chunks):
-                        chunk_id = self.chunks[idx]['id']
+                    # mapping 사용 (사용자 계약서) 또는 직접 인덱싱 (표준계약서)
+                    chunk = self._get_chunk_by_title_index(int(idx))
+                    if chunk:
+                        chunk_id = chunk['id']
                         similarity = 1.0 / (1.0 + float(distance))
                         title_results[chunk_id] = {
-                            'chunk': self.chunks[idx],
+                            'chunk': chunk,
                             'title_score': similarity
                         }
 
@@ -358,13 +385,37 @@ class HybridSearcher:
         """
         Dense와 Sparse 검색 결과를 융합
 
+        융합 방법:
+        - "weighted": 정규화 후 가중합 (Adaptive Weighting 적용)
+        - "rrf": Reciprocal Rank Fusion (순위 기반)
+
+        Args:
+            dense_results: Dense 검색 결과 (text_score, title_score 포함)
+            sparse_results: Sparse 검색 결과 (text_score, title_score 포함)
+
+        Returns:
+            융합된 검색 결과 리스트
+        """
+        if self.fusion_method == "rrf":
+            return self._fuse_scores_rrf(dense_results, sparse_results)
+        else:
+            return self._fuse_scores_weighted(dense_results, sparse_results)
+    
+    def _fuse_scores_weighted(
+        self,
+        dense_results: List[Dict[str, Any]],
+        sparse_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        가중합 기반 융합 (기존 방식)
+
         Adaptive Weighting:
         - Sparse 결과가 없으면 자동으로 Dense 가중치를 1.0으로 조정
         - 이를 통해 0.85 상한 문제 해결
 
         Args:
-            dense_results: Dense 검색 결과 (text_score, title_score 포함)
-            sparse_results: Sparse 검색 결과 (text_score, title_score 포함)
+            dense_results: Dense 검색 결과
+            sparse_results: Sparse 검색 결과
 
         Returns:
             융합된 검색 결과 리스트
@@ -427,6 +478,13 @@ class HybridSearcher:
             logger.info(f"  Sparse-Dense 중복: {sparse_contribution_count}/{len(chunk_scores)} ({overlap_rate:.1f}%)")
             logger.info(f"  가중치 - Dense: {effective_dense_weight:.2f}, Sparse: {effective_sparse_weight:.2f}")
 
+            # 디버깅: chunk_id 샘플 비교
+            if overlap_rate == 0.0:
+                dense_ids = list(dense_raw_scores.keys())[:3]
+                sparse_ids = list(sparse_raw_scores.keys())[:3]
+                logger.warning(f"  [디버깅] Dense chunk_id 샘플: {dense_ids}")
+                logger.warning(f"  [디버깅] Sparse chunk_id 샘플: {sparse_ids}")
+
         # 3. 가중합 계산 (Adaptive Weighting 적용)
         fused_results = []
         for chunk_id, data in chunk_scores.items():
@@ -451,6 +509,94 @@ class HybridSearcher:
         # 4. 최종 점수로 정렬
         fused_results.sort(key=lambda x: x['score'], reverse=True)
 
+        return fused_results
+    
+    def _fuse_scores_rrf(
+        self,
+        dense_results: List[Dict[str, Any]],
+        sparse_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        RRF (Reciprocal Rank Fusion) 기반 융합
+
+        순위 기반 융합으로 점수 스케일에 독립적입니다.
+        RRF 공식: score(d) = Σ 1/(k + rank_i(d))
+
+        Args:
+            dense_results: Dense 검색 결과
+            sparse_results: Sparse 검색 결과
+
+        Returns:
+            융합된 검색 결과 리스트
+        """
+        # 1. 순위 맵 생성 (1-based ranking)
+        dense_ranks = {r['chunk']['id']: idx + 1 for idx, r in enumerate(dense_results)}
+        sparse_ranks = {r['chunk']['id']: idx + 1 for idx, r in enumerate(sparse_results)}
+        
+        # 2. 청크 맵 생성 (메타데이터 보존)
+        chunk_map = {}
+        for result in dense_results:
+            chunk_map[result['chunk']['id']] = result['chunk']
+        for result in sparse_results:
+            if result['chunk']['id'] not in chunk_map:
+                chunk_map[result['chunk']['id']] = result['chunk']
+        
+        # 3. 모든 청크 ID 수집
+        all_chunk_ids = set(dense_ranks.keys()) | set(sparse_ranks.keys())
+        
+        if not all_chunk_ids:
+            logger.warning("RRF 융합: 검색 결과 없음")
+            return []
+        
+        # 4. RRF 점수 계산
+        rrf_scores = {}
+        
+        for chunk_id in all_chunk_ids:
+            score = 0.0
+            
+            # Dense 기여도
+            if chunk_id in dense_ranks:
+                score += 1.0 / (self.rrf_k + dense_ranks[chunk_id])
+            
+            # Sparse 기여도
+            if chunk_id in sparse_ranks:
+                score += 1.0 / (self.rrf_k + sparse_ranks[chunk_id])
+            
+            rrf_scores[chunk_id] = score
+        
+        # 5. 결과 생성
+        fused_results = []
+        
+        for chunk_id, rrf_score in rrf_scores.items():
+            chunk = chunk_map[chunk_id]
+            
+            # 원본 순위 정보 (디버깅용)
+            dense_rank = dense_ranks.get(chunk_id, 0)
+            sparse_rank = sparse_ranks.get(chunk_id, 0)
+            
+            fused_results.append({
+                'chunk': chunk,
+                'score': rrf_score,
+                'dense_rank': dense_rank,
+                'sparse_rank': sparse_rank,
+                'parent_id': chunk.get('parent_id'),
+                'title': chunk.get('title')
+            })
+        
+        # 6. RRF 점수로 정렬
+        fused_results.sort(key=lambda x: x['score'], reverse=True)
+        
+        # 로깅
+        if fused_results:
+            logger.info(f"  RRF 융합 완료: {len(fused_results)}개 청크")
+            logger.info(f"    Dense 기여: {len(dense_ranks)}개, Sparse 기여: {len(sparse_ranks)}개")
+            
+            # 상위 3개 샘플 로깅
+            for i, result in enumerate(fused_results[:3], 1):
+                d_rank = result['dense_rank']
+                s_rank = result['sparse_rank']
+                logger.debug(f"    {i}. {result['chunk']['id']}: RRF={result['score']:.4f} (D:{d_rank}, S:{s_rank})")
+        
         return fused_results
     
     def search(
@@ -568,6 +714,98 @@ class HybridSearcher:
         
         logger.info(f"필드 가중치 변경: 본문={self.text_weight:.2f}, 제목={self.title_weight:.2f}")
 
+    def _get_chunk_by_text_index(self, text_index: int) -> Optional[Dict]:
+        """
+        text FAISS 인덱스로 청크 조회
+        
+        Args:
+            text_index: text FAISS 인덱스 번호
+            
+        Returns:
+            청크 딕셔너리 또는 None
+        """
+        if self.mapping:
+            # 사용자 계약서: mapping 사용
+            for map_item in self.mapping:
+                if map_item.get('text_index') == text_index:
+                    # mapping에서 청크 정보 재구성
+                    chunk_id = self._build_chunk_id_from_mapping(map_item)
+                    # chunks에서 해당 ID 찾기
+                    for chunk in self.chunks:
+                        if chunk['id'] == chunk_id:
+                            return chunk
+                    return None
+            return None
+        else:
+            # 표준계약서: 직접 인덱싱
+            if text_index < len(self.chunks):
+                return self.chunks[text_index]
+            return None
+    
+    def _get_chunk_by_title_index(self, title_index: int) -> Optional[Dict]:
+        """
+        title FAISS 인덱스로 청크 조회
+        
+        Args:
+            title_index: title FAISS 인덱스 번호
+            
+        Returns:
+            청크 딕셔너리 또는 None
+        """
+        if self.mapping:
+            # 사용자 계약서: mapping 사용
+            for map_item in self.mapping:
+                if map_item.get('title_index') == title_index:
+                    # mapping에서 청크 정보 재구성
+                    chunk_id = self._build_chunk_id_from_mapping(map_item)
+                    # chunks에서 해당 ID 찾기
+                    for chunk in self.chunks:
+                        if chunk['id'] == chunk_id:
+                            return chunk
+                    return None
+            return None
+        else:
+            # 표준계약서: 직접 인덱싱
+            if title_index < len(self.chunks):
+                return self.chunks[title_index]
+            return None
+    
+    def _build_chunk_id_from_mapping(self, map_item: Dict) -> str:
+        """
+        mapping 정보로부터 chunk_id 생성
+        
+        Args:
+            map_item: mapping 항목
+            
+        Returns:
+            chunk_id (예: "제5조", "제5조 내용3", "전문 내용1")
+        """
+        item_type = map_item.get('type')
+        
+        if item_type == 'preamble_content':
+            content_index = map_item.get('content_index')
+            return f"전문 내용{content_index}"
+        
+        elif item_type == 'article_title':
+            article_no = map_item.get('article_no')
+            return f"제{article_no}조"
+        
+        elif item_type == 'article_content':
+            article_no = map_item.get('article_no')
+            content_index = map_item.get('content_index')
+            return f"제{article_no}조 내용{content_index}"
+        
+        elif item_type == 'exhibit_title':
+            exhibit_no = map_item.get('exhibit_no')
+            return f"별지{exhibit_no}"
+        
+        elif item_type == 'exhibit_content':
+            exhibit_no = map_item.get('exhibit_no')
+            content_index = map_item.get('content_index')
+            return f"별지{exhibit_no} 내용{content_index}"
+        
+        return "unknown"
+    
     @staticmethod
     def _ensure_vector(vector) -> np.ndarray:
         """Ensure the embedding vector is a 2D numpy array."""

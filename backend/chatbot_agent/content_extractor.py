@@ -63,7 +63,7 @@ class ContentExtractor:
                 for i, item in enumerate(content)
             ])
             
-            prompt = f"""다음 조항에서 사용자 질문에 답하는데 필요한 하위항목의 인덱스를 선택하세요.
+            prompt = f"""다음 조항에서 사용자 질문에 답하는데 필요한 모든 하위항목의 인덱스를 선택하세요.
 
 조 제목: {article_data.get("title", "")}
 조 내용:
