@@ -752,3 +752,188 @@ async def get_token_usage(contract_id: str, db: Session = Depends(get_db)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+
+@app.post("/api/chatbot/{contract_id}/message")
+async def chatbot_message(
+    contract_id: str,
+    message: str,
+    session_id: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    챗봇 메시지 전송 (스트리밍)
+    
+    Args:
+        contract_id: 계약서 ID
+        message: 사용자 메시지
+        session_id: 세션 ID (선택)
+        db: 데이터베이스 세션
+        
+    Returns:
+        챗봇 응답 (Server-Sent Events 스트리밍)
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+    import asyncio
+    
+    async def generate_stream():
+        try:
+            # 계약서 존재 확인
+            contract = db.query(ContractDocument).filter(
+                ContractDocument.contract_id == contract_id
+            ).first()
+            
+            if not contract:
+                yield f"data: {json.dumps({'error': '계약서를 찾을 수 없습니다'})}\n\n"
+                return
+            
+            # 분류 완료 확인
+            classification = db.query(ClassificationResult).filter(
+                ClassificationResult.contract_id == contract_id
+            ).first()
+            
+            if not classification:
+                yield f"data: {json.dumps({'error': '계약서 분류가 완료되지 않았습니다'})}\n\n"
+                return
+            
+            # ChatbotOrchestrator 초기화
+            from backend.chatbot_agent.agent import ChatbotOrchestrator
+            from openai import AzureOpenAI
+            import os
+            
+            azure_client = AzureOpenAI(
+                api_key=os.getenv('AZURE_OPENAI_API_KEY'),
+                azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
+                api_version="2024-02-01"
+            )
+            
+            orchestrator = ChatbotOrchestrator(azure_client=azure_client)
+            
+            # 스트리밍 메시지 처리
+            async for chunk in orchestrator.process_message_stream(
+                contract_id=contract_id,
+                user_message=message,
+                session_id=session_id
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+                await asyncio.sleep(0)  # 이벤트 루프에 제어권 양보
+            
+            # 완료 신호
+            yield "data: [DONE]\n\n"
+        
+        except Exception as e:
+            logger.exception(f"챗봇 메시지 처리 중 오류: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.get("/api/chatbot/{contract_id}/status")
+async def chatbot_status(contract_id: str, db: Session = Depends(get_db)):
+    """
+    챗봇 활성화 상태 확인
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "active": bool,
+            "reason": str
+        }
+    """
+    try:
+        # 계약서 존재 확인
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract:
+            return {
+                "active": False,
+                "reason": "계약서를 찾을 수 없습니다"
+            }
+        
+        # 분류 완료 확인
+        classification = db.query(ClassificationResult).filter(
+            ClassificationResult.contract_id == contract_id
+        ).first()
+        
+        if not classification:
+            return {
+                "active": False,
+                "reason": "계약서 분류가 완료되지 않았습니다"
+            }
+        
+        return {
+            "active": True,
+            "reason": "챗봇 사용 가능"
+        }
+    
+    except Exception as e:
+        logger.exception(f"챗봇 상태 확인 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/chatbot/{contract_id}/history")
+async def chatbot_history(
+    contract_id: str,
+    session_id: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    대화 히스토리 조회
+    
+    Args:
+        contract_id: 계약서 ID
+        session_id: 세션 ID (선택)
+        db: 데이터베이스 세션
+        
+    Returns:
+        대화 히스토리 리스트
+    """
+    try:
+        # 세션 ID가 없으면 모든 세션 조회
+        if session_id:
+            sessions = db.query(ChatbotSession).filter(
+                ChatbotSession.contract_id == contract_id,
+                ChatbotSession.session_id == session_id
+            ).order_by(ChatbotSession.created_at.asc()).all()
+        else:
+            sessions = db.query(ChatbotSession).filter(
+                ChatbotSession.contract_id == contract_id
+            ).order_by(ChatbotSession.created_at.asc()).all()
+        
+        history = []
+        for session in sessions:
+            history.append({
+                "session_id": session.session_id,
+                "role": session.role,
+                "content": session.content,
+                "created_at": session.created_at.isoformat() if session.created_at else None
+            })
+        
+        return {
+            "contract_id": contract_id,
+            "session_id": session_id,
+            "history": history
+        }
+    
+    except Exception as e:
+        logger.exception(f"대화 히스토리 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

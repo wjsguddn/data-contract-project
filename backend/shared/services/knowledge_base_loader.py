@@ -363,6 +363,54 @@ class KnowledgeBaseLoader:
             "details": details,
             "warnings": warnings
         }
+    
+    def load_user_contract_indexes(self, contract_id: str) -> Optional[tuple]:
+        """
+        사용자 계약서 인덱스 로드 (챗봇용)
+        
+        Args:
+            contract_id: 계약서 ID
+            
+        Returns:
+            (text_index, title_index, whoosh_searcher) 튜플 또는 None
+        """
+        try:
+            # 인덱스 경로
+            user_index_base = Path("data/user_contract_indexes")
+            faiss_text_path = user_index_base / "faiss" / f"{contract_id}_text.faiss"
+            faiss_title_path = user_index_base / "faiss" / f"{contract_id}_title.faiss"
+            whoosh_dir = user_index_base / "whoosh" / contract_id
+            
+            # 인덱스 존재 확인
+            if not faiss_text_path.exists() or not faiss_title_path.exists():
+                logger.error(f"사용자 계약서 FAISS 인덱스가 존재하지 않습니다: {contract_id}")
+                return None
+            
+            if not whoosh_dir.exists():
+                logger.error(f"사용자 계약서 Whoosh 인덱스가 존재하지 않습니다: {contract_id}")
+                return None
+            
+            # FAISS 인덱스 로드
+            text_index = faiss.read_index(str(faiss_text_path))
+            title_index = faiss.read_index(str(faiss_title_path))
+            
+            # Whoosh 인덱스 로드
+            from backend.shared.services.whoosh_searcher import WhooshSearcher
+            whoosh_searcher = WhooshSearcher(whoosh_dir)
+            
+            logger.info(
+                f"사용자 계약서 인덱스 로드 완료: {contract_id}\n"
+                f"  - text: {text_index.ntotal} vectors\n"
+                f"  - title: {title_index.ntotal} vectors"
+            )
+            
+            return (text_index, title_index, whoosh_searcher)
+        
+        except Exception as e:
+            logger.error(f"사용자 계약서 인덱스 로드 실패: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
 
 # 싱글톤 인스턴스

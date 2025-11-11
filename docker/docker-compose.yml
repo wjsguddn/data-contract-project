@@ -71,6 +71,28 @@ services:
     depends_on:
       - redis
 
+
+  # 현재는 FastAPI /api/chatbot 엔드포인트를 통해 작동
+  # 주석 해제해서 독립 서비스로 실행 가능
+  # chatbot-agent:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.chatbot
+  #   env_file:
+  #     - ../.env
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379
+  #     - DATABASE_URL=sqlite:///./data/database/contracts.db
+  #     - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+  #     - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+  #   volumes:
+  #     - ../data:/app/data
+  #     - ../data/search_indexes:/app/search_indexes
+  #     - ../backend:/app/backend
+  #   depends_on:
+  #     - redis
+  #     - fast-api
+
   # docker-compose --profile ingestion run --rm ingestion
   ingestion:
     profiles: ["ingestion"]
