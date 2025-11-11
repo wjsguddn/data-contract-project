@@ -29,8 +29,8 @@ class ReferenceResolver:
         
         # 내부 참조 패턴
         self.internal_reference_patterns = [
-            r"제(\d+)조",           # 제5조
-            r"별지\s*(\d+)",        # 별지1, 별지 2
+            r"제\s*(\d+)\s*조",     # 제5조, 제 5조, 제 5 조
+            r"별지\s*(\d+)",        # 별지1, 별지 1
             r"전\s*항",             # 전 항
             r"다음\s*항",           # 다음 항
             r"제(\d+)항",           # 제1항
@@ -168,8 +168,8 @@ class ReferenceResolver:
         """
         references = []
         
-        # 조 번호 패턴
-        article_pattern = r"제(\d+)조"
+        # 조 번호 패턴 (공백 허용: "제5조", "제 5조", "제 5 조")
+        article_pattern = r"제\s*(\d+)\s*조"
         for match in re.finditer(article_pattern, text):
             article_no = int(match.group(1))
             references.append({
@@ -177,7 +177,7 @@ class ReferenceResolver:
                 "number": article_no
             })
         
-        # 별지 번호 패턴
+        # 별지 번호 패턴 (공백 허용: "별지1", "별지 1")
         exhibit_pattern = r"별지\s*(\d+)"
         for match in re.finditer(exhibit_pattern, text):
             exhibit_no = int(match.group(1))
@@ -250,12 +250,21 @@ class ReferenceResolver:
                             if isinstance(item, dict):
                                 texts.append(item.get("chunk_text", ""))
                 
-                # ArticleIndexTool, ArticleTitleTool 결과
+                # ArticleIndexTool, ArticleTitleTool 결과 - 조항
                 matched_articles = result.data.get("matched_articles", [])
                 for article in matched_articles:
                     if isinstance(article, dict):
                         texts.append(article.get("title", ""))
                         content = article.get("content", [])
+                        if isinstance(content, list):
+                            texts.extend(content)
+                
+                # ArticleIndexTool 결과 - 별지
+                matched_exhibits = result.data.get("matched_exhibits", [])
+                for exhibit in matched_exhibits:
+                    if isinstance(exhibit, dict):
+                        texts.append(exhibit.get("title", ""))
+                        content = exhibit.get("content", [])
                         if isinstance(content, list):
                             texts.extend(content)
         
