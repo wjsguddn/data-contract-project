@@ -575,7 +575,7 @@ class ArticleMatcher:
         # 임계값 필터링 (낮은 점수 제거)
         filtered_scores = []
         for article in article_scores:
-            if article['score'] >= 0.5:  # 후보 최소 점수 0.5
+            if article['score'] >= 0.7:  # 후보 최소 점수 0.5
                 filtered_scores.append(article)
             else:
                 logger.debug(f"      임계값 미달로 제외: {article['parent_id']} (점수: {article['score']:.3f})")
