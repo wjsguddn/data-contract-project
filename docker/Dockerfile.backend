@@ -27,4 +27,4 @@ COPY data/ ./data/
 EXPOSE 8000
 
 # 작업 디렉토리를 backend로 변경하고 실행
-CMD ["python", "-m", "uvicorn", "backend.fastapi.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["python", "-m", "uvicorn", "backend.fastapi.main:app", "--host", "0.0.0.0", "--port", "8000"]
