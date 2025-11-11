@@ -182,7 +182,7 @@ class ToolPlanner:
         for tool_name in self.tool_registry.list_tools():
             try:
                 tool = self.tool_registry.get_tool(tool_name)
-                descriptions.append(f"- {tool_name}: {tool.description[:200]}...")
+                descriptions.append(f"- {tool_name}: {tool.description}...")
             except Exception as e:
                 logger.error(f"도구 설명 생성 실패: {tool_name}, {e}")
         
