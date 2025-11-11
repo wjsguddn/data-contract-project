@@ -1,0 +1,32 @@
+# Chatbot Agent용 Dockerfile
+FROM python:3.11-slim
+
+# 시스템 의존성
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리
+WORKDIR /app
+
+# Python 의존성
+COPY requirements/requirements.txt .
+COPY requirements/requirements-backend.txt .
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 -r requirements-backend.txt
+
+# PYTHONPATH 설정
+ENV PYTHONPATH=/app
+
+# 필요한 모듈 복사
+COPY backend/chatbot_agent/ ./backend/chatbot_agent/
+COPY backend/shared/ ./backend/shared/
+COPY backend/consistency_agent/hybrid_searcher.py ./backend/consistency_agent/hybrid_searcher.py
+COPY backend/consistency_agent/models.py ./backend/consistency_agent/models.py
+COPY data/ ./data/
+
+# 챗봇 에이전트는 FastAPI 백엔드에 통합되어 실행됨
+# 별도 프로세스가 아닌 FastAPI 엔드포인트로 제공
+CMD ["echo", "Chatbot agent is integrated into FastAPI backend"]
