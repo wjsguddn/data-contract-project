@@ -53,7 +53,8 @@ class CompletenessCheckNode:
 
         self.matching_verifier = MatchingVerifier(
             azure_client,
-            model="gpt-4o"
+            model="gpt-4o",
+            knowledge_base_loader=knowledge_base_loader
         )
 
         logger.info("A1 노드 (Completeness Check) 초기화 완료")
@@ -411,6 +412,9 @@ class CompletenessCheckNode:
             candidate_articles = matching_result['matched_articles']
             sub_item_results = matching_result.get('sub_item_results', [])  # 하위항목별 매칭 결과
             logger.info(f"[A1-S1] 후보 조문: {len(candidate_articles)}개")
+
+            # 전체 청크 로드 (MatchingVerifier의 참조 해결용)
+            self.matching_verifier.set_all_chunks(contract_type)
 
             # 2단계: LLM 매칭 검증(MatchingVerifier)
             verification_result = self.matching_verifier.verify_matching(
