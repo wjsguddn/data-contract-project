@@ -20,14 +20,17 @@ class MatchingVerifier:
     2. 선택된 조항들에 대한 매칭 여부 최종 검증 (LLM)
     """
 
-    def __init__(self, azure_client: AzureOpenAI, model: str = "gpt-4o"):
+    def __init__(self, azure_client: AzureOpenAI, model: str = "gpt-4o", knowledge_base_loader=None):
         """
         Args:
             azure_client: Azure OpenAI 클라이언트
             model: 사용할 모델명 (기본: gpt-4o)
+            knowledge_base_loader: KnowledgeBaseLoader 인스턴스 (참조 로드용)
         """
         self.azure_client = azure_client
         self.model = model
+        self.kb_loader = knowledge_base_loader
+        self.all_chunks = []  # 참조 로드용 전체 청크 캐시
 
         logger.info(f"MatchingVerifier 초기화 완료 (model={model})")
 
@@ -147,15 +150,51 @@ class MatchingVerifier:
             score = candidate['score']
             num_sub_items = candidate['num_sub_items']
 
-            # 해당 조의 청크들 포맷팅
+            # 해당 조의 청크들 포맷팅 (신규 구조: text_norm + commentary_summary + references)
             chunks = candidate.get('matched_chunks', [])
             chunk_lines = []
             for chunk_data in chunks:
                 chunk = chunk_data.get('chunk', {})
                 chunk_id = chunk.get('id', '')
-                text_raw = chunk.get('text_raw', '').strip()
-                if chunk_id and text_raw:
-                    chunk_lines.append(f"  {chunk_id}: {text_raw}")
+                text_norm = chunk.get('text_norm', '').strip()
+                commentary_summary = chunk.get('commentary_summary', '').strip()
+                references = chunk.get('references', [])
+                
+                if not chunk_id or not text_norm:
+                    continue
+                
+                # 기본 텍스트
+                chunk_lines.append(f"  {chunk_id}: {text_norm}")
+                
+                # references 처리
+                if references:
+                    logger.info(f"      청크 {chunk_id}에 references 발견: {len(references)}개")
+                    has_exhibit_ref = any(':ex:' in ref for ref in references)
+                    
+                    if has_exhibit_ref:
+                        logger.info(f"      별지 참조 감지: {[r for r in references if ':ex:' in r]}")
+                        # 별지 참조: text_llm 로드
+                        exhibit_contents = self._load_referenced_exhibits(references)
+                        if exhibit_contents:
+                            chunk_lines.append("    [참조 별지]")
+                            for ref_id, ref_content in exhibit_contents.items():
+                                chunk_lines.append(f"      {ref_id}: {ref_content}")
+                        else:
+                            logger.warning(f"      별지 참조 로드 실패")
+                    else:
+                        logger.info(f"      조항 참조 감지: {references}")
+                        # 조항 참조: text_norm + commentary_summary 로드
+                        article_contents = self._load_referenced_articles(references)
+                        if article_contents:
+                            chunk_lines.append("    [참조 조항]")
+                            for ref_id, ref_content in article_contents.items():
+                                chunk_lines.append(f"      {ref_id}: {ref_content}")
+                        else:
+                            logger.warning(f"      조항 참조 로드 실패")
+                
+                # commentary_summary (별지 참조가 없는 경우만)
+                if commentary_summary and not any(':ex:' in ref for ref in references):
+                    chunk_lines.append(f"    [해설] {commentary_summary}")
 
             candidates_text += f"{parent_id} ({title}) [유사도: {score:.3f}, 매칭 하위항목: {num_sub_items}개]\n"
             candidates_text += "\n".join(chunk_lines)
@@ -830,3 +869,93 @@ JSON만 응답하세요."""
                 "prompt_tokens": 0,
                 "completion_tokens": 0
             }
+
+    def set_all_chunks(self, contract_type: str):
+        """
+        전체 청크 로드 (참조 해결용)
+        
+        Args:
+            contract_type: 계약 유형
+        """
+        if self.kb_loader:
+            self.all_chunks = self.kb_loader.load_chunks(contract_type) or []
+            logger.debug(f"    전체 청크 로드 완료: {len(self.all_chunks)}개")
+        else:
+            logger.warning("    KnowledgeBaseLoader가 없어 청크를 로드할 수 없습니다")
+            self.all_chunks = []
+
+    def _load_referenced_exhibits(self, references: List[str]) -> Dict[str, str]:
+        """
+        별지 참조 로드 (text_llm만 사용)
+
+        Args:
+            references: 참조 ID 리스트 (예: ["urn:std:process:ex:001:idx:001"])
+
+        Returns:
+            {chunk_id: text_llm} 딕셔너리
+        """
+        exhibit_contents = {}
+
+        if not self.all_chunks:
+            logger.warning("      전체 청크가 로드되지 않아 별지 참조를 로드할 수 없습니다")
+            return exhibit_contents
+
+        for ref_id in references:
+            if ':ex:' not in ref_id:
+                continue
+
+            # global_id로 청크 찾기
+            for chunk in self.all_chunks:
+                if chunk.get('global_id') == ref_id:
+                    chunk_id = chunk.get('id', ref_id)
+                    text_llm = chunk.get('text_llm', '').strip()
+                    
+                    if text_llm:
+                        exhibit_contents[chunk_id] = text_llm
+                        logger.debug(f"        별지 참조 로드: {chunk_id}")
+                    else:
+                        logger.warning(f"        별지 {chunk_id}에 text_llm이 없습니다")
+                    break
+
+        return exhibit_contents
+
+    def _load_referenced_articles(self, references: List[str]) -> Dict[str, str]:
+        """
+        조항 참조 로드 (text_norm + commentary_summary)
+
+        Args:
+            references: 참조 ID 리스트 (예: ["urn:std:process:art:023:cla:002"])
+
+        Returns:
+            {chunk_id: formatted_content} 딕셔너리
+        """
+        article_contents = {}
+
+        if not self.all_chunks:
+            logger.warning("      전체 청크가 로드되지 않아 조항 참조를 로드할 수 없습니다")
+            return article_contents
+
+        for ref_id in references:
+            if ':art:' not in ref_id:
+                continue
+
+            # global_id로 청크 찾기
+            for chunk in self.all_chunks:
+                if chunk.get('global_id') == ref_id:
+                    chunk_id = chunk.get('id', ref_id)
+                    text_norm = chunk.get('text_norm', '').strip()
+                    commentary_summary = chunk.get('commentary_summary', '').strip()
+                    
+                    if text_norm:
+                        # text_norm + commentary_summary 결합
+                        content_parts = [text_norm]
+                        if commentary_summary:
+                            content_parts.append(f"[해설] {commentary_summary}")
+                        
+                        article_contents[chunk_id] = "\n        ".join(content_parts)
+                        logger.debug(f"        조항 참조 로드: {chunk_id}")
+                    else:
+                        logger.warning(f"        조항 {chunk_id}에 text_norm이 없습니다")
+                    break
+
+        return article_contents
