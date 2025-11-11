@@ -280,6 +280,9 @@ class ContentAnalysisNode:
             if not standard_chunks_list:
                 logger.warning(f"      모든 표준계약서 조 청크 로드 실패")
             else:
+                # 전체 청크 로드 (참조 해결용)
+                all_chunks = self.kb_loader.load_chunks(contract_type)
+                
                 # LLM 비교 수행
                 # A1에서 이미 관련 조항을 선택했으므로
                 # 1개: 직접 비교
@@ -287,7 +290,8 @@ class ContentAnalysisNode:
                 comparison_result = self.content_comparator.compare_articles(
                     user_article,
                     standard_chunks_list,
-                    contract_type
+                    contract_type,
+                    all_chunks=all_chunks
                 )
 
                 # 선택된 조항 정보
