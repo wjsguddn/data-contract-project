@@ -697,4 +697,25 @@ class StdContractDocxParser:
                     current_article["content"].append(self.new_article_text(self.paragraph_text(para)))
                 continue
         
+        # 제0조 생성: 제1조의 조본문을 서문으로 복사
+        if result["articles"]:
+            first_article = result["articles"][0]
+            if first_article.get("number") == 1:
+                # 제1조의 조본문 찾기
+                article_text_content = None
+                for item in first_article.get("content", []):
+                    if item.get("type") == "조 본문":
+                        article_text_content = item.get("text", "")
+                        break
+                
+                if article_text_content:
+                    # 제0조 생성 (서문)
+                    preamble_article = self.new_article(0, "서문")
+                    preamble_article["content"].append(self.new_article_text(article_text_content))
+                    
+                    # 제0조를 맨 앞에 삽입
+                    result["articles"].insert(0, preamble_article)
+                    
+                    logger.info(f"   - 제0조(서문) 생성: 제1조 조본문 복사")
+        
         return result

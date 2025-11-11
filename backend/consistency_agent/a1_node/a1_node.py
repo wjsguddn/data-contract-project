@@ -515,7 +515,7 @@ class CompletenessCheckNode:
         Args:
             chunks: 표준계약서 청크 리스트
         Returns:
-            조항단위로 그룹화된 정보 리스트
+            조항단위로 그룹화된 정보 리스트 (별지 제외)
         """
         article_map = defaultdict(lambda: {
             'parent_id': None,
@@ -528,6 +528,10 @@ class CompletenessCheckNode:
             if not parent_id:
                 continue
 
+            # 별지(exhibit) 제외: parent_id가 "별지"로 시작하는 경우
+            if parent_id.startswith('별지'):
+                continue
+
             if article_map[parent_id]['parent_id'] is None:
                 article_map[parent_id]['parent_id'] = parent_id
                 article_map[parent_id]['title'] = chunk.get('title', '')
@@ -537,6 +541,8 @@ class CompletenessCheckNode:
         # 리스트로 변환 후 정렬
         articles = list(article_map.values())
         articles.sort(key=lambda x: self._extract_article_number(x['parent_id']))
+
+        logger.info(f"  표준 조문 추출 완료: {len(articles)}개 (별지 제외)")
 
         return articles
 
@@ -709,7 +715,7 @@ class CompletenessCheckNode:
                     "standard_article_id": global_id,  # global_id로 저장
                     "standard_article_title": title,
                     "is_truly_missing": True,
-                    "confidence": 0.5,
+                    "confidence": 0.7,
                     "matched_user_article": None,
                     "reasoning": f"재검증 중 오류 발생: {str(e)}",
                     "recommendation": f"'{title}' 조항 확인 필요",

@@ -556,7 +556,11 @@ def display_validation_result(validation_data: dict):
             matched = analysis.get('matched', False)
             similarity = analysis.get('similarity', 0.0)
 
-            st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>제{user_article_no}조 {user_article_title}</h3>", unsafe_allow_html=True)
+            # 제0조는 "서문"으로 표시
+            if user_article_no == 0:
+                st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>📄 서문</h3>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>제{user_article_no}조 {user_article_title}</h3>", unsafe_allow_html=True)
 
             if matched:
                 # Primary 매칭 조
@@ -840,7 +844,11 @@ def display_validation_result(validation_data: dict):
                 if not matched:
                     continue  # 매칭 안 된 것은 건너뜀
                 
-                st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>제{user_article_no}조 {user_article_title}</h3>", unsafe_allow_html=True)
+                # 제0조는 "서문"으로 표시
+                if user_article_no == 0:
+                    st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>📄 서문</h3>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<h3 style='margin-bottom: 0.5rem;'>제{user_article_no}조 {user_article_title}</h3>", unsafe_allow_html=True)
                 
                 # 매칭된 표준 조항 정보
                 matched_articles_details = analysis.get('matched_articles_details', [])
@@ -961,7 +969,7 @@ def _format_matching_info(user_article_no, reference: str) -> str:
     
     # 사용자 조항 참조 생성
     if user_article_no == 0 or user_article_no == "preamble":
-        user_ref = "사용자 서문"
+        user_ref = "사용자 서문 (제0조)"
     else:
         user_ref = f"사용자 제{user_article_no}조"
     
@@ -1048,7 +1056,11 @@ def display_checklist_results_body(checklist_validation: dict):
             for user_article in matched_user_articles:
                 user_no = user_article.get('user_article_no', 'N/A')
                 user_title = user_article.get('user_article_title', '')
-                user_refs.append(f"제{user_no}조 ({user_title})")
+                # 제0조는 "서문"으로 표시
+                if user_no == 0:
+                    user_refs.append(f"서문")
+                else:
+                    user_refs.append(f"제{user_no}조 ({user_title})")
             st.caption(f"매칭된 사용자 조항: {', '.join(user_refs)}")
         
         # 조항별 통과율 표시
@@ -1069,7 +1081,14 @@ def display_checklist_results_body(checklist_validation: dict):
             # 발견된 사용자 조항 정보 생성
             found_info = ""
             if found_in_user_articles:
-                found_refs = [f"제{art.get('user_article_no')}조" for art in found_in_user_articles]
+                # 제0조는 "서문"으로 표시
+                found_refs = []
+                for art in found_in_user_articles:
+                    art_no = art.get('user_article_no')
+                    if art_no == 0:
+                        found_refs.append("서문")
+                    else:
+                        found_refs.append(f"제{art_no}조")
                 found_info = f"발견 위치: {', '.join(found_refs)}"
             
             # 결과에 따라 다른 스타일 적용

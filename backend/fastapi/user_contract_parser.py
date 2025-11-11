@@ -147,9 +147,22 @@ class UserContractParser:
         if current_exhibit is not None:
             exhibits.append(current_exhibit)
 
+        # 서문을 제0조로 변환
+        if preamble:
+            preamble_text = "\n".join(preamble)
+            preamble_article = {
+                "article_id": "user_article_000",
+                "number": 0,
+                "title": "서문",
+                "text": preamble_text,
+                "content": []  # 서문은 하위항목 없음
+            }
+            # 제0조를 맨 앞에 삽입
+            articles.insert(0, preamble_article)
+
         return {
-            "preamble": preamble,
-            "articles": articles,
+            "preamble": preamble,  # 하위 호환성을 위해 유지
+            "articles": articles,  # 제0조 포함
             "exhibits": exhibits
         }
     

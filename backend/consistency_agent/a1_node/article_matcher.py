@@ -166,10 +166,16 @@ class ArticleMatcher:
         """
         content_items = user_article.get('content', [])
         article_title = user_article.get('title', '')
+        article_text = user_article.get('text', '')
         
+        # 서문 처리: content가 비어있으면 text 필드 사용
         if not content_items:
-            logger.warning("  하위항목이 없습니다")
-            return [], []
+            if article_text:
+                logger.info("  하위항목이 없습니다 - text 필드 사용 (서문)")
+                content_items = [article_text]
+            else:
+                logger.warning("  하위항목이 없고 text도 없습니다")
+                return [], []
         
         # 하위항목별 매칭 결과
         sub_item_results = []
