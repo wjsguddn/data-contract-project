@@ -55,6 +55,13 @@ def main() -> None:
     if 'dense_weight' not in st.session_state:
         st.session_state.dense_weight = 0.85
     
+    # 챗봇 세션 상태 초기화
+    if 'chatbot_messages' not in st.session_state:
+        st.session_state.chatbot_messages = []
+    if 'chatbot_session_id' not in st.session_state:
+        import uuid
+        st.session_state.chatbot_session_id = str(uuid.uuid4())
+    
     # 사이드바 검색 설정
     with st.sidebar:
         st.header("검색 설정")
@@ -397,6 +404,28 @@ def main() -> None:
                             display_validation_result(data)
                 except Exception as e:
                     st.error(f"검증 결과 조회 실패: {str(e)}")
+        
+        # 챗봇 UI 표시 (분류 완료 후)
+        if st.session_state.get('classification_done', False):
+            # 챗봇 활성화 상태 확인
+            try:
+                chatbot_status_url = f"http://localhost:8000/api/chatbot/{contract_id}/status"
+                status_resp = requests.get(chatbot_status_url, timeout=10)
+                
+                if status_resp.status_code == 200:
+                    status_data = status_resp.json()
+                    is_active = status_data.get('active', False)  # 'is_active'가 아닌 'active' 키 사용
+                    
+                    if is_active:
+                        # 챗봇 UI 표시
+                        display_chatbot_interface(contract_id)
+                    else:
+                        # 챗봇 비활성화 상태 (분류 미완료 등)
+                        reason = status_data.get('reason', '알 수 없는 이유')
+                        st.info(f"💬 챗봇: {reason}")
+            except Exception as e:
+                # 에러 발생 시 무시 (챗봇은 선택적 기능)
+                pass
 
 
 def start_validation(contract_id: str):
@@ -1221,6 +1250,216 @@ def display_manual_checks(manual_checks: dict):
     
     if processing_time > 0:
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
+
+
+def display_chatbot_interface(contract_id: str):
+    """
+    챗봇 인터페이스 표시
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+    
+    # 헤더와 초기화 버튼
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.markdown("### 계약서 챗봇")
+        st.markdown(
+            '<p style="color:#6b7280; font-size:0.95rem; margin-top:-0.5rem;">계약서 내용에 대해 질문하세요.</p>',
+            unsafe_allow_html=True
+        )
+    with col2:
+        if st.button("채팅 초기화", key=f"reset_chat_{contract_id}", use_container_width=True):
+            st.session_state.chatbot_messages = []
+            import uuid
+            st.session_state.chatbot_session_id = str(uuid.uuid4())
+            st.rerun()
+    
+    st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
+    
+    # 대화 히스토리 표시 영역 (스크롤 가능)
+    # CSS로 최대 높이 설정 및 스크롤 적용
+    st.markdown(
+        """
+        <style>
+        .chatbot-container {
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 1rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            background-color: #ffffff;
+            margin-bottom: 1rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    chat_container = st.container()
+    
+    with chat_container:
+        # 대화 히스토리 표시
+        if st.session_state.chatbot_messages:
+            for message in st.session_state.chatbot_messages:
+                role = message.get('role')
+                content = message.get('content', '')
+                sources = message.get('sources', [])
+                
+                if role == 'user':
+                    # 사용자 메시지 (오른쪽 정렬)
+                    st.markdown(
+                        f"""
+                        <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+                            <div style="background-color: #3b82f6; color: white; padding: 0.75rem 1rem; border-radius: 1rem; max-width: 70%; word-wrap: break-word;">
+                                {content}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                elif role == 'assistant':
+                    # 챗봇 응답 (왼쪽 정렬)
+                    # 마크다운 포맷팅 적용 (볼드, 리스트 등)
+                    formatted_content = content.replace('\n', '<br>')
+                    
+                    st.markdown(
+                        f"""
+                        <div style="display: flex; justify-content: flex-start; margin-bottom: 1rem;">
+                            <div style="background-color: #f3f4f6; color: #1f2937; padding: 0.75rem 1rem; border-radius: 1rem; max-width: 70%; word-wrap: break-word; line-height: 1.6;">
+                                {formatted_content}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    
+                    # 출처 정보 표시 (조항 내용 포맷팅)
+                    if sources:
+                        with st.expander("📚 참조 조항 보기"):
+                            for idx, source in enumerate(sources, 1):
+                                article_title = source.get('article_title', '')
+                                article_content = source.get('article_content', [])
+                                
+                                st.markdown(f"**{idx}. {article_title}**")
+                                
+                                if article_content:
+                                    # 조항 내용을 들여쓰기와 함께 표시
+                                    for content_idx, content_item in enumerate(article_content, 1):
+                                        # 긴 내용은 줄바꿈 적용
+                                        formatted_item = content_item.replace('\n', '  \n  ')
+                                        st.markdown(f"  {content_idx}. {formatted_item}")
+                                
+                                st.markdown("")  # 여백
+        else:
+            # 초기 안내 메시지
+            st.info("💡 계약서 내용에 대해 자유롭게 질문해보세요. 예: '데이터 제공 대가는 얼마인가요?'")
+    
+    # 메시지 입력창
+    st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
+    
+    # 입력 폼
+    with st.form(key=f"chatbot_form_{contract_id}", clear_on_submit=True):
+        col1, col2 = st.columns([5, 1])
+        
+        with col1:
+            user_input = st.text_input(
+                "메시지를 입력하세요",
+                key=f"chatbot_input_{contract_id}",
+                label_visibility="collapsed",
+                placeholder="계약서에 대해 질문하세요..."
+            )
+        
+        with col2:
+            submit_button = st.form_submit_button("전송", use_container_width=True)
+        
+        if submit_button and user_input:
+            # 입력 검증
+            if len(user_input.strip()) == 0:
+                st.warning("메시지를 입력해주세요.")
+                return
+            
+            # 사용자 메시지 추가
+            st.session_state.chatbot_messages.append({
+                'role': 'user',
+                'content': user_input.strip()
+            })
+            
+            # 로딩 인디케이터와 함께 챗봇 응답 요청
+            with st.spinner("답변을 생성하고 있습니다..."):
+                try:
+                    response = requests.post(
+                        f"http://localhost:8000/api/chatbot/{contract_id}/message",
+                        params={
+                            'message': user_input.strip(),
+                            'session_id': st.session_state.chatbot_session_id
+                        },
+                        timeout=120  # 챗봇 응답은 시간이 걸릴 수 있으므로 2분으로 설정
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        # 디버깅: 응답 데이터 출력
+                        print(f"[DEBUG] 챗봇 응답 데이터: {data}")
+                        
+                        if data.get('success'):
+                            # 챗봇 응답 추가
+                            message_content = data.get('message', '')
+                            if not message_content:
+                                message_content = "응답을 생성할 수 없습니다."
+                            
+                            st.session_state.chatbot_messages.append({
+                                'role': 'assistant',
+                                'content': message_content,
+                                'sources': data.get('sources', [])
+                            })
+                        else:
+                            # 에러 메시지 표시
+                            error_msg = data.get('error') or data.get('message') or '알 수 없는 오류가 발생했습니다.'
+                            st.session_state.chatbot_messages.append({
+                                'role': 'assistant',
+                                'content': f"⚠️ {error_msg}"
+                            })
+                    elif response.status_code == 404:
+                        # 계약서를 찾을 수 없음
+                        st.session_state.chatbot_messages.append({
+                            'role': 'assistant',
+                            'content': "⚠️ 계약서를 찾을 수 없습니다. 다시 업로드해 주세요."
+                        })
+                    elif response.status_code == 400:
+                        # 잘못된 요청
+                        error_detail = response.json().get('detail', '잘못된 요청입니다.')
+                        st.session_state.chatbot_messages.append({
+                            'role': 'assistant',
+                            'content': f"⚠️ {error_detail}"
+                        })
+                    else:
+                        # 기타 HTTP 에러
+                        st.session_state.chatbot_messages.append({
+                            'role': 'assistant',
+                            'content': f"⚠️ 서버 오류가 발생했습니다. (HTTP {response.status_code})"
+                        })
+                
+                except requests.exceptions.Timeout:
+                    st.session_state.chatbot_messages.append({
+                        'role': 'assistant',
+                        'content': "⚠️ 요청 시간이 초과되었습니다. 질문이 복잡한 경우 시간이 더 걸릴 수 있습니다. 다시 시도해주세요."
+                    })
+                except requests.exceptions.ConnectionError:
+                    st.session_state.chatbot_messages.append({
+                        'role': 'assistant',
+                        'content': "⚠️ 서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해주세요."
+                    })
+                except Exception as e:
+                    st.session_state.chatbot_messages.append({
+                        'role': 'assistant',
+                        'content': f"⚠️ 예상치 못한 오류가 발생했습니다: {str(e)}"
+                    })
+            
+            # 페이지 리렌더링
+            st.rerun()
 
 
 if __name__ == "__main__":
