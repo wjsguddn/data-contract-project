@@ -822,6 +822,102 @@ def display_validation_result(validation_data: dict):
             
             st.markdown("---")
     
+    # 매칭 안된 사용자 조항 분석 결과 표시
+    unmatched_user_articles = completeness_check.get('unmatched_user_articles', [])
+    unmatched_count = completeness_check.get('unmatched_user_articles_count', len(unmatched_user_articles))
+    
+    if unmatched_count > 0:
+        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+        st.markdown("### ➕ 표준에 없는 사용자 조항")
+        st.markdown("표준계약서와 매칭되지 않은 조항들입니다. 추가 조항이거나 변형된 조항일 수 있습니다.")
+        
+        # 통계 표시
+        category_counts = {}
+        for item in unmatched_user_articles:
+            cat = item.get('category', 'unknown')
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("전체", f"{unmatched_count}개")
+        with col2:
+            st.metric("추가 조항", f"{category_counts.get('additional', 0)}개")
+        with col3:
+            st.metric("변형 조항", f"{category_counts.get('modified', 0)}개")
+        with col4:
+            st.metric("불필요 조항", f"{category_counts.get('irrelevant', 0)}개")
+        
+        st.markdown("---")
+        
+        # 각 매칭 안된 조항별 상세 분석
+        for idx, analysis in enumerate(unmatched_user_articles, 1):
+            user_article_no = analysis.get('user_article_no', '?')
+            user_article_title = analysis.get('user_article_title', '')
+            category = analysis.get('category', 'unknown')
+            confidence = analysis.get('confidence', 0.0)
+            risk_level = analysis.get('risk_level', 'medium')
+            
+            # 카테고리별 아이콘 및 색상
+            category_info = {
+                'additional': ('➕', '#3b82f6', '추가 조항'),
+                'modified': ('🔄', '#f59e0b', '변형 조항'),
+                'irrelevant': ('📋', '#6b7280', '불필요 조항'),
+                'unknown': ('❓', '#9ca3af', '미분류')
+            }
+            icon, color, label = category_info.get(category, category_info['unknown'])
+            
+            # 위험도별 색상
+            risk_colors = {
+                'high': '#ef4444',
+                'medium': '#f59e0b',
+                'low': '#10b981'
+            }
+            risk_color = risk_colors.get(risk_level, '#6b7280')
+            
+            # 헤더
+            st.markdown(
+                f"<h4 style='color:{color};'>{icon} 제{user_article_no}조 ({user_article_title})</h4>",
+                unsafe_allow_html=True
+            )
+            
+            # 분류 및 신뢰도
+            col_cat, col_conf, col_risk = st.columns(3)
+            with col_cat:
+                st.markdown(f"**분류**: {label}")
+            with col_conf:
+                st.markdown(f"**신뢰도**: {confidence:.1%}")
+            with col_risk:
+                st.markdown(f"**위험도**: <span style='color:{risk_color};font-weight:bold;'>{risk_level.upper()}</span>", unsafe_allow_html=True)
+            
+            # 판단 근거
+            reasoning = analysis.get('reasoning', '')
+            if reasoning:
+                st.markdown("**판단 근거**:")
+                st.markdown(reasoning)
+            
+            # 권고사항
+            recommendation = analysis.get('recommendation', '')
+            if recommendation:
+                st.markdown("**권고사항**:")
+                if risk_level == 'high':
+                    st.error(recommendation)
+                elif risk_level == 'medium':
+                    st.warning(recommendation)
+                else:
+                    st.info(recommendation)
+            
+            # 조항 내용 (펼치기)
+            user_article_text = analysis.get('user_article_text', '')
+            if user_article_text:
+                with st.expander("조항 내용 보기"):
+                    st.text(user_article_text)
+            
+            st.markdown("---")
+    
+    elif unmatched_count == 0:
+        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+        st.success("✅ 모든 사용자 조항이 표준계약서와 매칭되었습니다.")
+    
     # Recovered 매칭 결과 표시
     st.write(f"DEBUG [A3 Recovered]: exists={content_analysis_recovered is not None}, type={type(content_analysis_recovered)}")
     if content_analysis_recovered:
