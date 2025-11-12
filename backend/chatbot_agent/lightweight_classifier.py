@@ -20,24 +20,15 @@ class LightweightClassifier:
     불확실한 경우는 None을 반환하여 LLM에 위임합니다.
     """
     
-    # 조 번호 패턴 (제1조, 제 1조, 제1조의2 등)
-    ARTICLE_NUMBER_PATTERN = re.compile(r'제\s*(\d+)\s*조')
+    # 조 번호 패턴
+    # - "제n조", "제 n조", "제 n 조" (표준 형식)
+    # - "n조", "n 조" (축약 형식)
+    ARTICLE_NUMBER_PATTERN = re.compile(r'(?:제\s*)?(\d+)\s*조')
     
-    # 별지 번호 패턴 (별지1, 별지 1, 별지1호 등)
-    EXHIBIT_NUMBER_PATTERN = re.compile(r'별지\s*(\d+)')
-    
-    # 계약서 내용 관련 키워드
-    CONTRACT_CONTENT_KEYWORDS = [
-        '계약서', '조항', '내용', '규정', '명시', '기재',
-        '포함', '있는지', '있나요', '어떻게', '무엇',
-        '어디', '언제', '누가', '왜'
-    ]
-    
-    # 일반 대화 키워드 (툴 불필요)
-    GENERAL_CONVERSATION_KEYWORDS = [
-        '안녕', '감사', '고마워', '미안', '죄송',
-        '도와줘', '알려줘', '설명해줘'
-    ]
+    # 별지 번호 패턴
+    # - "별지n", "별지 n" (표준 형식)
+    # - "n번 별지" (역순 형식)
+    EXHIBIT_NUMBER_PATTERN = re.compile(r'(?:별지\s*(\d+)|(\d+)\s*번\s*별지)')
     
     def __init__(self):
         """초기화"""
@@ -46,6 +37,9 @@ class LightweightClassifier:
     def classify(self, user_message: str) -> Optional[Dict[str, Any]]:
         """
         사용자 메시지를 분석하여 툴 필요성을 빠르게 판단
+        
+        명확한 패턴(조 번호, 별지 번호)만 감지하고,
+        나머지는 모두 LLM에 위임합니다.
         
         Args:
             user_message: 사용자 메시지
@@ -59,61 +53,32 @@ class LightweightClassifier:
             }
             또는 None (불확실한 경우 - LLM에 위임)
         """
-        message_lower = user_message.lower().strip()
-        
-        # 1. 조 번호 명시 → 툴 필요 (높은 확신)
+        # 조 번호와 별지 번호 모두 체크
         article_matches = self.ARTICLE_NUMBER_PATTERN.findall(user_message)
-        if article_matches:
-            logger.info(f"조 번호 감지: {article_matches}")
-            return {
-                "needs_tools": True,
-                "confidence": 0.95,
-                "reason": f"조 번호가 명시됨: {', '.join([f'제{n}조' for n in article_matches])}",
-                "suggested_tool": "article_index_tool"
-            }
-        
-        # 2. 별지 번호 명시 → 툴 필요 (높은 확신)
         exhibit_matches = self.EXHIBIT_NUMBER_PATTERN.findall(user_message)
-        if exhibit_matches:
-            logger.info(f"별지 번호 감지: {exhibit_matches}")
+        
+        # 둘 중 하나라도 있으면 툴 필요
+        if article_matches or exhibit_matches:
+            reasons = []
+            if article_matches:
+                reasons.append(f"조 번호: {', '.join([f'제{n}조' for n in article_matches])}")
+            if exhibit_matches:
+                # exhibit_matches는 튜플 리스트이므로 처리 필요
+                exhibit_nums = [n1 or n2 for n1, n2 in exhibit_matches]
+                reasons.append(f"별지 번호: {', '.join([f'별지{n}' for n in exhibit_nums])}")
+            
+            reason = ", ".join(reasons) + " 명시됨"
+            logger.info(f"명시적 참조 감지: {reason}")
+            
             return {
                 "needs_tools": True,
                 "confidence": 0.95,
-                "reason": f"별지 번호가 명시됨: {', '.join([f'별지{n}' for n in exhibit_matches])}",
+                "reason": reason,
                 "suggested_tool": "article_index_tool"
             }
         
-        # 3. 일반 대화 키워드만 있음 → 툴 불필요 (중간 확신)
-        has_general_only = any(
-            keyword in message_lower 
-            for keyword in self.GENERAL_CONVERSATION_KEYWORDS
-        )
-        has_contract_keywords = any(
-            keyword in message_lower 
-            for keyword in self.CONTRACT_CONTENT_KEYWORDS
-        )
-        
-        if has_general_only and not has_contract_keywords:
-            logger.info("일반 대화 키워드만 감지")
-            return {
-                "needs_tools": False,
-                "confidence": 0.7,
-                "reason": "일반적인 인사 또는 대화로 판단됨",
-                "suggested_tool": None
-            }
-        
-        # 4. 계약서 내용 키워드 있음 → 툴 필요 (중간 확신)
-        if has_contract_keywords:
-            logger.info("계약서 내용 키워드 감지")
-            return {
-                "needs_tools": True,
-                "confidence": 0.75,
-                "reason": "계약서 내용 관련 질문으로 판단됨",
-                "suggested_tool": None  # 구체적인 툴은 LLM이 결정
-            }
-        
-        # 5. 불확실 → LLM에 위임
-        logger.info("패턴 매칭 실패 - LLM에 위임")
+        # 명시적 참조 없음 → LLM에 위임
+        logger.info("명시적 참조 없음 - LLM에 위임")
         return None
     
     def extract_article_numbers(self, user_message: str) -> list[int]:
@@ -140,7 +105,10 @@ class LightweightClassifier:
             별지 번호 리스트 (예: [1, 2])
         """
         matches = self.EXHIBIT_NUMBER_PATTERN.findall(user_message)
-        return [int(n) for n in matches]
+        # 정규식이 2개의 캡처 그룹을 반환하므로 (별지n, n번 별지)
+        # 각 매치는 튜플 형태: ('1', '') 또는 ('', '1')
+        # 비어있지 않은 그룹을 선택
+        return [int(n1 or n2) for n1, n2 in matches]
     
     def has_explicit_references(self, user_message: str) -> bool:
         """
@@ -166,22 +134,29 @@ class LightweightClassifier:
         Returns:
             (tool_name, args, reasoning) 또는 None
         """
-        # 조 번호 명시 → article_index_tool
+        # 조 번호와 별지 번호 모두 추출
         article_numbers = self.extract_article_numbers(user_message)
-        if article_numbers:
-            return (
-                "get_article_by_index",
-                {"article_numbers": article_numbers},
-                f"조 번호가 명시됨: {article_numbers}"
-            )
-        
-        # 별지 번호 명시 → article_index_tool
         exhibit_numbers = self.extract_exhibit_numbers(user_message)
-        if exhibit_numbers:
+        
+        # 둘 중 하나라도 있으면 article_index_tool 제안
+        if article_numbers or exhibit_numbers:
+            args = {}
+            reasons = []
+            
+            if article_numbers:
+                args["article_numbers"] = article_numbers
+                reasons.append(f"조 번호: {article_numbers}")
+            
+            if exhibit_numbers:
+                args["exhibit_numbers"] = exhibit_numbers
+                reasons.append(f"별지 번호: {exhibit_numbers}")
+            
+            reasoning = ", ".join(reasons) + " 명시됨"
+            
             return (
                 "get_article_by_index",
-                {"exhibit_numbers": exhibit_numbers},
-                f"별지 번호가 명시됨: {exhibit_numbers}"
+                args,
+                reasoning
             )
         
         # 불확실 → None 반환
