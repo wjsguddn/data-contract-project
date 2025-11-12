@@ -21,7 +21,7 @@ from backend.chatbot_agent.agent_runtime import AgentRuntime
 from backend.chatbot_agent.agent_persistence import AgentPersistence
 from backend.chatbot_agent.agent_recovery import AgentRecovery
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class AutonomousAgent:
@@ -150,7 +150,8 @@ class AutonomousAgent:
         self,
         contract_id: str,
         user_message: str,
-        session_id: str
+        session_id: str,
+        previous_turn: List[Dict[str, str]] = None
     ) -> AgentState:
         """
         에이전트 실행
@@ -164,11 +165,22 @@ class AutonomousAgent:
             최종 AgentState
         """
         # 초기 상태 구성
+        # 직전 대화를 messages에 포함 (LangChain 형식으로 변환)
+        messages = []
+        if previous_turn:
+            for msg in previous_turn:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    messages.append(AIMessage(content=msg["content"]))
+        # 현재 질문 추가
+        messages.append(HumanMessage(content=user_message))
+        
         initial_state: AgentState = {
             "contract_id": contract_id,
             "user_message": user_message,
             "session_id": session_id,
-            "messages": [HumanMessage(content=user_message)],
+            "messages": messages,
             "contract_structure": None,
             "tool_history": [],
             "collected_info": [],
@@ -264,20 +276,40 @@ class AutonomousAgent:
             
             logger.info(
                 f"[check_tool_needed] 규칙 기반 판단: "
-                f"needs_tools={needs_tools}, confidence={confidence}"
+                f"needs_tools={needs_tools}, "
+                f"action={'use_tools' if needs_tools else 'direct_response'}, "
+                f"confidence={confidence}, "
+                f"reasoning={reasoning}"
             )
             
             return state
         
         # 2. LLM 판단
-        prompt = f"""다음 질문이 계약서 내용 조회를 필요로 하는지 판단하세요.
+        # 직전 대화 컨텍스트 구성
+        context_text = ""
+        messages = state.get("messages", [])
+        if len(messages) > 1:
+            # 현재 질문 제외하고 직전 대화만
+            for msg in messages[:-1]:
+                if isinstance(msg, HumanMessage):
+                    context_text += f"사용자: {msg.content}\n"
+                elif isinstance(msg, AIMessage):
+                    context_text += f"챗봇: {msg.content}\n"
+        
+        # 프롬프트 구성
+        context_section = f"이전 대화:\n{context_text}\n" if context_text else ""
+        
+        prompt = f"""현재 사용자 질문이 계약서 내용 조회 툴 사용을 필요로 하는지 판단하세요.
 
-질문: {user_message}
+{context_section}현재 사용자 질문: {user_message}
 
-판단 기준:
+툴 필요성의 판단 기준은, 현재 사용자 질문에 답하는데에 있어서 사용자 계약서의 내용 파악이 필요한지 아닌지로 구분된다.
+
+판단 기준 예시:
 - 계약서 조항, 내용, 조건 등을 물어보는 경우 → 툴 필요
 - 일반적인 인사, 감사 표현 → 툴 불필요
 - 계약서와 무관한 질문 → 툴 불필요
+- 이전 대화를 참조하는 질문이지만 계약서 내용이 필요한 경우 → 툴 필요
 
 응답 형식 (JSON):
 {{
@@ -299,7 +331,7 @@ JSON만 응답하세요."""
                         "content": prompt
                     }
                 ],
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 temperature=0.2,
                 max_tokens=200,
                 response_format={"type": "json_object"}
@@ -322,8 +354,10 @@ JSON만 응답하세요."""
             state["decision_log"].append(decision.dict())
             
             logger.info(
-                f"[check_tool_needed] LLM 판단: "
-                f"needs_tools={needs_tools}"
+                f"[check_tool_needed] "
+                f"needs_tools={needs_tools}, "
+                f"action={'use_tools' if needs_tools else 'direct_response'}, "
+                f"reasoning={reasoning}"
             )
             
         except Exception as e:
