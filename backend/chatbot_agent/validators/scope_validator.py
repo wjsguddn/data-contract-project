@@ -31,7 +31,7 @@ class ScopeValidator:
         """
         self.client = azure_client
         
-        # 명백한 범위 외 키워드 (빠른 필터링용)
+        # 범위 외 키워드
         self.obvious_out_of_scope = [
             "날씨", "기온", "강수량",
             "주식", "코스피", "환율",
@@ -48,6 +48,16 @@ class ScopeValidator:
             "기간", "해지", "책임", "의무", "권리",
             "당사자", "제공자", "이용자", "중개자",
             "조건", "명시", "충돌", "검증"
+        ]
+        
+        # 이전 대화 참조 지시어 (대명사, 접속사 등)
+        self.reference_indicators = [
+            "그게", "그거", "이거", "저거", "이것", "저것",  # 지시대명사
+            "그럼", "그러면", "그래서",      # 접속사
+            "그건", "그랬", "그런", "그렇",  # 지시 관형사
+            "뭐", "어디", "언제", "왜", "아니",      # 의문사 (단독 사용 시)
+            "더", "또", "다시", "간단", "자세", "상세",             # 추가/반복
+            "아까", "방금", "전에"           # 시간 참조
         ]
         
         logger.info("ScopeValidator 초기화")
@@ -106,17 +116,22 @@ class ScopeValidator:
             logger.info(f"범위 검증: 범위 외 키워드 감지, LLM 판단 요청")
             return self._llm_validate(user_message)
         
-        # 4단계: 불확실한 경우 (키워드 없음)
-        if len(user_message) < 10:
-            # 너무 짧은 질문은 일단 허용 (예: "뭐야?", "어디?")
-            # 대화 컨텍스트에서 이전 질문 참조 가능
-            logger.info(f"범위 검증: 짧은 질문 (허용)")
+        # 4단계: 이전 대화 참조 가능성 체크 (키워드 없는 경우)
+        has_reference_indicator = any(
+            indicator in user_message for indicator in self.reference_indicators
+        )
+        
+        if has_reference_indicator:
+            # 이전 대화를 참조하는 것으로 보이는 질문
+            # 예: "그게 뭐야?", "그럼 언제야?", "더 알려줘"
+            logger.info(f"범위 검증: 이전 대화 참조 가능성 (허용)")
             return ValidationResult(
                 is_valid=True,
-                confidence=0.6
+                confidence=0.75,
+                reason="이전 대화 참조 질문으로 추정"
             )
         
-        # LLM으로 의도 분석 (최소 토큰 사용)
+        # 5단계: 불확실한 경우 → LLM 판단
         logger.info(f"범위 검증: 불확실, LLM 판단 요청")
         return self._llm_validate(user_message)
     
@@ -135,13 +150,13 @@ class ScopeValidator:
 질문: {user_message}
 
 계약서 관련 질문의 예:
-- 계약 조항 내용 질문
+- 계약 조항 내용 관련 질문
 - 계약 당사자, 기간, 대가 등에 대한 질문
 - 계약서에 명시된 권리, 의무, 책임에 대한 질문
+- 표준계약서에 관한 질문
 
 계약서와 무관한 질문의 예:
 - 일반 상식, 뉴스, 날씨 등
-- 법률 자문 (계약서 내용이 아닌 법률 해석)
 - 계약서와 무관한 개인적 질문
 
 답변 형식:
@@ -150,7 +165,7 @@ class ScopeValidator:
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=100
