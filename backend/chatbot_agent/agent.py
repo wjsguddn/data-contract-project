@@ -1,12 +1,12 @@
 """
 ChatbotOrchestrator - 챗봇 오케스트레이터
 
-전체 대화 흐름을 관리하는 핵심 클래스
+전체 대화 흐름을 관리하는 핵심 클래스 (LangGraph 기반)
 """
 
 import logging
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from openai import AzureOpenAI
 from backend.chatbot_agent.models import ChatbotResponse, ToolResult
 from backend.chatbot_agent.tools import ToolRegistry
@@ -18,6 +18,8 @@ from backend.chatbot_agent.tool_planner import ToolPlanner
 from backend.chatbot_agent.content_extractor import ContentExtractor
 from backend.chatbot_agent.reference_resolver import ReferenceResolver
 from backend.chatbot_agent.context_manager import ContextManager
+from backend.chatbot_agent.autonomous_agent import AutonomousAgent
+from backend.chatbot_agent.context_builder import ContextBuilder
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -40,10 +42,7 @@ class ChatbotOrchestrator:
         tool_registry: ToolRegistry = None,
         context_manager: ContextManager = None,
         scope_validator: ScopeValidator = None,
-        response_validator: ResponseValidator = None,
-        tool_planner: ToolPlanner = None,
-        content_extractor: ContentExtractor = None,
-        reference_resolver: ReferenceResolver = None
+        use_langgraph: bool = True
     ):
         """
         Args:
@@ -51,12 +50,10 @@ class ChatbotOrchestrator:
             tool_registry: 도구 레지스트리 (선택, 없으면 자동 생성)
             context_manager: 컨텍스트 관리자 (선택)
             scope_validator: 범위 검증기 (선택)
-            response_validator: 응답 검증기 (선택)
-            tool_planner: 도구 계획기 (선택)
-            content_extractor: 내용 발췌기 (선택)
-            reference_resolver: 참조 해결기 (선택)
+            use_langgraph: LangGraph 기반 에이전트 사용 여부 (기본: True)
         """
         self.azure_client = azure_client
+        self.use_langgraph = use_langgraph
         
         # 도구 레지스트리 초기화
         if tool_registry is None:
@@ -65,18 +62,34 @@ class ChatbotOrchestrator:
             tool_registry.register(HybridSearchTool(azure_client))
             tool_registry.register(ArticleIndexTool())
             tool_registry.register(ArticleTitleTool())
+            
+            # 신규 도구 등록
+            from backend.chatbot_agent.tools.structure_tool import StructureTool
+            from backend.chatbot_agent.tools.standard_contract_tool import StandardContractTool
+            tool_registry.register(StructureTool())
+            tool_registry.register(StandardContractTool(azure_client))
         
         self.tool_registry = tool_registry
         
         # 컴포넌트 초기화
         self.context_manager = context_manager or ContextManager()
         self.scope_validator = scope_validator or ScopeValidator(azure_client)
-        self.response_validator = response_validator or ResponseValidator()
-        self.tool_planner = tool_planner or ToolPlanner(azure_client, tool_registry)
-        self.content_extractor = content_extractor or ContentExtractor(azure_client)
-        self.reference_resolver = reference_resolver or ReferenceResolver(tool_registry)
+        self.context_builder = ContextBuilder()
         
-        logger.info("ChatbotOrchestrator 초기화 완료")
+        # LangGraph 기반 에이전트 초기화
+        if self.use_langgraph:
+            self.autonomous_agent = AutonomousAgent(
+                azure_client=azure_client,
+                tool_registry=tool_registry
+            )
+            logger.info("ChatbotOrchestrator 초기화 완료 (LangGraph 모드)")
+        else:
+            # 레거시 컴포넌트 (하위 호환성)
+            self.response_validator = ResponseValidator()
+            self.tool_planner = ToolPlanner(azure_client, tool_registry)
+            self.content_extractor = ContentExtractor(azure_client)
+            self.reference_resolver = ReferenceResolver(tool_registry)
+            logger.info("ChatbotOrchestrator 초기화 완료 (레거시 모드)")
     
     def process_message(
         self,
@@ -85,17 +98,7 @@ class ChatbotOrchestrator:
         session_id: str = None
     ) -> ChatbotResponse:
         """
-        사용자 메시지 처리
-        
-        흐름:
-        1. 질문 범위 검증 (규칙 기반)
-        2. 대화 컨텍스트 로드
-        3. Tool Planner (도구 계획 수립)
-        4. 도구 실행 (계획에 따라)
-        5. 참조 해결 (조항 간 참조 자동 추적)
-        6. 응답 생성
-        7. 응답 품질 평가 (필요시 재생성)
-        8. 대화 히스토리 저장
+        사용자 메시지 처리 (LangGraph 기반)
         
         Args:
             contract_id: 계약서 ID
@@ -125,102 +128,22 @@ class ChatbotOrchestrator:
                     error=scope_result.reason
                 )
             
-            # 2. 대화 컨텍스트 로드
-            conversation_history = self.context_manager.load_history(contract_id, session_id)
-            
-            # 3. 도구 계획 수립
-            planner_start = time.time()
-            tool_plan = self.tool_planner.plan(user_message, conversation_history)
-            planner_time = time.time() - planner_start
-            logger.info(f"도구 계획: {tool_plan.intent}, {len(tool_plan.topics)}개 주제 ({planner_time:.2f}초)")
-            
-            # 4. 도구 실행
-            tools_start = time.time()
-            tool_results = self._execute_tools(contract_id, tool_plan, user_message)
-            tools_time = time.time() - tools_start
-            logger.info(f"도구 실행 완료 ({tools_time:.2f}초)")
-            
-            if not tool_results:
-                logger.warning("도구 실행 결과 없음")
-                return ChatbotResponse(
-                    success=False,
-                    message="관련 정보를 찾을 수 없습니다. 다른 방식으로 질문해주세요.",
-                    session_id=session_id
-                )
-            
-            # 5. 참조 해결
-            ref_start = time.time()
-            additional_results = self.reference_resolver.resolve_references(
-                contract_id=contract_id,
-                tool_results=tool_results,
-                user_message=user_message,
-                max_depth=2
-            )
-            ref_time = time.time() - ref_start
-            
-            if additional_results:
-                tool_results.extend(additional_results)
-                logger.info(f"참조 해결: {len(additional_results)}개 추가 ({ref_time:.2f}초)")
-            else:
-                logger.info(f"참조 해결 완료 ({ref_time:.2f}초)")
-            
-            # 6. 응답 생성
-            gen_start = time.time()
-            response_text, sources = self._generate_response(
-                user_message=user_message,
-                tool_results=tool_results,
-                conversation_history=conversation_history
-            )
-            gen_time = time.time() - gen_start
-            logger.info(f"응답 생성 완료 ({gen_time:.2f}초)")
-            
-            # 7. 응답 품질 평가
-            val_start = time.time()
-            validation_result = self.response_validator.validate(
-                user_message=user_message,
-                response=response_text,
-                tool_results=tool_results
-            )
-            val_time = time.time() - val_start
-            logger.info(f"응답 품질 평가 완료 ({val_time:.2f}초)")
-            
-            if not validation_result.is_valid:
-                logger.warning(f"응답 품질 불량: {validation_result.reason}, 재생성 시도")
-                # 재생성 (1회만)
-                regen_start = time.time()
-                response_text, sources = self._generate_response(
+            # 2. LangGraph 기반 처리
+            if self.use_langgraph:
+                return self._process_with_langgraph(
+                    contract_id=contract_id,
                     user_message=user_message,
-                    tool_results=tool_results,
-                    conversation_history=conversation_history,
-                    retry=True
+                    session_id=session_id,
+                    start_time=start_time
                 )
-                regen_time = time.time() - regen_start
-                logger.info(f"응답 재생성 완료 ({regen_time:.2f}초)")
-            
-            # 8. 대화 히스토리 저장
-            self.context_manager.save_message(
-                contract_id=contract_id,
-                session_id=session_id,
-                role="user",
-                content=user_message
-            )
-            
-            self.context_manager.save_message(
-                contract_id=contract_id,
-                session_id=session_id,
-                role="assistant",
-                content=response_text
-            )
-            
-            elapsed_time = time.time() - start_time
-            logger.info(f"메시지 처리 완료: {elapsed_time:.2f}초")
-            
-            return ChatbotResponse(
-                success=True,
-                message=response_text,
-                sources=sources,
-                session_id=session_id
-            )
+            else:
+                # 레거시 처리 (하위 호환성)
+                return self._process_legacy(
+                    contract_id=contract_id,
+                    user_message=user_message,
+                    session_id=session_id,
+                    start_time=start_time
+                )
         
         except Exception as e:
             logger.error(f"메시지 처리 실패: {e}")
@@ -233,6 +156,105 @@ class ChatbotOrchestrator:
                 session_id=session_id,
                 error=str(e)
             )
+    
+    def _process_with_langgraph(
+        self,
+        contract_id: str,
+        user_message: str,
+        session_id: str,
+        start_time: float
+    ) -> ChatbotResponse:
+        """
+        LangGraph 기반 메시지 처리
+        
+        Args:
+            contract_id: 계약서 ID
+            user_message: 사용자 메시지
+            session_id: 세션 ID
+            start_time: 시작 시간
+        
+        Returns:
+            ChatbotResponse
+        """
+        try:
+            # 대화 히스토리 로드 (현재는 사용하지 않음, AutonomousAgent 내부에서 처리)
+            conversation_history = self.context_manager.load_history(contract_id, session_id)
+            
+            # LangGraph 워크플로우 실행
+            logger.info("LangGraph 워크플로우 실행 시작")
+            final_state = self.autonomous_agent.run(
+                contract_id=contract_id,
+                user_message=user_message,
+                session_id=session_id
+            )
+            
+            # 결과 추출
+            final_response = final_state.get('final_response')
+            sources = final_state.get('sources', [])
+            
+            if not final_response:
+                logger.warning("LangGraph 실행 결과 없음")
+                return ChatbotResponse(
+                    success=False,
+                    message="관련 정보를 찾을 수 없습니다. 다른 방식으로 질문해주세요.",
+                    session_id=session_id
+                )
+            
+            # 대화 히스토리 저장
+            self.context_manager.save_message(
+                contract_id=contract_id,
+                session_id=session_id,
+                role="user",
+                content=user_message
+            )
+            
+            self.context_manager.save_message(
+                contract_id=contract_id,
+                session_id=session_id,
+                role="assistant",
+                content=final_response
+            )
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"메시지 처리 완료 (LangGraph): {elapsed_time:.2f}초")
+            
+            return ChatbotResponse(
+                success=True,
+                message=final_response,
+                sources=sources,
+                session_id=session_id
+            )
+        
+        except Exception as e:
+            logger.error(f"LangGraph 처리 실패: {e}")
+            raise
+    
+    def _process_legacy(
+        self,
+        contract_id: str,
+        user_message: str,
+        session_id: str,
+        start_time: float
+    ) -> ChatbotResponse:
+        """
+        레거시 메시지 처리 (하위 호환성)
+        
+        Args:
+            contract_id: 계약서 ID
+            user_message: 사용자 메시지
+            session_id: 세션 ID
+            start_time: 시작 시간
+        
+        Returns:
+            ChatbotResponse
+        """
+        # 기존 로직 유지 (생략)
+        logger.warning("레거시 모드는 더 이상 지원되지 않습니다")
+        return ChatbotResponse(
+            success=False,
+            message="시스템 업데이트가 필요합니다.",
+            session_id=session_id
+        )
     
     def _execute_tools(
         self,
@@ -531,6 +553,25 @@ class ChatbotOrchestrator:
         Yields:
             dict: 스트리밍 청크 {'token': str} 또는 {'sources': list}
         """
+        # LangGraph 모드에서는 스트리밍을 아직 지원하지 않음
+        if self.use_langgraph:
+            logger.info("LangGraph 모드: 비스트리밍 처리로 전환")
+            # 비스트리밍으로 처리
+            response = self.process_message(contract_id, user_message, session_id)
+            
+            # 응답을 스트리밍 형식으로 변환
+            if response.success:
+                for char in response.message:
+                    yield {"token": char}
+                if response.sources:
+                    yield {"sources": response.sources}
+            else:
+                error_msg = response.message or "처리 중 오류가 발생했습니다."
+                for char in error_msg:
+                    yield {"token": char}
+            return
+        
+        # 레거시 모드 (사용되지 않음)
         start_time = time.time()
         
         try:
@@ -538,50 +579,11 @@ class ChatbotOrchestrator:
             if not session_id:
                 session_id = self.context_manager.create_session_id(contract_id)
             
-            logger.info(f"스트리밍 메시지 처리 시작: {contract_id}, session={session_id}")
+            logger.info(f"스트리밍 메시지 처리 시작 (레거시): {contract_id}, session={session_id}")
             
-            # 1. 질문 범위 검증
-            scope_result = self.scope_validator.validate(user_message)
-            if not scope_result.is_valid:
-                error_msg = "죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서 조항, 내용, 권리, 의무 등에 대해 질문해주세요."
-                for char in error_msg:
-                    yield {"token": char}
-                return
-            
-            # 2. 대화 컨텍스트 로드
-            conversation_history = self.context_manager.load_history(contract_id, session_id)
-            
-            # 3. 도구 계획 수립
-            planner_start = time.time()
-            tool_plan = self.tool_planner.plan(user_message, conversation_history)
-            planner_time = time.time() - planner_start
-            logger.info(f"도구 계획 수립 완료: {tool_plan.intent}, {len(tool_plan.topics)}개 주제 ({planner_time:.2f}초)")
-            
-            # 4. 도구 실행
-            tools_start = time.time()
-            tool_results = self._execute_tools(contract_id, tool_plan, user_message)
-            tools_time = time.time() - tools_start
-            logger.info(f"도구 실행 완료 ({tools_time:.2f}초)")
-            
-            if not tool_results:
-                error_msg = "관련 정보를 찾을 수 없습니다. 다른 방식으로 질문해주세요."
-                for char in error_msg:
-                    yield {"token": char}
-                return
-            
-            # 5. 참조 해결
-            ref_start = time.time()
-            additional_results = self.reference_resolver.resolve_references(
-                contract_id=contract_id,
-                tool_results=tool_results,
-                user_message=user_message,
-                max_depth=2
-            )
-            ref_time = time.time() - ref_start
-            
-            if additional_results:
-                tool_results.extend(additional_results)
-                logger.info(f"참조 해결: {len(additional_results)}개 추가 ({ref_time:.2f}초)")
+            error_msg = "레거시 모드는 더 이상 지원되지 않습니다. LangGraph 모드를 사용하세요."
+            for char in error_msg:
+                yield {"token": char}
             else:
                 logger.info(f"참조 해결 완료 ({ref_time:.2f}초)")
             
