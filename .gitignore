@@ -78,7 +78,7 @@ data/search_indexes/*/*
 !data/source_documents/.gitkeep
 data/extracted_documents/*
 !data/extracted_documents/.gitkeep
-data/chunked_documents/*
+
 !data/chunked_documents/guidebook_chunked_documents/
 !data/chunked_documents/.gitkeep
 logs/*
