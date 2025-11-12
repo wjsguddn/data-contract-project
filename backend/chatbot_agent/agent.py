@@ -123,7 +123,7 @@ class ChatbotOrchestrator:
                 logger.warning(f"범위 외 질문: {scope_result.reason}")
                 return ChatbotResponse(
                     success=False,
-                    message="죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서 조항, 내용, 권리, 의무 등에 대해 질문해주세요.",
+                    message="죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서와 관련된 내용에 대해 질문해주세요.",
                     session_id=session_id,
                     error=scope_result.reason
                 )
@@ -177,15 +177,18 @@ class ChatbotOrchestrator:
             ChatbotResponse
         """
         try:
-            # 대화 히스토리 로드 (현재는 사용하지 않음, AutonomousAgent 내부에서 처리)
+            # 대화 히스토리 로드 (직전 1턴만)
             conversation_history = self.context_manager.load_history(contract_id, session_id)
+            # 직전 대화만 추출 (최근 2개 메시지 = 1턴)
+            previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
             
             # LangGraph 워크플로우 실행
             logger.info("LangGraph 워크플로우 실행 시작")
             final_state = self.autonomous_agent.run(
                 contract_id=contract_id,
                 user_message=user_message,
-                session_id=session_id
+                session_id=session_id,
+                previous_turn=previous_turn
             )
             
             # 결과 추출
