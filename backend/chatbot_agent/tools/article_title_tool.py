@@ -6,9 +6,14 @@ ArticleTitleTool - 조 제목 기반 접근 도구
 
 import logging
 import re
+import time
 from typing import Dict, Any, List
 from backend.chatbot_agent.tools.base import BaseTool
-from backend.chatbot_agent.models import ToolResult
+from backend.chatbot_agent.models import (
+    ArticleTitleToolResult,
+    ArticleTitleData,
+    ArticleContent
+)
 from backend.shared.database import SessionLocal, ContractDocument
 
 logger = logging.getLogger("uvicorn.error")
@@ -62,27 +67,30 @@ class ArticleTitleTool(BaseTool):
         self,
         contract_id: str,
         titles: List[str]
-    ) -> ToolResult:
+    ) -> ArticleTitleToolResult:
         """
-        조 제목으로 DB 직접 조회
+        조 제목으로 DB 직접 조회 (타입 안전)
         
         Args:
             contract_id: 계약서 ID
             titles: 조 제목 목록
             
         Returns:
-            ToolResult: 조회 결과
+            ArticleTitleToolResult: 타입 안전한 조회 결과
         """
+        start_time = time.time()
+        
         try:
             if not titles:
-                return ToolResult(
+                return ArticleTitleToolResult(
                     success=False,
                     tool_name=self.name,
                     data=None,
-                    error="조 제목이 필요합니다"
+                    error="조 제목이 필요합니다",
+                    execution_time=time.time() - start_time
                 )
             
-            logger.info(f"조 제목 조회: {contract_id}, 제목={titles}")
+            logger.info(f"[ArticleTitleTool] 조회 시작: {contract_id}, 제목={titles}")
             
             # DB에서 계약서 로드
             db = SessionLocal()
@@ -91,20 +99,19 @@ class ArticleTitleTool(BaseTool):
             ).first()
             
             if not contract or not contract.parsed_data:
-                return ToolResult(
+                return ArticleTitleToolResult(
                     success=False,
                     tool_name=self.name,
                     data=None,
-                    error="계약서를 찾을 수 없습니다"
+                    error="계약서를 찾을 수 없습니다",
+                    execution_time=time.time() - start_time
                 )
             
             parsed_data = contract.parsed_data
             articles = parsed_data.get("articles", [])
             
-            results = {
-                "matched_articles": [],
-                "failed_titles": []
-            }
+            matched_articles: List[ArticleContent] = []
+            failed_titles = []
             
             # 제목별 조회
             for title_query in titles:
@@ -119,58 +126,59 @@ class ArticleTitleTool(BaseTool):
                     
                     # 공백 제거 후 비교
                     if normalized_query == normalized_article_title:
-                        results["matched_articles"].append({
-                            "article_no": article.get("number"),
-                            "article_id": article.get("article_id"),
-                            "title": article_title,
-                            "text": article.get("text", ""),
-                            "content": article.get("content", []),
-                            "matched_title": title_query
-                        })
+                        matched_articles.append(ArticleContent(
+                            article_no=article.get("number"),
+                            title=article_title,
+                            text=article.get("text", ""),
+                            content=article.get("content", [])
+                        ))
                         found = True
                         break
                     
                     # 부분 매칭 (정규화된 쿼리가 정규화된 제목에 포함되는 경우)
                     if normalized_query in normalized_article_title:
-                        results["matched_articles"].append({
-                            "article_no": article.get("number"),
-                            "article_id": article.get("article_id"),
-                            "title": article_title,
-                            "text": article.get("text", ""),
-                            "content": article.get("content", []),
-                            "matched_title": title_query,
-                            "match_type": "partial"
-                        })
+                        matched_articles.append(ArticleContent(
+                            article_no=article.get("number"),
+                            title=article_title,
+                            text=article.get("text", ""),
+                            content=article.get("content", [])
+                        ))
                         found = True
                         break
                 
                 if not found:
-                    results["failed_titles"].append({
+                    failed_titles.append({
                         "title": title_query,
                         "reason": "제목을 찾을 수 없습니다"
                     })
             
-            logger.info(f"조 제목 조회 완료: {len(results['matched_articles'])}개 매칭")
+            # ArticleTitleData 스키마로 래핑
+            result_data = ArticleTitleData(
+                matched_articles=matched_articles,
+                total_matched=len(matched_articles),
+                search_title=", ".join(titles)
+            )
             
-            return ToolResult(
+            logger.info(f"[ArticleTitleTool] 조회 완료: {result_data.total_matched}개 매칭")
+            
+            return ArticleTitleToolResult(
                 success=True,
                 tool_name=self.name,
-                data=results,
-                metadata={
-                    "total_matched": len(results["matched_articles"]),
-                    "total_failed": len(results["failed_titles"])
-                }
+                data=result_data,
+                metadata={"failed_titles": failed_titles} if failed_titles else None,
+                execution_time=time.time() - start_time
             )
         
         except Exception as e:
             logger.error(f"조 제목 조회 실패: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return ToolResult(
+            return ArticleTitleToolResult(
                 success=False,
                 tool_name=self.name,
                 data=None,
-                error=str(e)
+                error=str(e),
+                execution_time=time.time() - start_time
             )
         
         finally:
