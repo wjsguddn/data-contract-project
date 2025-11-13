@@ -98,6 +98,11 @@ class ValidationResult(Base):
     issues = Column(JSON, nullable=True)  # 이슈 리스트
     suggestions = Column(JSON, nullable=True)  # 개선 제안
     recommendations = Column(JSON, nullable=True)  # 권장사항 (agent.py에서 사용)
+    # Report Agent 필드
+    report_step1_normalized = Column(JSON, nullable=True)  # Step 1: 정규화 결과
+    report_step2_aggregated = Column(JSON, nullable=True)  # Step 2: 재집계 결과
+    report_step3_resolved = Column(JSON, nullable=True)  # Step 3: 충돌 해소 결과
+    final_report = Column(JSON, nullable=True)  # Step 4: 최종 보고서
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

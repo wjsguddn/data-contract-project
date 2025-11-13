@@ -813,12 +813,14 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
                     except Exception as e:
                         logger.error(f"[reA1-S2] batch2 트리거 실패: {e}")
 
-                # 비동기 실행 (A1-Stage2는 계속 진행)
+                # batch2 실행 및 완료 대기
                 import threading
-                batch2_thread = threading.Thread(target=trigger_batch2, daemon=True)
+                batch2_thread = threading.Thread(target=trigger_batch2, daemon=False)
                 batch2_thread.start()
-
-                logger.info(f"[reA1-S2] batch2 트리거 완료 (비동기 실행)")
+                
+                logger.info(f"[reA1-S2] batch2 스레드 시작, 완료 대기 중...")
+                batch2_thread.join()  # batch2 완료까지 대기
+                logger.info(f"[reA1-S2] batch2 완료 확인")
             else:
                 logger.error(f"[reA1-S2] recovered_matching_details 저장 실패")
         else:
@@ -989,6 +991,17 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
                           f"A2={a2_result.get('status')}, A3={a3_result.get('status')}")
 
         logger.info(f"[PARALLEL] 통합 검증 완료: {contract_id}, status={status}")
+        
+        # batch1 완료 (batch2도 A1-Stage2에서 대기했으므로 완료됨)
+        # Report Agent 트리거
+        if status == "completed":
+            logger.info(f"[PARALLEL] Report Agent 트리거: {contract_id}")
+            try:
+                from backend.report_agent.tasks import generate_report_task
+                generate_report_task.delay(contract_id)
+                logger.info(f"[PARALLEL] Report Agent 태스크 제출 완료")
+            except Exception as report_error:
+                logger.error(f"[PARALLEL] Report Agent 트리거 실패: {report_error}")
 
         return {
             "status": status,

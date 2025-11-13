@@ -46,7 +46,179 @@ def poll_classification_result(contract_id: str, max_attempts: int = 30, interva
     return False, {"error": "분류 작업이 너무 오래 걸립니다. 잠시 후 페이지를 새로고침해주세요."}
 
 
+def _format_contract_type(contract_type: str) -> str:
+    """계약 유형을 한글로 변환"""
+    type_map = {
+        'provide': '제공형',
+        'create': '창출형',
+        'process': '가공형',
+        'brokerage_provider': '중개거래형 (제공자)',
+        'brokerage_user': '중개거래형 (이용자)'
+    }
+    return type_map.get(contract_type, contract_type)
+
+
+def show_report_page(contract_id: str):
+    """
+    최종 보고서 페이지 표시
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    # 뒤로 가기 버튼
+    if st.button("← 검증 결과로 돌아가기"):
+        st.session_state.show_report = False
+        st.rerun()
+    
+    st.markdown("# 📊 최종 검증 보고서")
+    st.markdown("---")
+    
+    # 보고서 로딩
+    try:
+        report_url = f"http://localhost:8000/api/report/{contract_id}"
+        response = requests.get(report_url, timeout=60)
+        
+        if response.status_code != 200:
+            st.error(f"보고서를 불러올 수 없습니다. (HTTP {response.status_code})")
+            st.write(f"응답: {response.text[:500]}")
+            return
+        
+        report = response.json()
+        
+        # 상태 확인
+        if report.get('status') == 'generating':
+            st.info("📝 보고서 생성 중입니다...")
+            with st.spinner("보고서 생성 대기 중..."):
+                time.sleep(2)
+                st.rerun()
+            return
+        elif report.get('status') in ['not_ready', 'failed']:
+            st.error(f"보고서 상태: {report.get('message', '알 수 없는 오류')}")
+            return
+        
+        # 계약서 정보 헤더
+        st.markdown(f"**계약서 ID**: `{report.get('contract_id', 'N/A')}`")
+        st.markdown(f"**계약 유형**: {_format_contract_type(report.get('contract_type', 'N/A'))}")
+        st.markdown(f"**생성 일시**: {report.get('generated_at', 'N/A')}")
+        st.markdown("---")
+        
+        # 요약 통계
+        summary = report.get('summary', {})
+        st.markdown("## 📈 요약 통계")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("전체 조항", f"{summary.get('total', 0)}개")
+        
+        with col2:
+            sufficient = summary.get('sufficient', 0)
+            st.metric("충족", f"{sufficient}개", delta=None, delta_color="normal")
+        
+        with col3:
+            insufficient = summary.get('insufficient', 0)
+            st.metric("불충분", f"{insufficient}개", delta=f"-{insufficient}" if insufficient > 0 else None, delta_color="inverse")
+        
+        with col4:
+            missing = summary.get('missing', 0)
+            st.metric("누락", f"{missing}개", delta=f"-{missing}" if missing > 0 else None, delta_color="inverse")
+        
+        st.markdown("---")
+        
+        # 전체 계약서에서 누락된 조항
+        overall_missing = report.get('overall_missing_clauses', [])
+        if overall_missing:
+            st.markdown("## ❌ 전체 계약서에서 누락된 조항")
+            st.markdown(f"사용자 계약서 전체에서 찾을 수 없는 표준 조항입니다. ({len(overall_missing)}개)")
+            
+            for item in overall_missing:
+                std_clause_id = item.get('std_clause_id', '')
+                std_clause_title = item.get('std_clause_title', '')
+                analysis = item.get('analysis', '')
+                
+                with st.expander(f"🔴 {std_clause_title} ({std_clause_id})"):
+                    st.markdown(analysis)
+            
+            st.markdown("---")
+        
+        # 사용자 조항별 상세 분석
+        user_articles = report.get('user_articles', [])
+        if user_articles:
+            st.markdown("## 📋 조항별 상세 분석")
+            st.markdown(f"각 사용자 조항에 대한 매칭 및 검증 결과입니다. ({len(user_articles)}개)")
+            
+            for article in user_articles:
+                user_article_no = article.get('user_article_no', 0)
+                user_article_title = article.get('user_article_title', '')
+                matched = article.get('matched', [])
+                insufficient = article.get('insufficient', [])
+                missing = article.get('missing', [])
+                
+                # 조항 헤더
+                if user_article_no == 0:
+                    article_header = "📄 서문"
+                else:
+                    # user_article_title이 "제n조 (제목)" 형식이므로 그대로 사용
+                    article_header = user_article_title if user_article_title else f"제{user_article_no}조"
+                
+                # 모든 조항 표시 (문제 여부와 관계없이)
+                if insufficient or missing:
+                    # 문제가 있는 조항
+                    with st.expander(f"⚠️ {article_header}", expanded=False):
+                        # 매칭된 조항
+                        if matched:
+                            st.markdown("**✅ 매칭된 표준 조항:**")
+                            for m in matched:
+                                st.markdown(f"- {m.get('std_clause_title', '')} (`{m.get('std_clause_id', '')}`)")
+                        
+                        # 불충분한 조항
+                        if insufficient:
+                            st.markdown("**⚠️ 불충분한 조항:**")
+                            for item in insufficient:
+                                std_clause_title = item.get('std_clause_title', '')
+                                std_clause_id = item.get('std_clause_id', '')
+                                analysis = item.get('analysis', '')
+                                
+                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                if analysis:
+                                    # 들여쓰기를 위해 > 사용
+                                    st.markdown(f"> {analysis}")
+                        
+                        # 누락된 조항
+                        if missing:
+                            st.markdown("**❌ 누락된 조항:**")
+                            for item in missing:
+                                std_clause_title = item.get('std_clause_title', '')
+                                std_clause_id = item.get('std_clause_id', '')
+                                analysis = item.get('analysis', '')
+                                
+                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                if analysis:
+                                    # 들여쓰기를 위해 > 사용
+                                    st.markdown(f"> {analysis}")
+                
+                elif matched:
+                    # 문제 없는 조항 (매칭만 있음)
+                    with st.expander(f"✅ {article_header}", expanded=False):
+                        st.markdown("**✅ 매칭된 표준 조항:**")
+                        for m in matched:
+                            st.markdown(f"- {m.get('std_clause_title', '')} (`{m.get('std_clause_id', '')}`)")
+        
+        st.markdown("---")
+        st.markdown("### 보고서 끝")
+    
+    except Exception as e:
+        st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
+
+
 def main() -> None:
+    # 보고서 페이지 라우팅
+    if st.session_state.get('show_report', False):
+        contract_id = st.session_state.get('contract_id')
+        if contract_id:
+            show_report_page(contract_id)
+            return
+    
     # 세션 상태 초기화 (가중치)
     if 'text_weight' not in st.session_state:
         st.session_state.text_weight = 0.7
@@ -307,11 +479,36 @@ def main() -> None:
                     success, result = poll_validation_result(contract_id)
 
                 if success:
-                    # 검증 완료 - 결과를 session_state에 저장
-                    st.session_state.validation_completed = True
-                    st.session_state.validation_started = False  # 폴링 중지
+                    # 검증 완료 - Report 생성 대기
                     st.session_state.validation_result_data = result  # 결과 저장
-                    st.rerun()  # 상태 업데이트 후 리렌더링
+                    
+                    # Report 생성 완료 확인
+                    try:
+                        report_status_url = f"http://localhost:8000/api/report/{contract_id}/status"
+                        report_resp = requests.get(report_status_url, timeout=10)
+                        
+                        if report_resp.status_code == 200:
+                            report_status = report_resp.json()
+                            
+                            if report_status.get('status') == 'completed':
+                                # Report 완료 - 검증 완료 처리
+                                st.session_state.validation_completed = True
+                                st.session_state.validation_started = False
+                                st.rerun()
+                            else:
+                                # Report 생성 중 - 계속 대기
+                                time.sleep(2)
+                                st.rerun()
+                        else:
+                            # Report 상태 확인 실패 - 일단 검증 완료 처리
+                            st.session_state.validation_completed = True
+                            st.session_state.validation_started = False
+                            st.rerun()
+                    except Exception as e:
+                        # Report 확인 실패 - 일단 검증 완료 처리
+                        st.session_state.validation_completed = True
+                        st.session_state.validation_started = False
+                        st.rerun()
                 else:
                     # 검증 실패
                     st.error(f"검증 실패: {result.get('error', '알 수 없는 오류')}")
@@ -388,7 +585,58 @@ def main() -> None:
 
         # 검증 결과 표시
         if st.session_state.get('validation_completed', False):
-            # 이미 검증이 완료된 경우 - session_state에 저장된 결과 표시
+            # 보고서 버튼을 맨 위에 표시
+            st.markdown("---")
+            
+            # 보고서 상태 확인 (타임아웃 시에도 버튼 표시)
+            report_ready = False
+            report_generating = False
+            
+            try:
+                report_status_url = f"http://localhost:8000/api/report/{contract_id}/status"
+                report_status_resp = requests.get(report_status_url, timeout=30)
+                
+                if report_status_resp.status_code == 200:
+                    report_status = report_status_resp.json()
+                    
+                    if report_status.get('status') == 'completed':
+                        report_ready = True
+                    elif report_status.get('status') == 'generating':
+                        report_generating = True
+                    elif report_status.get('status') == 'not_started':
+                        st.info("⏳ 보고서가 생성 중입니다. 잠시만 기다려주세요...")
+                        time.sleep(3)
+                        st.rerun()
+                    elif report_status.get('status') == 'failed':
+                        st.error("❌ 보고서 생성에 실패했습니다.")
+                else:
+                    # 상태 확인 실패 시에도 버튼 표시 (보고서가 있을 수 있음)
+                    report_ready = True
+            
+            except requests.exceptions.Timeout:
+                # 타임아웃 시에도 버튼 표시 (보고서가 이미 생성되었을 수 있음)
+                st.info("⏳ 보고서 상태 확인 중... 버튼을 클릭하여 보고서를 확인해보세요.")
+                report_ready = True
+            
+            except Exception as e:
+                # 오류 발생 시에도 버튼 표시
+                st.warning(f"보고서 상태 확인 중 오류가 발생했습니다. 버튼을 클릭하여 보고서를 확인해보세요.")
+                report_ready = True
+            
+            # 보고서 버튼 표시
+            if report_ready:
+                if st.button("📊 최종 보고서 보기", type="primary", use_container_width=True):
+                    st.session_state.show_report = True
+                    st.session_state.contract_id = contract_id  # contract_id 저장
+                    st.rerun()
+            elif report_generating:
+                st.info("📝 최종 보고서 생성 중입니다...")
+                time.sleep(3)
+                st.rerun()
+            
+            st.markdown("---")
+            
+            # 검증 결과 상세 표시
             if 'validation_result_data' in st.session_state:
                 display_validation_result(st.session_state.validation_result_data)
             else:
@@ -1554,5 +1802,3 @@ def display_chatbot_interface(contract_id: str):
 
 if __name__ == "__main__":
     main()
-
-

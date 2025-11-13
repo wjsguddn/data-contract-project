@@ -1,13 +1,9 @@
 -r requirements.txt
 
-# Search
-# faiss-cpu>=1.8.0
-# whoosh==2.7.4
+# Report Agent는 다음 의존성을 사용합니다:
+# - openai (Azure OpenAI 클라이언트) - requirements.txt에서 상속
+# - celery (비동기 작업) - requirements.txt에서 상속
+# - sqlalchemy (데이터베이스) - requirements.txt에서 상속
+# - KnowledgeBaseLoader (공유 서비스) - requirements.txt에서 상속
 
-# LLM
-# openai>=1.50.0
-# tiktoken==0.5.2
-
-# PDF generation
-# pymupdf==1.23.14
-# reportlab==4.0.7
+# 추가 의존성 없음 (모두 requirements.txt에서 상속)

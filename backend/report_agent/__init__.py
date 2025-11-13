@@ -1,9 +1,11 @@
 """
-Report Agent Module
+Report Agent 패키지
 
-보고서 생성 에이전트 및 Celery 태스크를 제공합니다.
+A1, A2, A3 결과를 통합하여 최종 보고서를 생성합니다.
 """
 
-# TODO: 구현 후 import 추가
-# from backend.report_agent.agent import ReportAgent, generate_report_task
-# __all__ = ["ReportAgent", "generate_report_task"]
+from backend.report_agent.agent import ReportAgent
+
+__all__ = [
+    "ReportAgent"
+]

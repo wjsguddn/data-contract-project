@@ -937,3 +937,149 @@ async def chatbot_history(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+@app.get("/api/report/{contract_id}")
+async def get_report(contract_id: str, db: Session = Depends(get_db)):
+    """
+    최종 보고서 조회
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        최종 보고서 JSON
+    """
+    try:
+        # ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계약서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        # 최종 보고서 확인
+        if not validation.final_report:
+            # 상태 확인
+            contract = db.query(ContractDocument).filter(
+                ContractDocument.contract_id == contract_id
+            ).first()
+            
+            status = contract.status if contract else "unknown"
+            
+            if status == "generating_report":
+                return {
+                    "contract_id": contract_id,
+                    "status": "generating",
+                    "message": "보고서 생성 중입니다"
+                }
+            elif status == "failed":
+                return {
+                    "contract_id": contract_id,
+                    "status": "failed",
+                    "message": "보고서 생성에 실패했습니다"
+                }
+            else:
+                return {
+                    "contract_id": contract_id,
+                    "status": "not_ready",
+                    "message": "보고서가 아직 생성되지 않았습니다"
+                }
+        
+        # 최종 보고서 반환
+        return validation.final_report
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"보고서 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/report/{contract_id}/status")
+async def get_report_status(contract_id: str, db: Session = Depends(get_db)):
+    """
+    보고서 생성 상태 조회
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "contract_id": str,
+            "status": "not_started" | "generating" | "completed" | "failed",
+            "message": str,
+            "progress": dict (optional)
+        }
+    """
+    try:
+        # 계약서 상태 확인
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계약서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        # ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        # 상태 판단
+        if validation and validation.final_report:
+            return {
+                "contract_id": contract_id,
+                "status": "completed",
+                "message": "보고서 생성 완료",
+                "progress": {
+                    "step1": bool(validation.report_step1_normalized),
+                    "step2": bool(validation.report_step2_aggregated),
+                    "step3": bool(validation.report_step3_resolved),
+                    "step4": bool(validation.final_report)
+                }
+            }
+        elif contract.status == "generating_report":
+            # 진행 상황 확인
+            progress = {}
+            if validation:
+                progress = {
+                    "step1": bool(validation.report_step1_normalized),
+                    "step2": bool(validation.report_step2_aggregated),
+                    "step3": bool(validation.report_step3_resolved),
+                    "step4": bool(validation.final_report)
+                }
+            
+            return {
+                "contract_id": contract_id,
+                "status": "generating",
+                "message": "보고서 생성 중",
+                "progress": progress
+            }
+        elif contract.status == "failed":
+            return {
+                "contract_id": contract_id,
+                "status": "failed",
+                "message": "보고서 생성 실패"
+            }
+        else:
+            return {
+                "contract_id": contract_id,
+                "status": "not_started",
+                "message": "보고서 생성이 시작되지 않았습니다"
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"보고서 상태 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

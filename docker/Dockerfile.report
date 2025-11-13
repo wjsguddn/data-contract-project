@@ -24,4 +24,4 @@ COPY backend/shared/ ./backend/shared/
 COPY data/ ./data/
 
 # Celery 워커 실행
-CMD ["python", "-m", "celery", "-A", "backend.shared.core.celery_app:celery_app", "worker", "-Q", "report", "-l", "info"]
+CMD ["python", "-m", "celery", "-A", "backend.shared.core.celery_app:celery_app", "worker", "-Q", "report_generation", "-l", "info"]
