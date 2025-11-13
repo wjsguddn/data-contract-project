@@ -264,8 +264,8 @@ class AgentState(TypedDict, total=False):
     user_message: str
     session_id: str
     
-    # 대화 히스토리 (LangChain BaseMessage 사용)
-    messages: List[Any]  # List[BaseMessage]
+    # 대화 히스토리 (plain dict 사용)
+    messages: List[Dict[str, str]]  # [{"role": "user"|"assistant", "content": str}]
     
     # 계약서 구조 정보
     contract_structure: Optional[Dict[str, Any]]  # {articles: [...], exhibits: [...]}
