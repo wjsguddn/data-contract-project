@@ -626,41 +626,45 @@ JSON만 응답하세요."""
             state["decision_log"].append(decision.dict())
             return state
         
-        # 수집된 정보 요약
-        info_summary = self._build_info_summary(state)
+        # 수집된 정보 상세
         collected_info = state.get("collected_info", [])
+        collected_info_detail = self._build_collected_info_detail(collected_info)
         
         # LLM으로 충분성 평가
         prompt = f"""수집된 정보가 질문에 답변하기 충분한지 평가하세요.
 
 질문: {state['user_message']}
 
-{info_summary}
-
-수집된 정보 상세:
-{self._build_collected_info_detail(collected_info)}
+수집된 정보:
+{collected_info_detail}
 
 평가 기준:
 1. **질문에 직접 답변할 수 있는가?**
-   - 수집된 정보에 질문의 답이 포함되어 있는가?
-   - 예: "해지 조건이 있나?" → 해지 관련 조항이 수집되었는가?
+   - 수집된 정보에 질문의 답이 명확히 포함되어 있는가?
+   - 질문에 답하기 위해 필요한 내용들이 정확히 무엇인지, 수집 정보에 그 내용들이 모두 명확히 드러나 있는지를 파악해야함
+   - 단순히 관련 조항이 있다는 것만으로는 불충분
+   - 질문의 구체적인 내용(조건, 기간, 금액 등)에 대한 답이 있어야 함
 
 2. **추가 탐색이 필요한가?**
    - 질문의 핵심 정보가 누락되었는가?
-   - 이미 수집한 정보와 중복되는 탐색은 불필요
+   - 조항은 찾았지만 내용이 불완전한가?
+   - 다른 관련 조항이 더 필요한가?
 
 3. **중복 탐색 방지**
-   - 이미 같은 주제로 검색했다면 추가 탐색 불필요
+   - 이미 같은 조항을 다른 방법으로 조회했다면 추가 탐색 불필요
    - 반복 횟수: {state['iteration_count']}/{state['max_iterations']}
+
+**판단 원칙**:
+- 질문에 완전히 답변할 수 있을 때만 is_sufficient=true
+- 조항을 찾았지만 내용이 부족하면 is_sufficient=false
+- 불확실하면 is_sufficient=false (추가 탐색 선호)
 
 응답 형식 (JSON):
 {{
     "is_sufficient": true/false,
-    "reasoning": "평가 근거 (구체적으로)",
+    "reasoning": "평가 근거",
     "missing_info": "부족한 정보 (있다면, 없으면 null)"
 }}
-
-**중요**: 이미 관련 정보가 충분히 수집되었다면 is_sufficient=true로 판단하세요.
 
 JSON만 응답하세요."""
         
@@ -837,37 +841,46 @@ JSON만 응답하세요."""
         
         tool_schemas = {
             "get_contract_structure": {
-                "description": "사용자 계약서의 구조(조 목록, 별지 목록)를 파악합니다.",
+                "description": "사용자 계약서의 구조(조와 별지들의 제목 및 목록)를 파악합니다.",
                 "parameters": {"contract_id": "계약서 ID (자동 제공)"}
             },
-            "hybrid_search": {
-                "description": "키워드 기반 하이브리드 검색으로 관련 조항을 찾습니다.",
-                "parameters": {
-                    "contract_id": "계약서 ID (자동 제공)",
-                    "topics": "검색 주제 리스트 [{'topic_name': '주제명', 'queries': ['검색어1', '검색어2']}]"
-                }
-            },
             "get_article_by_index": {
-                "description": "조 번호 또는 별지 번호로 직접 조회합니다.",
+                "description": """조 번호 또는 별지 번호로 직접 조회합니다.
+- get_contract_structure를 통해 얻은 조항 목록이 있고, 해당 목록 중 질문에 답하는데에 유용한 정보가 있을 것으로 판단되는 항목들이 있다면 사용합니다.
+- 사용자 질문에서 조 번호나 별지 번호가 직접적으로 언급된 경우 사용합니다.""",
                 "parameters": {
                     "contract_id": "계약서 ID (자동 제공)",
-                    "article_numbers": "조 번호 리스트 [1, 3, 5]",
-                    "exhibit_numbers": "별지 번호 리스트 [1, 2]"
+                    "article_numbers": "조 번호 리스트 [번호, 번호, ...]",
+                    "exhibit_numbers": "별지 번호 리스트 [번호, ...]"
                 }
             },
             "get_article_by_title": {
-                "description": "조 제목으로 조항을 검색합니다.",
+                "description": """조 제목 또는 별지 제목으로 직접 조회합니다.
+- 사용자 질문에서 조의 제목이나 별지의 제목이 직접적으로 언급된 것으로 보이는 경우 사용합니다.""",
                 "parameters": {
                     "contract_id": "계약서 ID (자동 제공)",
-                    "titles": "제목 키워드 리스트 ['데이터 제공', '보안']"
+                    "titles": "제목 키워드 리스트 ['제목', '제목', ...]"
+                }
+            },
+            "hybrid_search": {
+                "description": """쿼리 기반 하이브리드 검색으로 관련 조항을 찾습니다.
+- get_contract_structure를 통해 얻은 조항 목록에서, 질문의 주제들과 대응되는 항목이 없다고 판단되는 경우 사용합니다.
+- get_article_by_index 또는 get_article_by_title 툴을 통해서 직접 조회를 했음에도 원하는 정보를 얻지 못한 경우 사용합니다.
+- hybrid_search까지 사용하여 정보를 수집했음에도 원하는 정보를 얻지 못한 경우, 이전에 사용하지 않은 새로운 쿼리로 검색을 시도할 수 있습니다.""",
+                "parameters": {
+                    "contract_id": "계약서 ID (자동 제공)",
+                    "topics": "검색 주제 리스트 [{'topic_name': '주제명', 'queries': ['검색쿼리', '검색쿼리']}, {...}]"
                 }
             },
             "lookup_standard_contract": {
-                "description": "표준계약서 조문을 조회합니다.",
+                "description": """표준계약서 조문을 조회합니다.(표준계약서란 계약서의 작성 형식에 있어서 참고할만한 모범 템플릿으로, 실제 계약서는 아닙니다.)
+- 사용자가 계약서의 형식 검증이나 작성에 대한 질문을 한 경우 사용합니다.
+- 사용자 계약서의 조항 중에서 모범 템플릿 형식을 파악하고 싶은 조항의 번호와 해당 조항 관련 주제를 입력합니다.
+- 조항 번호를 알 수 없는 경우, 주제만 입력합니다.""",
                 "parameters": {
                     "contract_id": "계약서 ID (자동 제공)",
-                    "user_article_numbers": "사용자 조 번호 리스트 [3, 5] (매칭 기반)",
-                    "topic": "검색 주제 문자열 (주제 기반)"
+                    "user_article_numbers": "조 번호 리스트 [번호, 번호, ...]",
+                    "topic": "검색 주제 문자열..."
                 }
             }
         }
@@ -888,7 +901,9 @@ JSON만 응답하세요."""
         return "\n".join(descriptions)
     
     def _build_info_summary(self, state: AgentState) -> str:
-        """수집된 정보 요약"""
+        """수집된 정보 요약 - 더 이상 사용하지 않음 (상세 정보로 대체)"""
+        # 이 메서드는 더 이상 evaluate_sufficiency에서 사용되지 않음
+        # 하위 호환성을 위해 유지
         collected_info = state.get("collected_info", [])
         
         if not collected_info:
@@ -903,30 +918,123 @@ JSON만 응답하세요."""
         return "\n".join(summary_parts)
     
     def _build_collected_info_detail(self, collected_info: List[Dict[str, Any]]) -> str:
-        """수집된 정보 상세 (충분성 평가용)"""
+        """수집된 정보 상세 (충분성 평가용) - 실제 내용 포함"""
         if not collected_info:
             return "없음"
         
-        details = []
-        for idx, info in enumerate(collected_info, 1):
-            source = info.get("source", "unknown")
+        sections = []
+        
+        # 1. 계약서 구조 (get_contract_structure)
+        structure_info = next((info for info in collected_info if info.get("source") == "get_contract_structure"), None)
+        if structure_info:
+            content = structure_info.get("content", {})
+            articles = content.get("articles", [])
+            exhibits = content.get("exhibits", [])
+            
+            structure_text = "사용자 계약서 구조:\n"
+            if articles:
+                structure_text += "조: " + ", ".join(articles) + "\n"
+            if exhibits:
+                structure_text += "별지: " + ", ".join(exhibits)
+            
+            sections.append(structure_text.strip())
+        
+        # 2. 사용자 계약서 조항 (중복 제거 및 통합)
+        articles_dict = {}  # {article_no: {title, content}}
+        exhibits_dict = {}  # {exhibit_no: {title, content}}
+        
+        for info in collected_info:
+            source = info.get("source")
             content = info.get("content", {})
             
-            # 내용 요약
-            if isinstance(content, dict):
-                if "total_articles" in content:
-                    details.append(f"{idx}. {source}: {content.get('total_articles', 0)}개 조")
-                elif "results" in content:
-                    total = sum(len(articles) for articles in content.get("results", {}).values())
-                    details.append(f"{idx}. {source}: {total}개 조 검색됨")
-                elif "matched_articles" in content:
-                    details.append(f"{idx}. {source}: {len(content.get('matched_articles', []))}개 조")
-                else:
-                    details.append(f"{idx}. {source}: 정보 수집됨")
-            else:
-                details.append(f"{idx}. {source}: 정보 수집됨")
+            # get_article_by_index, get_article_by_title
+            if source in ["get_article_by_index", "get_article_by_title"]:
+                matched_articles = content.get("matched_articles", [])
+                for article in matched_articles:
+                    article_no = str(article.get("article_no", ""))
+                    if article_no and article_no not in articles_dict:
+                        articles_dict[article_no] = {
+                            "title": article.get("title", ""),
+                            "content": article.get("content", [])
+                        }
+                
+                matched_exhibits = content.get("matched_exhibits", [])
+                for exhibit in matched_exhibits:
+                    exhibit_no = str(exhibit.get("exhibit_no", ""))
+                    if exhibit_no and exhibit_no not in exhibits_dict:
+                        exhibits_dict[exhibit_no] = {
+                            "title": exhibit.get("title", ""),
+                            "content": exhibit.get("content", [])
+                        }
+            
+            # hybrid_search
+            elif source == "hybrid_search":
+                results = content.get("results", {})
+                for topic_name, articles_list in results.items():
+                    for article in articles_list:
+                        article_no = str(article.get("article_no", ""))
+                        if article_no and article_no not in articles_dict:
+                            articles_dict[article_no] = {
+                                "title": article.get("title", ""),
+                                "content": article.get("content", [])
+                            }
         
-        return "\n".join(details)
+        # 조항 텍스트 생성
+        if articles_dict or exhibits_dict:
+            articles_text = "사용자 계약서 조항:\n"
+            
+            # 조 번호 순으로 정렬
+            for article_no in sorted(articles_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999):
+                article = articles_dict[article_no]
+                title = article["title"]
+                content = article["content"]
+                
+                articles_text += f"\n제{article_no}조({title})\n"
+                if isinstance(content, list):
+                    articles_text += "\n".join(content)
+                else:
+                    articles_text += str(content)
+                articles_text += "\n"
+            
+            # 별지
+            for exhibit_no in sorted(exhibits_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999):
+                exhibit = exhibits_dict[exhibit_no]
+                title = exhibit["title"]
+                content = exhibit["content"]
+                
+                articles_text += f"\n별지{exhibit_no}({title})\n"
+                if isinstance(content, list):
+                    articles_text += "\n".join(content)
+                else:
+                    articles_text += str(content)
+                articles_text += "\n"
+            
+            sections.append(articles_text.strip())
+        
+        # 3. 표준계약서 템플릿 (lookup_standard_contract)
+        standard_info = next((info for info in collected_info if info.get("source") == "lookup_standard_contract"), None)
+        if standard_info:
+            content = standard_info.get("content", {})
+            standard_articles = content.get("standard_articles", [])
+            
+            if standard_articles:
+                template_text = "계약서 작성 참고용 템플릿 조항:\n"
+                
+                for article in standard_articles:
+                    article_no = article.get("article_no", "")
+                    title = article.get("title", "")
+                    article_content = article.get("content", [])
+                    
+                    template_text += f"\n제{article_no}조({title})\n"
+                    if isinstance(article_content, list):
+                        template_text += "\n".join(article_content)
+                    else:
+                        template_text += str(article_content)
+                    template_text += "\n"
+                
+                sections.append(template_text.strip())
+        
+        return "\n\n".join(sections) if sections else "없음"
     
     def _build_context_from_collected_info(self, state: AgentState) -> str:
         """수집된 정보를 컨텍스트로 변환"""
