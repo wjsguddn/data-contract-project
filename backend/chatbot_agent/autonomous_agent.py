@@ -11,7 +11,6 @@ from datetime import datetime
 from openai import AzureOpenAI
 
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from backend.chatbot_agent.models import AgentState, DecisionLog, CollectedInfo
@@ -160,21 +159,19 @@ class AutonomousAgent:
             contract_id: 계약서 ID
             user_message: 사용자 메시지
             session_id: 세션 ID
+            previous_turn: 직전 대화 이력 (plain dict)
             
         Returns:
             최종 AgentState
         """
         # 초기 상태 구성
-        # 직전 대화를 messages에 포함 (LangChain 형식으로 변환)
+        # 직전 대화를 messages에 포함 (plain dict 그대로 사용)
         messages = []
         if previous_turn:
-            for msg in previous_turn:
-                if msg["role"] == "user":
-                    messages.append(HumanMessage(content=msg["content"]))
-                elif msg["role"] == "assistant":
-                    messages.append(AIMessage(content=msg["content"]))
+            messages.extend(previous_turn)
+        
         # 현재 질문 추가
-        messages.append(HumanMessage(content=user_message))
+        messages.append({"role": "user", "content": user_message})
         
         initial_state: AgentState = {
             "contract_id": contract_id,
@@ -291,10 +288,12 @@ class AutonomousAgent:
         if len(messages) > 1:
             # 현재 질문 제외하고 직전 대화만
             for msg in messages[:-1]:
-                if isinstance(msg, HumanMessage):
-                    context_text += f"사용자: {msg.content}\n"
-                elif isinstance(msg, AIMessage):
-                    context_text += f"챗봇: {msg.content}\n"
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user":
+                    context_text += f"사용자: {content}\n"
+                elif role == "assistant":
+                    context_text += f"챗봇: {content}\n"
         
         # 프롬프트 구성
         context_section = f"이전 대화:\n{context_text}\n" if context_text else ""
@@ -331,7 +330,7 @@ JSON만 응답하세요."""
                         "content": prompt
                     }
                 ],
-                model="gpt-4o-mini",
+                model="gpt-4.1-nano",
                 temperature=0.2,
                 max_tokens=200,
                 response_format={"type": "json_object"}
@@ -400,10 +399,12 @@ JSON만 응답하세요."""
             executed_tool_signatures.add(signature)
         
         logger.info(f"[plan_next_action] 이미 실행한 툴: {len(executed_tool_signatures)}개")
-        
-        # 1. 규칙 기반 툴 제안
-        quick_suggestion = self.classifier.suggest_tool(user_message)
-        
+
+        # 1. 규칙 기반 툴 제안 (최초 1회만 - tool_history가 비어있을 때만)
+        quick_suggestion = None
+        if len(tool_history) == 0:
+            quick_suggestion = self.classifier.suggest_tool(user_message)
+
         if quick_suggestion is not None:
             tool_name, args, reasoning = quick_suggestion
             
@@ -609,10 +610,16 @@ JSON만 응답하세요."""
             업데이트된 상태
         """
         logger.info("[evaluate_sufficiency] 충분성 평가 시작")
-        
-        # 반복 횟수 증가
-        state["iteration_count"] = state.get("iteration_count", 0) + 1
-        
+
+        # 반복 횟수 증가 (get_contract_structure 툴은 카운트 제외)
+        tool_history = state.get("tool_history", [])
+        last_tool = tool_history[-1].get("tool") if tool_history else None
+
+        if last_tool != "get_contract_structure":
+            state["iteration_count"] = state.get("iteration_count", 0) + 1
+        else:
+            logger.info("[evaluate_sufficiency] get_contract_structure 사용으로 반복 횟수 카운트 생략")
+
         # 최대 반복 체크
         if state["iteration_count"] >= state["max_iterations"]:
             logger.warning(f"[evaluate_sufficiency] 최대 반복 횟수 도달: {state['iteration_count']}")
@@ -682,15 +689,16 @@ JSON만 응답하세요."""
                 ],
                 model="gpt-4o",
                 temperature=0.2,
-                max_tokens=300,
+                max_tokens=200,
                 response_format={"type": "json_object"}
             )
             
             result = json.loads(response_text)
-            
+
             is_sufficient = result.get("is_sufficient", False)
             reasoning = result.get("reasoning", "")
-            
+            missing_info = result.get("missing_info")
+
             decision = DecisionLog(
                 step="evaluation",
                 reasoning=reasoning,
@@ -699,10 +707,12 @@ JSON만 응답하세요."""
                 method="llm"
             )
             state["decision_log"].append(decision.dict())
-            
+
             logger.info(
                 f"[evaluate_sufficiency] 평가 완료: "
-                f"is_sufficient={is_sufficient}"
+                f"is_sufficient={is_sufficient}, "
+                f"reasoning={reasoning}, "
+                f"missing_info={missing_info}"
             )
             
         except Exception as e:
@@ -738,14 +748,16 @@ JSON만 응답하세요."""
         system_prompt = """당신은 계약서 질의응답 전문가입니다.
 
 규칙:
-1. 제공된 계약서 내용만을 기반으로 답변하세요
+1. 제공된 내용을 기반으로 답변하세요
 2. 계약서에 없는 내용은 추측하지 마세요
 3. 참조한 조항의 출처를 명시하세요
 4. 명확하고 이해하기 쉽게 답변하세요
-5. 불확실한 경우 솔직히 말하세요"""
+5. 불확실한 경우 솔직히 말하세요
+6. 표준계약서는 계약서 작성 시 형식 참고용 템플릿입니다. 표준계약서의 형식이 무조건 옳은 것은 아니며 표준계약서의 내용에 매몰되어선 안됩니다.
+7. 사용자 계약서와 표준계약서의 차이를 명확히 인지하고 구분하세요. 사용자가 표준계약서라고 직접 명시하지 않으면 그것은 사용자 계약서에 대한 내용입니다."""
         
         # 사용자 프롬프트
-        user_prompt = f"""계약서 내용:
+        user_prompt = f"""
 {context}
 
 질문: {state['user_message']}
@@ -760,7 +772,7 @@ JSON만 응답하세요."""
                 ],
                 model="gpt-4o",
                 temperature=0.3,
-                max_tokens=1000
+                max_tokens=6000
             )
             
             # 출처 추출
@@ -825,14 +837,17 @@ JSON만 응답하세요."""
     # ============================================
     
     def _build_status_summary(self, state: AgentState) -> str:
-        """현재 상태 요약"""
+        """현재 상태 요약 (계획 수립용)"""
+        # 수집된 정보 상세 가져오기 (evaluator와 동일한 방식)
+        collected_info = state.get("collected_info", [])
+        collected_info_detail = self._build_collected_info_detail(collected_info)
+
         summary_parts = [
             f"질문: {state['user_message']}",
-            f"반복 횟수: {state.get('iteration_count', 0)}/{state['max_iterations']}",
             f"실행한 툴: {len(state.get('tool_history', []))}개",
-            f"수집된 정보: {len(state.get('collected_info', []))}개"
+            f"\n수집된 정보:\n{collected_info_detail}"
         ]
-        
+
         return "\n".join(summary_parts)
     
     def _build_tool_descriptions(self) -> str:
@@ -841,13 +856,15 @@ JSON만 응답하세요."""
         
         tool_schemas = {
             "get_contract_structure": {
-                "description": "사용자 계약서의 구조(조와 별지들의 제목 및 목록)를 파악합니다.",
+                "description": """사용자 계약서의 전체 구조(조와 별지들의 제목 및 목록)를 파악합니다.
+- 사용자 계약서의 전체 항목들(조, 별지)의 제목을 통해서 어떤 항목에 어떤 내용이 작성되어있는지를 대략적으로 파악할 수 있습니다.""",
                 "parameters": {"contract_id": "계약서 ID (자동 제공)"}
             },
             "get_article_by_index": {
-                "description": """조 번호 또는 별지 번호로 직접 조회합니다.
-- get_contract_structure를 통해 얻은 조항 목록이 있고, 해당 목록 중 질문에 답하는데에 유용한 정보가 있을 것으로 판단되는 항목들이 있다면 사용합니다.
-- 사용자 질문에서 조 번호나 별지 번호가 직접적으로 언급된 경우 사용합니다.""",
+                "description": """사용자 계약서의 조 번호 또는 별지 번호로 해당 항목의 상세 내용을 직접 조회합니다.
+- 수집된 정보에 사용자 계약서 구조가 있고, 해당 목록 중 질문에 연관된 정보가 있을 것으로 판단되는 항목들이 있다면 사용합니다.
+- 사용자 질문에서 조 번호나 별지 번호가 직접적으로 언급된 경우 사용합니다.
+- article_numbers와 exhibit_numbers를 모두 명시해도 좋고, 둘 중 하나만 명시해도 좋습니다.""",
                 "parameters": {
                     "contract_id": "계약서 ID (자동 제공)",
                     "article_numbers": "조 번호 리스트 [번호, 번호, ...]",
@@ -855,16 +872,17 @@ JSON만 응답하세요."""
                 }
             },
             "get_article_by_title": {
-                "description": """조 제목 또는 별지 제목으로 직접 조회합니다.
-- 사용자 질문에서 조의 제목이나 별지의 제목이 직접적으로 언급된 것으로 보이는 경우 사용합니다.""",
+                "description": """사용자 계약서의 조 제목 또는 별지 제목으로 해당 항목의 상세 내용을 직접 조회합니다.
+- 사용자 질문에서 조의 제목이나 별지의 제목이 직접적으로 언급된 것으로 보이는 경우 사용합니다.
+- 수집된 정보에 사용자 계약서 구조가 있다면, 이 툴은 사용을 지양합니다.(get_article_by_index를 사용할 수 있기 때문에)""",
                 "parameters": {
                     "contract_id": "계약서 ID (자동 제공)",
                     "titles": "제목 키워드 리스트 ['제목', '제목', ...]"
                 }
             },
             "hybrid_search": {
-                "description": """쿼리 기반 하이브리드 검색으로 관련 조항을 찾습니다.
-- get_contract_structure를 통해 얻은 조항 목록에서, 질문의 주제들과 대응되는 항목이 없다고 판단되는 경우 사용합니다.
+                "description": """쿼리 기반 하이브리드 검색으로 사용자 계약서의 관련 조항을 찾습니다.
+- 수집된 사용자 계약서 구조에, 질문의 주제들과 대응되는 항목이 없다고 판단되는 경우 사용합니다.
 - get_article_by_index 또는 get_article_by_title 툴을 통해서 직접 조회를 했음에도 원하는 정보를 얻지 못한 경우 사용합니다.
 - hybrid_search까지 사용하여 정보를 수집했음에도 원하는 정보를 얻지 못한 경우, 이전에 사용하지 않은 새로운 쿼리로 검색을 시도할 수 있습니다.""",
                 "parameters": {
@@ -1018,7 +1036,7 @@ JSON만 응답하세요."""
             standard_articles = content.get("standard_articles", [])
             
             if standard_articles:
-                template_text = "계약서 작성 참고용 템플릿 조항:\n"
+                template_text = "계약서 작성 참고용 템플릿(표준계약서)조항:\n"
                 
                 for article in standard_articles:
                     article_no = article.get("article_no", "")
@@ -1037,19 +1055,14 @@ JSON만 응답하세요."""
         return "\n\n".join(sections) if sections else "없음"
     
     def _build_context_from_collected_info(self, state: AgentState) -> str:
-        """수집된 정보를 컨텍스트로 변환"""
+        """수집된 정보를 컨텍스트로 변환 (상세 포맷팅)"""
         collected_info = state.get("collected_info", [])
-        
+
         if not collected_info:
             return "관련 정보를 찾을 수 없습니다."
-        
-        context_parts = []
-        
-        for info in collected_info:
-            content = info.get("content", {})
-            context_parts.append(str(content))
-        
-        return "\n\n".join(context_parts)
+
+        # evaluator/planner와 동일한 방식 사용 (중복 제거, 정렬, 구조화)
+        return self._build_collected_info_detail(collected_info)
     
     def _extract_sources(self, state: AgentState) -> List[Dict[str, Any]]:
         """출처 추출"""
