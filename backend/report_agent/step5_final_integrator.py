@@ -39,13 +39,15 @@ class Step5FinalIntegrator:
             logger.warning(f"Azure OpenAI 클라이언트 초기화 실패: {e}. 서술형 보고서 생성 불가")
     
     def integrate(self, step4_result: Dict[str, Any], 
-                 a2_result: Dict[str, Any]) -> Dict[str, Any]:
+                 a2_result: Dict[str, Any],
+                 a2_recovered_result: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        체크리스트 결과를 통합하여 최종 보고서 생성
+        체크리스트 결과를 통합하여 최종 보고서 생성 (Primary + Recovered 병합)
         
         Args:
             step4_result: Step 4 결과 (포맷팅된 보고서)
-            a2_result: A2 체크리스트 검증 결과 (None 가능)
+            a2_result: A2 Primary 체크리스트 검증 결과 (None 가능)
+            a2_recovered_result: A2 Recovered 체크리스트 검증 결과 (None 가능)
             
         Returns:
             최종 통합 보고서 JSON
@@ -55,9 +57,9 @@ class Step5FinalIntegrator:
         # Step4 결과 복사
         final_report = step4_result.copy()
         
-        # A2 결과 확인
+        # A2 Primary 결과 확인
         if not a2_result:
-            logger.warning("A2 체크리스트 결과가 없습니다. 체크리스트 통합 스킵")
+            logger.warning("A2 Primary 체크리스트 결과가 없습니다. 체크리스트 통합 스킵")
             final_report["checklist_summary"] = {
                 "total_items": 0,
                 "passed_items": 0,
@@ -67,16 +69,21 @@ class Step5FinalIntegrator:
                 "pass_rate": 0.0
             }
         else:
+            # A2 Primary + Recovered 병합
+            merged_a2_result = self._merge_a2_results(a2_result, a2_recovered_result)
+            
             # 체크리스트 결과 통합
             final_report["user_articles"] = self._integrate_checklist_results(
                 step4_result.get("user_articles", []),
-                a2_result
+                merged_a2_result
             )
             
             # 체크리스트 통계 추가
-            final_report["checklist_summary"] = self._calculate_checklist_summary(a2_result)
+            final_report["checklist_summary"] = self._calculate_checklist_summary(merged_a2_result)
             
-            logger.info(f"체크리스트 통합 완료: {len(a2_result.get('matched_articles', []))}개 조항")
+            primary_count = len(a2_result.get('matched_articles', [])) or len(a2_result.get('std_article_results', []))
+            recovered_count = len(a2_recovered_result.get('std_article_results', [])) if a2_recovered_result else 0
+            logger.info(f"체크리스트 통합 완료: Primary {primary_count}개 + Recovered {recovered_count}개 조항")
         
         # 조항별 서술형 보고서 생성
         if self.client:
@@ -94,6 +101,52 @@ class Step5FinalIntegrator:
         logger.info(f"Step 5 최종 통합 완료")
         
         return final_report
+    
+    def _merge_a2_results(self, a2_primary: Dict[str, Any], 
+                         a2_recovered: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        A2 Primary와 A2 Recovered 결과 병합
+        
+        Recovered 결과는 A1 재검증 후의 매칭 결과를 기반으로 하므로,
+        Primary에 없는 체크리스트 항목을 추가합니다.
+        
+        Args:
+            a2_primary: A2 Primary 결과
+            a2_recovered: A2 Recovered 결과 (None 가능)
+            
+        Returns:
+            병합된 A2 결과
+        """
+        if not a2_recovered:
+            logger.info("A2 Recovered 결과 없음. Primary만 사용")
+            return a2_primary
+        
+        logger.info("A2 Primary + Recovered 병합 시작")
+        
+        # Primary 결과 복사
+        merged = a2_primary.copy()
+        
+        # std_article_results 형식인 경우
+        if 'std_article_results' in a2_primary and 'std_article_results' in a2_recovered:
+            primary_results = merged['std_article_results']
+            recovered_results = a2_recovered['std_article_results']
+            
+            # Recovered의 표준 조항들을 Primary에 추가
+            primary_std_ids = {r['std_article_id'] for r in primary_results}
+            
+            added_count = 0
+            for recovered_std in recovered_results:
+                std_id = recovered_std['std_article_id']
+                
+                if std_id not in primary_std_ids:
+                    # Primary에 없는 표준 조항 추가
+                    primary_results.append(recovered_std)
+                    added_count += 1
+                    logger.info(f"  A2 Recovered 추가: {std_id} → 사용자 조항 {recovered_std.get('matched_user_articles')}")
+            
+            logger.info(f"A2 병합 완료: {added_count}개 표준 조항 추가")
+        
+        return merged
     
     def _integrate_checklist_results(self, user_articles: List[Dict], 
                                     a2_result: Dict[str, Any]) -> List[Dict]:
@@ -120,15 +173,22 @@ class Step5FinalIntegrator:
                 matched_users = std_result.get("matched_user_articles", [])
                 checklist_results = std_result.get("checklist_results", [])
                 
-                # 이 표준 조항에 매칭된 모든 사용자 조항에 체크리스트 추가
-                for user_info in matched_users:
-                    user_article_no = user_info.get("user_article_no")
-                    if user_article_no is not None:
-                        if user_article_no not in a2_by_article:
-                            a2_by_article[user_article_no] = []
+                # 체크리스트 항목별로 source_article_no 추출 및 매핑
+                for checklist_item in checklist_results:
+                    # source_article_no 추출 (방안 3)
+                    source_article_no = self._extract_source_article_no(
+                        checklist_item, 
+                        matched_users
+                    )
+                    
+                    if source_article_no is not None:
+                        if source_article_no not in a2_by_article:
+                            a2_by_article[source_article_no] = []
                         
-                        # 체크리스트 항목 추가 (중복 방지)
-                        a2_by_article[user_article_no].extend(checklist_results)
+                        # source_article_no 추가
+                        checklist_with_source = checklist_item.copy()
+                        checklist_with_source["source_article_no"] = source_article_no
+                        a2_by_article[source_article_no].append(checklist_with_source)
             
             logger.info(f"변환 완료: {len(a2_by_article)}개 사용자 조항에 체크리스트 매핑됨")
         
@@ -166,6 +226,67 @@ class Step5FinalIntegrator:
                         f"체크리스트 {len(checklist_items)}개")
         
         return user_articles
+    
+    def _extract_source_article_no(self, checklist_item: Dict[str, Any], 
+                                   matched_users: List[Dict]) -> int:
+        """
+        체크리스트 항목의 evidence 또는 recommendation에서 조항 번호 추출
+        
+        Args:
+            checklist_item: 체크리스트 항목
+            matched_users: 매칭된 사용자 조항 리스트
+            
+        Returns:
+            조항 번호 (정수) 또는 None
+        """
+        import re
+        
+        # 1. evidence에서 조항 번호 추출 시도 (YES 결과)
+        evidence = checklist_item.get("evidence", "")
+        if evidence:
+            match = re.search(r'제(\d+)조', evidence)
+            if match:
+                article_num = int(match.group(1))
+                for user_info in matched_users:
+                    if user_info.get("user_article_no") == article_num:
+                        return article_num
+            
+            if "서문" in evidence:
+                for user_info in matched_users:
+                    if user_info.get("user_article_no") == 0:
+                        return 0
+        
+        # 2. recommendation에서 조항 번호 추출 시도 (NO 결과)
+        recommendation = checklist_item.get("recommendation", "")
+        if recommendation:
+            match = re.search(r'제(\d+)조', recommendation)
+            if match:
+                article_num = int(match.group(1))
+                for user_info in matched_users:
+                    if user_info.get("user_article_no") == article_num:
+                        return article_num
+            
+            if "서문" in recommendation:
+                for user_info in matched_users:
+                    if user_info.get("user_article_no") == 0:
+                        return 0
+        
+        # 3. missing_explanation에서 조항 번호 추출 시도 (NO 결과)
+        missing_explanation = checklist_item.get("missing_explanation", "")
+        if missing_explanation:
+            match = re.search(r'제(\d+)조', missing_explanation)
+            if match:
+                article_num = int(match.group(1))
+                for user_info in matched_users:
+                    if user_info.get("user_article_no") == article_num:
+                        return article_num
+        
+        # 4. 패턴을 찾지 못하면 첫 번째 매칭 조항 사용 (폴백)
+        if matched_users:
+            logger.warning(f"조항 번호 추출 실패, 첫 번째 매칭 조항 사용: {evidence[:50] if evidence else recommendation[:50]}...")
+            return matched_users[0].get("user_article_no")
+        
+        return None
     
     def _calculate_checklist_summary(self, a2_result: Dict[str, Any]) -> Dict[str, Any]:
         """

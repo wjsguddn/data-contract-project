@@ -35,7 +35,8 @@ class Step1Normalizer:
         self.std_chunks = None
     
     def normalize(self, a1_result: Dict[str, Any], a3_result: Dict[str, Any], 
-                  contract_type: str) -> Dict[str, Any]:
+                  a3_recovered_result: Dict[str, Any] = None,
+                  contract_type: str = None) -> Dict[str, Any]:
         """
         A1, A3 결과를 사용자 조항 기준으로 정규화
         
@@ -65,9 +66,14 @@ class Step1Normalizer:
             logger.info(f"A1 파싱 완료: 전역 누락 {len(overall_missing)}개, "
                        f"매칭된 사용자 조항 {len(user_articles)}개")
             
-            # A3 파싱 (기존 user_articles에 추가)
+            # A3 Primary 파싱 (기존 user_articles에 추가)
             self._parse_a3_results(a3_result, user_articles, contract_type)
-            logger.info(f"A3 파싱 완료: 총 사용자 조항 {len(user_articles)}개")
+            logger.info(f"A3 Primary 파싱 완료: 총 사용자 조항 {len(user_articles)}개")
+            
+            # A3 Recovered 파싱 및 병합 (있는 경우)
+            if a3_recovered_result:
+                self._merge_a3_recovered_results(a3_recovered_result, user_articles, contract_type)
+                logger.info(f"A3 Recovered 병합 완료")
             
             # 중복 제거
             overall_missing = self._remove_duplicates(overall_missing, user_articles)
@@ -349,6 +355,114 @@ class Step1Normalizer:
                         })
                 
                 logger.debug(f"{user_article_no}: insufficient {len(insufficient_items)}개 추가")
+    
+    def _merge_a3_recovered_results(self, a3_recovered_result: Dict[str, Any], 
+                                    user_articles: Dict[str, Dict], contract_type: str):
+        """
+        A3 Recovered 결과를 user_articles에 병합
+        
+        Recovered 결과는 A1 재검증 후의 매칭 결과를 기반으로 하므로,
+        Primary 결과보다 더 정확합니다. 따라서 Recovered의 insufficient/missing 항목을
+        Primary 결과에 추가합니다.
+        
+        Args:
+            a3_recovered_result: A3 Recovered 결과
+            user_articles: 기존 user_articles (Primary 결과 포함)
+            contract_type: 계약 유형
+        """
+        logger.info("A3 Recovered 결과 병합 시작")
+        
+        for article in a3_recovered_result.get("article_analysis", []):
+            user_article_no = f"user_article_{article['user_article_no']}"
+            
+            # user_articles에 없으면 초기화
+            if user_article_no not in user_articles:
+                user_articles[user_article_no] = {
+                    "matched": [],
+                    "insufficient": [],
+                    "missing": []
+                }
+            
+            # A3 Recovered의 insufficient/missing 항목 추가
+            # (matched는 추가하지 않음 - Primary와 중복 방지)
+            
+            # sub_items 수집 (summary 활용)
+            sub_items_by_global_id = {}
+            for matched in article.get("matched_articles", []):
+                for sub_item in matched.get("sub_items", []):
+                    idx = sub_item.get("index")
+                    matched_chunks = matched.get("matched_chunks", [])
+                    if idx is not None and idx < len(matched_chunks):
+                        chunk_global_id = matched_chunks[idx].get("global_id")
+                        if chunk_global_id:
+                            sub_items_by_global_id[chunk_global_id] = sub_item
+            
+            suggestions = article.get("suggestions", [])
+            recovered_insufficient_count = 0
+            recovered_missing_count = 0
+            
+            for suggestion in suggestions:
+                # missing_items 병합
+                missing_items = suggestion.get("missing_items", [])
+                for item in missing_items:
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            # 중복 체크: Primary에 이미 있는지 확인
+                            existing_ids = [m.get("std_clause_id") for m in user_articles[user_article_no]["missing"]]
+                            
+                            if global_id not in existing_ids:
+                                # A3 sub_items에서 summary 찾기
+                                sub_item = sub_items_by_global_id.get(global_id)
+                                if sub_item and sub_item.get("fidelity") == "missing":
+                                    summary = sub_item.get("summary", "")
+                                    analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                                else:
+                                    analysis = f"{std_article} {std_clause}: {reason}"
+                                
+                                user_articles[user_article_no]["missing"].append({
+                                    "std_clause_id": global_id,
+                                    "analysis": analysis
+                                })
+                                recovered_missing_count += 1
+                                logger.info(f"  {user_article_no}: Recovered missing 추가 - {global_id}")
+                
+                # insufficient_items 병합
+                insufficient_items = suggestion.get("insufficient_items", [])
+                for item in insufficient_items:
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            # 중복 체크: Primary에 이미 있는지 확인
+                            existing_ids = [m.get("std_clause_id") for m in user_articles[user_article_no]["insufficient"]]
+                            
+                            if global_id not in existing_ids:
+                                # A3 sub_items에서 summary 찾기
+                                sub_item = sub_items_by_global_id.get(global_id)
+                                if sub_item and sub_item.get("fidelity") == "insufficient":
+                                    summary = sub_item.get("summary", "")
+                                    analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                                else:
+                                    analysis = f"{std_article} {std_clause}: {reason}"
+                                
+                                user_articles[user_article_no]["insufficient"].append({
+                                    "std_clause_id": global_id,
+                                    "analysis": analysis
+                                })
+                                recovered_insufficient_count += 1
+                                logger.info(f"  {user_article_no}: Recovered insufficient 추가 - {global_id}")
+            
+            if recovered_insufficient_count > 0 or recovered_missing_count > 0:
+                logger.info(f"{user_article_no}: Recovered 병합 완료 - "
+                          f"insufficient {recovered_insufficient_count}개, missing {recovered_missing_count}개 추가")
     
     def _map_to_global_id(self, std_article: str, std_clause: str, contract_type: str) -> str:
         """

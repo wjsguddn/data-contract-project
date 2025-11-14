@@ -76,10 +76,11 @@ class ReportAgent:
             # Step 0: 입력 데이터 로드
             input_data = self._load_input_data(db, contract_id)
             
-            # Step 1: 정규화
+            # Step 1: 정규화 (Primary + Recovered 병합)
             step1_result = self.step1.normalize(
                 a1_result=input_data['a1_result'],
                 a3_result=input_data['a3_result'],
+                a3_recovered_result=input_data.get('a3_recovered_result'),
                 contract_type=input_data['contract_type']
             )
             self._save_step_result(db, contract_id, "report_step1_normalized", step1_result)
@@ -110,7 +111,8 @@ class ReportAgent:
             # Step 5: 체크리스트 통합 + 최종 보고서
             final_report = self.step5.integrate(
                 step4_result=step4_result,
-                a2_result=input_data['a2_result']
+                a2_result=input_data['a2_result'],
+                a2_recovered_result=input_data.get('a2_recovered_result')
             )
             logger.info(f"[Step 5] 최종 통합 완료")
             
@@ -181,12 +183,32 @@ class ReportAgent:
         # A2 결과 로드 (없으면 빈 딕셔너리)
         a2_result = validation_result.checklist_validation or {"matched_articles": []}
         
-        logger.info(f"입력 데이터 로드 완료: A1, A2 ({len(a2_result.get('matched_articles', []))}개 조항), A3, 계약서 원본")
+        # A2 Recovered 결과 로드 (선택적)
+        a2_recovered_result = validation_result.checklist_validation_recovered
+        
+        # A3 Recovered 결과 로드 (선택적)
+        a3_recovered_result = validation_result.content_analysis_recovered
+        
+        # 로그 메시지 생성
+        log_parts = ["A1"]
+        a2_count = len(a2_result.get('matched_articles', [])) or len(a2_result.get('std_article_results', []))
+        log_parts.append(f"A2 Primary ({a2_count}개 조항)")
+        if a2_recovered_result:
+            a2_recovered_count = len(a2_recovered_result.get('std_article_results', []))
+            log_parts.append(f"A2 Recovered ({a2_recovered_count}개 조항)")
+        log_parts.append("A3 Primary")
+        if a3_recovered_result:
+            log_parts.append("A3 Recovered")
+        log_parts.append("계약서 원본")
+        
+        logger.info(f"입력 데이터 로드 완료: {', '.join(log_parts)}")
         
         return {
             "a1_result": validation_result.completeness_check,
-            "a2_result": a2_result,  # A2 체크리스트 (없으면 빈 딕셔너리)
+            "a2_result": a2_result,  # A2 Primary (없으면 빈 딕셔너리)
+            "a2_recovered_result": a2_recovered_result,  # A2 Recovered (없으면 None)
             "a3_result": validation_result.content_analysis,
+            "a3_recovered_result": a3_recovered_result,  # A3 Recovered (없으면 None)
             "contract_type": validation_result.contract_type,
             "user_contract_data": contract.parsed_data
         }

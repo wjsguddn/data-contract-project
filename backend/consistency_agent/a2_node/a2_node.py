@@ -51,7 +51,7 @@ class ChecklistCheckNode:
         
         # 컴포넌트 초기화
         self.checklist_loader = ChecklistLoader()
-        self.verifier = ChecklistVerifier(llm_client, model="gpt-4o-mini")  # 명시적으로 mini 모델 사용
+        self.verifier = ChecklistVerifier(llm_client, model="gpt-4o")  # 체크리스트는 gpt-4o 사용 (품질 중요)
         
         # 개발 중: 캐시 초기화 (코드 변경 반영 위해)
         self.checklist_loader.clear_cache()

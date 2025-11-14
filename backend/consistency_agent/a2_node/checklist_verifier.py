@@ -46,7 +46,8 @@ class ChecklistVerifier:
     def verify_single(
         self,
         user_clause_text: str,
-        checklist_item: Dict[str, Any]
+        checklist_item: Dict[str, Any],
+        user_article_no: int = None
     ) -> Dict[str, Any]:
         """
         단일 체크리스트 항목 검증
@@ -93,10 +94,16 @@ YES 또는 NO로 답변하고, 판단 근거를 제시해주세요.
 - YES: 요구사항이 계약서에 명시되어 있음
 - NO: 요구사항이 계약서에 명시되지 않음
 
+**evidence 작성 규칙 (중요):**
+- 반드시 "제n조(조항명) ①항에서..." 형식으로 시작할 것
+- 조항 번호가 없는 경우 "서문에서..." 사용
+- 예시: "제8조(계약 종료 후 후속 조치) ①항에서 '을은 즉시 갑이 제공한 모든 제공데이터를...' 라고 명시되어 있음."
+- 예시: "서문에서 '갑: 케이텔레콤 주식회사, 을: 베타AI 주식회사'로 명시되어 있음."
+
 JSON 형식:
 {{
   "result": "YES" or "NO",
-  "evidence": "판단 근거 (YES인 경우 계약서의 해당 부분 인용)" or null,
+  "evidence": "판단 근거 (YES인 경우 계약서의 해당 부분 인용, 반드시 조항 번호 포함)" or null,
   "confidence": 0.95
 }}"""
         
@@ -121,7 +128,7 @@ JSON 형식:
             response_text = response.choices[0].message.content.strip()
             llm_result = json.loads(response_text)
             
-            return {
+            result = {
                 "check_text": check_text,
                 "reference": reference,
                 "std_global_id": global_id,
@@ -129,10 +136,16 @@ JSON 형식:
                 "evidence": llm_result.get('evidence'),
                 "confidence": float(llm_result.get('confidence', 0.5))
             }
+            
+            # source_article_no 추가 (방안 3)
+            if user_article_no is not None:
+                result["source_article_no"] = user_article_no
+            
+            return result
         
         except Exception as e:
             logger.error(f"  단일 항목 검증 실패: {e}")
-            return {
+            result = {
                 "check_text": check_text,
                 "reference": reference,
                 "std_global_id": global_id,
@@ -140,6 +153,12 @@ JSON 형식:
                 "evidence": f"검증 실패: {str(e)}",
                 "confidence": 0.0
             }
+            
+            # source_article_no 추가 (방안 3)
+            if user_article_no is not None:
+                result["source_article_no"] = user_article_no
+            
+            return result
     
     def verify_batch(
         self,
@@ -248,6 +267,12 @@ JSON 형식:
 4. 사용자 확인 필요 시: 이유와 확인 방법
 5. NO인 경우: 왜 매칭되지 않는지 구체적 설명 및 위험성 평가
 
+**evidence 작성 규칙 (매우 중요!):**
+- 반드시 "제n조(조항명) ①항에서..." 형식으로 시작할 것
+- 조항 번호가 없는 경우 "서문에서..." 사용
+- 예시: "제8조(계약 종료 후 후속 조치) ①항에서 '을은 즉시 갑이 제공한 모든 제공데이터를...' 라고 명시되어 있음."
+- 예시: "서문에서 '갑: 케이텔레콤 주식회사, 을: 베타AI 주식회사'로 명시되어 있음."
+
 **판단 기준:**
 - **YES**: 요구사항이 계약서에 명시되어 있음
 - **NO**: 요구사항이 계약서에 명시되지 않음 (내용 자체가 없음)
@@ -286,11 +311,15 @@ JSON 형식:
 - 내용이 **없으면** → NO (추가 필요)
 - 내용이 **있는데 확인이 필요하면** → MANUAL_CHECK_REQUIRED (외부 확인 필요)
 
-**NO 판단 시 추가 정보:**
-- missing_explanation: 어떤 키워드/개념을 찾았는지, 왜 충분하지 않은지 구체적 설명
+**NO 판단 시 추가 정보 (매우 상세하게 작성):**
+- missing_explanation: 
+  * 계약서에서 어떤 내용을 찾았는지 구체적으로 설명
+  * 표준계약서에서는 무엇을 요구하는지 명시
+  * 왜 현재 내용이 불충분한지 상세히 설명
+  * 예: "계약서 제2조에 '용어 정의' 조항이 있으나, 표준계약서에서 요구하는 '데이터', '개인정보', '파생데이터' 등 핵심 용어의 정의가 포함되지 않았습니다. 현재는 일반적인 계약 용어만 정의되어 있어, 데이터 거래 계약에 필수적인 용어 해석 기준이 부족합니다."
 - risk_level: "high" | "medium" | "low" - 누락 시 위험도
-- risk_description: 이 항목이 없으면 어떤 법적/실무적 위험이 있는지 설명
-- recommendation: 개선 권장사항
+- risk_description: 이 항목이 없으면 어떤 법적/실무적 위험이 있는지 구체적으로 설명
+- recommendation: 개선 권장사항 (반드시 "제n조에..." 형식으로 시작, 어느 조항에 추가해야 하는지 명시)
 
 JSON 배열 형식으로 답변:
 {{
@@ -302,10 +331,10 @@ JSON 배열 형식으로 답변:
       "confidence": 0.95,
       "manual_check_reason": "외부 문서 대조 필요" (MANUAL_CHECK_REQUIRED인 경우만),
       "user_action": "등기부등본과 대조하여 회사명, 주소 확인" (MANUAL_CHECK_REQUIRED인 경우만),
-      "missing_explanation": "수행계획서 작성 절차 명시 없음, 단순 일정 협의만 있음" (NO인 경우만),
+      "missing_explanation": "계약서 제3조에 '일정 협의' 조항이 있으나, 표준계약서에서 요구하는 '수행계획서 작성 및 제출 절차'가 명시되지 않았습니다. 현재는 단순히 일정을 협의한다는 내용만 있어, 구체적인 수행 계획의 작성 주체, 제출 시기, 승인 절차 등이 불명확합니다." (NO인 경우만, 매우 상세하게),
       "risk_level": "high" (NO인 경우만),
       "risk_description": "수행계획서 미작성 시 용역 범위 분쟁 가능성" (NO인 경우만),
-      "recommendation": "제1조에 수행계획서 작성 및 제출 절차 추가" (NO인 경우만)
+      "recommendation": "제1조에 수행계획서 작성 및 제출 절차 추가" (NO인 경우만, 반드시 "제n조에..." 형식)
     }},
     ...
   ]
