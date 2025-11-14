@@ -10,6 +10,51 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# 사이드바 너비 및 닫기 버튼 스타일 설정 (CSS)
+st.markdown(
+    """
+    <style>
+    /* 사이드바 너비 설정 - 열려있을 때만 적용 */
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        min-width: 470px !important;
+        max-width: 700px !important;
+    }
+    
+    /* 사이드바가 닫혀있을 때는 너비 0 */
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        min-width: 0 !important;
+        width: 0 !important;
+    }
+    
+    /* 사이드바 닫기 버튼 아이콘 변경 (X → ←) */
+    [data-testid="stSidebar"] button[kind="header"] svg {
+        display: none;
+    }
+    [data-testid="stSidebar"] button[kind="header"]::after {
+        content: "←";
+        font-size: 1.5rem;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+    /* 호버 시 밑줄 제거 및 밝기 증가 */
+    [data-testid="stSidebar"] button[kind="header"]:hover::after {
+        text-decoration: none !important;
+        opacity: 1;
+        color: #ffffff;
+    }
+    [data-testid="stSidebar"] button[kind="header"]:hover {
+        text-decoration: none !important;
+        background-color: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 def poll_classification_result(contract_id: str, max_attempts: int = 30, interval: int = 2):
     """
@@ -57,15 +102,7 @@ def main() -> None:
     # 사이드바 스타일 조정 CSS
     st.markdown("""
         <style>
-        /* 사이드바를 오른쪽으로 이동 */
-        section[data-testid="stSidebar"] {
-            right: 0;
-            left: auto;
-        }
-        section[data-testid="stSidebar"] > div {
-            right: 0;
-            left: auto;
-        }
+
         /* 메인 컨텐츠 영역 조정 */
         .main .block-container {
             margin-right: auto;
@@ -1387,10 +1424,10 @@ def display_chatbot_sidebar(contract_id: str):
     Args:
         contract_id: 계약서 ID
     """
-    # 채팅 컨테이너 높이 설정
+    # 채팅 컨테이너 높이 설정 516
     # 작업표시줄 on:    그램 544  모니터 758
     # 작업표시줄 off:   그램 591  모니터 805
-    CHAT_CONTAINER_HEIGHT = 591
+    CHAT_CONTAINER_HEIGHT = 516
     
     # CSS로 스크롤바 숨기기 및 채팅 스타일링 (헤더보다 먼저 배치)
     # CSS 템플릿에서 HEIGHT_PLACEHOLDER를 실제 높이로 치환
