@@ -7,7 +7,7 @@ st.set_page_config(
     page_title="데이터 표준계약 검증",
     page_icon="",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -47,14 +47,6 @@ def poll_classification_result(contract_id: str, max_attempts: int = 30, interva
 
 
 def main() -> None:
-    # 세션 상태 초기화 (가중치)
-    if 'text_weight' not in st.session_state:
-        st.session_state.text_weight = 0.7
-    if 'title_weight' not in st.session_state:
-        st.session_state.title_weight = 0.3
-    if 'dense_weight' not in st.session_state:
-        st.session_state.dense_weight = 0.85
-    
     # 챗봇 세션 상태 초기화
     if 'chatbot_messages' not in st.session_state:
         st.session_state.chatbot_messages = []
@@ -62,40 +54,93 @@ def main() -> None:
         import uuid
         st.session_state.chatbot_session_id = str(uuid.uuid4())
     
-    # 사이드바 검색 설정
+    # 사이드바 스타일 조정 CSS
+    st.markdown("""
+        <style>
+        /* 사이드바를 오른쪽으로 이동 */
+        section[data-testid="stSidebar"] {
+            right: 0;
+            left: auto;
+        }
+        section[data-testid="stSidebar"] > div {
+            right: 0;
+            left: auto;
+        }
+        /* 메인 컨텐츠 영역 조정 */
+        .main .block-container {
+            margin-right: auto;
+            margin-left: auto;
+        }
+        /* 사이드바 배경색을 더 어둡게 */
+        section[data-testid="stSidebar"] {
+            background-color: #090b0f !important;
+        }
+        section[data-testid="stSidebar"] > div {
+            background-color: #090b0f !important;
+        }
+        /* 채팅 입력창 배경색을 조금 더 밝게 */
+        section[data-testid="stSidebar"] .stChatInput textarea {
+            background-color: #1a1d24 !important;
+        }
+        section[data-testid="stSidebar"] .stChatInput {
+            background-color: #1a1d24 !important;
+        }
+        /* 사이드바 스크롤바 숨기기 */
+        section[data-testid="stSidebar"] {
+            overflow-y: auto;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        section[data-testid="stSidebar"]::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+        section[data-testid="stSidebar"] > div {
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        section[data-testid="stSidebar"] > div::-webkit-scrollbar {
+            display: none;
+        }
+        /* 사이드바 상단 여백 제거 - emotion 클래스 타겟팅 */
+        section[data-testid="stSidebar"] .st-emotion-cache-16txtl3 {
+            padding: 1rem 1.5rem !important;
+        }
+        section[data-testid="stSidebar"] > div:first-child {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    # 사이드바 - 챗봇만 표시
     with st.sidebar:
-        st.header("검색 설정")
-        
-        st.subheader("본문:제목 가중치")
-        text_weight = st.slider(
-            "본문 가중치",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.text_weight,
-            step=0.05,
-            key="text_weight_slider"
-        )
-        title_weight = 1.0 - text_weight
-        st.caption(f"본문: {text_weight:.0%}, 제목: {title_weight:.0%}")
-        
-        # 세션 상태 업데이트
-        st.session_state.text_weight = text_weight
-        st.session_state.title_weight = title_weight
-        
-        st.subheader("시멘틱:키워드 가중치")
-        dense_weight = st.slider(
-            "시멘틱 가중치",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.dense_weight,
-            step=0.05,
-            key="dense_weight_slider"
-        )
-        sparse_weight = 1.0 - dense_weight
-        st.caption(f"시멘틱: {dense_weight:.0%}, 키워드: {sparse_weight:.0%}")
-        
-        # 세션 상태 업데이트
-        st.session_state.dense_weight = dense_weight
+        # 챗봇 UI (분류 완료 후에만 표시)
+        if st.session_state.get('classification_done', False) and st.session_state.get('uploaded_contract_data') is not None:
+            contract_id = st.session_state.uploaded_contract_data['contract_id']
+            
+            # 챗봇 활성화 상태 확인
+            try:
+                chatbot_status_url = f"http://localhost:8000/api/chatbot/{contract_id}/status"
+                status_resp = requests.get(chatbot_status_url, timeout=10)
+                
+                if status_resp.status_code == 200:
+                    status_data = status_resp.json()
+                    is_active = status_data.get('active', False)
+                    
+                    if is_active:
+                        # 챗봇 UI 표시
+                        display_chatbot_sidebar(contract_id)
+            except Exception:
+                pass
     
     # 상단 헤더
     st.markdown(
@@ -405,49 +450,17 @@ def main() -> None:
                 except Exception as e:
                     st.error(f"검증 결과 조회 실패: {str(e)}")
         
-        # 챗봇 UI 표시 (분류 완료 후)
-        if st.session_state.get('classification_done', False):
-            # 챗봇 활성화 상태 확인
-            try:
-                chatbot_status_url = f"http://localhost:8000/api/chatbot/{contract_id}/status"
-                status_resp = requests.get(chatbot_status_url, timeout=10)
-                
-                if status_resp.status_code == 200:
-                    status_data = status_resp.json()
-                    is_active = status_data.get('active', False)  # 'is_active'가 아닌 'active' 키 사용
-                    
-                    if is_active:
-                        # 챗봇 UI 표시
-                        display_chatbot_interface(contract_id)
-                    else:
-                        # 챗봇 비활성화 상태 (분류 미완료 등)
-                        reason = status_data.get('reason', '알 수 없는 이유')
-                        st.info(f"💬 챗봇: {reason}")
-            except Exception as e:
-                # 에러 발생 시 무시 (챗봇은 선택적 기능)
-                pass
+
 
 
 def start_validation(contract_id: str):
-    """검증 시작 - API 호출 (가중치 전달)"""
+    """검증 시작 - API 호출"""
     try:
         print(f"[DEBUG] start_validation 호출됨: contract_id={contract_id}")
         
-        # 세션 상태에서 가중치 읽기
-        text_weight = st.session_state.get('text_weight', 0.7)
-        title_weight = st.session_state.get('title_weight', 0.3)
-        dense_weight = st.session_state.get('dense_weight', 0.85)
-        
-        print(f"[DEBUG] 가중치: text={text_weight}, title={title_weight}, dense={dense_weight}")
-        
-        # API 호출 시 가중치 파라미터 전달
+        # API 호출 (기본 가중치 사용)
         response = requests.post(
             f"http://localhost:8000/api/validation/{contract_id}/start",
-            params={
-                'text_weight': text_weight,
-                'title_weight': title_weight,
-                'dense_weight': dense_weight
-            },
             timeout=30
         )
         print(f"[DEBUG] 응답 status_code: {response.status_code}")
@@ -1367,9 +1380,280 @@ def display_manual_checks(manual_checks: dict):
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
 
 
+def display_chatbot_sidebar(contract_id: str):
+    """
+    사이드바에 챗봇 인터페이스 표시
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    # 채팅 컨테이너 높이 설정
+    # 작업표시줄 on:
+    # 그램: 544  모니터: 758
+    # 작업표시줄 off:
+    # 그램: 591  모니터: 805
+    CHAT_CONTAINER_HEIGHT = 591
+    
+    # CSS로 스크롤바 숨기기 및 채팅 스타일링 (헤더보다 먼저 배치)
+    # CSS 템플릿에서 HEIGHT_PLACEHOLDER를 실제 높이로 치환
+    css_template = """
+        <style>
+        /* CSS 요소의 마진 제거 */
+        section[data-testid="stSidebar"] .element-container {
+            margin: 0 !important;
+        }
+        section[data-testid="stSidebar"] .stMarkdown {
+            margin: 0 !important;
+        }
+        /* 채팅 컨테이너 스크롤바 숨기기 - 모든 선택자 */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div[style*="height"],
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"][height="HEIGHT_PLACEHOLDER"],
+        section[data-testid="stSidebar"] div[style*="height: HEIGHT_PLACEHOLDERpx"] {
+            scrollbar-width: none !important; /* Firefox */
+            -ms-overflow-style: none !important; /* IE and Edge */
+        }
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div[style*="height"]::-webkit-scrollbar,
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"][height="HEIGHT_PLACEHOLDER"]::-webkit-scrollbar,
+        section[data-testid="stSidebar"] div[style*="height: HEIGHT_PLACEHOLDERpx"]::-webkit-scrollbar {
+            display: none !important; /* Chrome, Safari, Opera */
+            width: 0 !important;
+            height: 0 !important;
+        }
+        /* 채팅 컨테이너 하단 정렬 */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div[style*="height"] > div {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            min-height: 100%;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        /* 채팅 컨테이너 내부 패딩/마진 제거 및 테두리 제거 */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"][height="HEIGHT_PLACEHOLDER"] {
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"][height="HEIGHT_PLACEHOLDER"] > div {
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"][height="HEIGHT_PLACEHOLDER"] div[class*="e1f1d6gn1"] {
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        /* 아바타 숨기기 - 모든 가능한 선택자 */
+        section[data-testid="stSidebar"] .stChatMessage img {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+            visibility: hidden !important;
+        }
+        section[data-testid="stSidebar"] .stChatMessage [class*="avatar"],
+        section[data-testid="stSidebar"] .stChatMessage [class*="Avatar"],
+        section[data-testid="stSidebar"] .stChatMessage > div:first-child {
+            display: none !important;
+            width: 0 !important;
+            visibility: hidden !important;
+        }
+        
+        /* user 메시지 오른쪽 정렬 - 모든 가능한 선택자 */
+        section[data-testid="stSidebar"] .stChatMessage[data-testid*="user"],
+        section[data-testid="stSidebar"] [data-testid="stChatMessage"]:nth-child(odd) {
+            flex-direction: row-reverse !important;
+            justify-content: flex-end !important;
+        }
+        
+        /* 메시지 컨텐츠도 오른쪽 정렬 */
+        section[data-testid="stSidebar"] .stChatMessage[data-testid*="user"] > div,
+        section[data-testid="stSidebar"] [data-testid="stChatMessage"]:nth-child(odd) > div {
+            text-align: right !important;
+        }
+        
+        /* Clear 버튼을 텍스트 링크처럼 만들기 */
+        section[data-testid="stSidebar"] button[data-testid*="baseButton"] {
+            background: none !important;
+            border: none !important;
+            padding: 0 !important;
+            font-size: 0.875rem !important;
+            height: auto !important;
+            min-height: auto !important;
+            color: #6b7280 !important;
+            box-shadow: none !important;
+            width: auto !important;
+            min-width: auto !important;
+        }
+        section[data-testid="stSidebar"] button[data-testid*="baseButton"]:hover {
+            background: none !important;
+            color: #9ca3af !important;
+            text-decoration: underline !important;
+        }
+        section[data-testid="stSidebar"] button[data-testid*="baseButton"] p {
+            font-size: 0.875rem !important;
+            margin: 0 !important;
+            color: inherit !important;
+        }
+        /* 버튼을 감싸는 컨테이너 오른쪽 정렬 */
+        section[data-testid="stSidebar"] .row-widget.stButton {
+            width: auto !important;
+            display: flex !important;
+            justify-content: flex-end !important;
+        }
+        
+        /* 버튼이 있는 컬럼을 하단 정렬 */
+        section[data-testid="stSidebar"] div[data-testid="column"]:has(button) {
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: flex-end !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="column"]:has(button) [data-testid="stVerticalBlock"] {
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: flex-end !important;
+        }
+        </style>
+    """
+    
+    # HEIGHT_PLACEHOLDER를 실제 높이로 치환
+    css_with_height = css_template.replace("HEIGHT_PLACEHOLDER", str(CHAT_CONTAINER_HEIGHT))
+    st.markdown(css_with_height, unsafe_allow_html=True)
+    
+    # 헤더와 초기화 버튼을 같은 줄에 배치
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        st.markdown('''
+            <div style="display: flex; align-items: baseline; margin-bottom: 0; margin-top: -1rem;">
+                <h2 style="margin: 0; font-size: 1.5rem;">계약서 챗봇</h2>
+                <p style="margin: 0; margin-left: 0.75rem; color: #6b7280; font-size: 0.875rem;">계약서 내용에 대해 질문하세요</p>
+            </div>
+        ''', unsafe_allow_html=True)
+    
+    with col2:
+        if st.button("Clear", key=f"reset_chat_header_{contract_id}", use_container_width=True):
+            st.session_state.chatbot_messages = []
+            import uuid
+            st.session_state.chatbot_session_id = str(uuid.uuid4())
+            st.rerun()
+    
+    # 중간 영역 - 채팅 히스토리 (스크롤 가능)
+    chat_container = st.container(height=CHAT_CONTAINER_HEIGHT)
+    
+    with chat_container:
+        if not st.session_state.chatbot_messages:
+            # 안내 메시지를 컨테이너 하단에 표시 (상단에 큰 마진 추가)
+            st.markdown(f'<div style="height: {CHAT_CONTAINER_HEIGHT - 100}px;"></div>', unsafe_allow_html=True)
+            st.info("💡 계약서에 대해 질문해보세요")
+        else:
+            # 채팅 메시지 표시 (st.chat_message 사용 - 자동 스크롤 지원)
+            for idx, message in enumerate(st.session_state.chatbot_messages):
+                role = message.get('role')
+                content = message.get('content', '')
+                
+                with st.chat_message(role):
+                    st.markdown(content)
+    
+    # 푸터 (고정) - 입력창만
+    # 메시지 입력창
+    user_input = st.chat_input("질문을 입력하세요...", key=f"chatbot_input_sidebar_{contract_id}")
+    
+    if user_input and user_input.strip():
+        # 사용자 메시지 추가
+        st.session_state.chatbot_messages.append({
+            'role': 'user',
+            'content': user_input.strip()
+        })
+        
+        # 챗봇 응답 생성
+        try:
+            response = requests.post(
+                f"http://localhost:8000/api/chatbot/{contract_id}/message",
+                params={
+                    'message': user_input.strip(),
+                    'session_id': st.session_state.chatbot_session_id
+                },
+                stream=True,
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                full_response = ""
+                sources_data = []
+                
+                # 스트리밍 응답 처리
+                for line in response.iter_lines():
+                    if line:
+                        decoded_line = line.decode('utf-8')
+                        
+                        if decoded_line.startswith('data: '):
+                            data_str = decoded_line[6:]
+                            
+                            if data_str == '[DONE]':
+                                break
+                            
+                            try:
+                                import json
+                                data = json.loads(data_str)
+                                
+                                if 'token' in data:
+                                    full_response += data['token']
+                                
+                                if 'sources' in data:
+                                    sources_data = data['sources']
+                            
+                            except json.JSONDecodeError:
+                                continue
+                
+                # 최종 응답 저장
+                if full_response:
+                    st.session_state.chatbot_messages.append({
+                        'role': 'assistant',
+                        'content': full_response,
+                        'sources': sources_data
+                    })
+                else:
+                    st.session_state.chatbot_messages.append({
+                        'role': 'assistant',
+                        'content': "응답을 생성할 수 없습니다."
+                    })
+            else:
+                error_msg = f"⚠️ 서버 오류 (HTTP {response.status_code})"
+                st.session_state.chatbot_messages.append({
+                    'role': 'assistant',
+                    'content': error_msg
+                })
+        
+        except requests.exceptions.Timeout:
+            error_msg = "⚠️ 요청 시간 초과"
+            st.session_state.chatbot_messages.append({
+                'role': 'assistant',
+                'content': error_msg
+            })
+        
+        except requests.exceptions.ConnectionError:
+            error_msg = "⚠️ 서버 연결 실패"
+            st.session_state.chatbot_messages.append({
+                'role': 'assistant',
+                'content': error_msg
+            })
+        
+        except Exception as e:
+            error_msg = f"⚠️ 오류: {str(e)}"
+            st.session_state.chatbot_messages.append({
+                'role': 'assistant',
+                'content': error_msg
+            })
+        
+        # 리렌더링
+        st.rerun()
+
+
 def display_chatbot_interface(contract_id: str):
     """
-    챗봇 인터페이스 표시
+    챗봇 인터페이스 표시 (더 이상 사용 안 함 - 사이드바로 이동)
     
     Args:
         contract_id: 계약서 ID
