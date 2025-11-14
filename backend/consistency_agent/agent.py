@@ -748,10 +748,11 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
 
         recovered_matching_details = extract_and_restructure_false_positives(missing_article_analysis)
 
-        # recovered_matching_details가 있으면 DB 저장 및 batch2 트리거
+        # recovered_matching_details가 있으면 DB 저장
+        has_batch2 = False
         if recovered_matching_details:
-            logger.info(f"[reA1-S2] ========== 오탐지 복구 매칭 시작 ==========")
-            logger.info(f"[reA1-S2] 복구된 매칭: {len(recovered_matching_details)}개")
+            logger.info(f"[A1-S2] ========== 오탐지 복구 매칭 발견 ==========")
+            logger.info(f"[A1-S2] 복구된 매칭: {len(recovered_matching_details)}개")
             
             # 복구된 조문 상세 로그
             for detail in recovered_matching_details:
@@ -759,7 +760,7 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
                 user_title = detail.get('user_article_title', 'N/A')
                 matched_ids = detail.get('matched_articles', [])
                 matched_global_ids = detail.get('matched_articles_global_ids', [])
-                logger.info(f"[reA1-S2]   - 사용자 제{user_no}조 ({user_title}) → 표준 조문 {matched_ids} (global_ids: {matched_global_ids})")
+                logger.info(f"[A1-S2]   - 사용자 제{user_no}조 ({user_title}) → 표준 조문 {matched_ids} (global_ids: {matched_global_ids})")
 
             # DB 저장
             success = update_completeness_check_partial_with_retry(
@@ -768,69 +769,19 @@ def check_missing_articles_task(self, contract_id: str, text_weight: float = 0.7
             )
 
             if success:
-                logger.info(f"[reA1-S2] recovered_matching_details DB 저장 완료")
-
-                # batch2 트리거 (비동기)
-                from concurrent.futures import ThreadPoolExecutor
-
-                def trigger_batch2():
-                    try:
-                        logger.info(f"[reA1-S2] ========== batch2 트리거 시작 ==========")
-                        
-                        # ThreadPoolExecutor로 병렬 실행 (래퍼 함수 사용)
-                        def run_a2():
-                            return check_checklist_task(contract_id, ["recovered"])
-                        
-                        def run_a3():
-                            return analyze_content_task(contract_id, ["recovered"],
-                                                        text_weight, title_weight, dense_weight)
-                        
-                        with ThreadPoolExecutor(max_workers=2) as executor:
-                            future_a2 = executor.submit(run_a2)
-                            future_a3 = executor.submit(run_a3)
-                            
-                            # 결과 대기
-                            try:
-                                a2_result = future_a2.result()
-                                if a2_result.get('status') == 'completed':
-                                    logger.info(f"[reA1-S2] [reA2] batch2 완료: {a2_result.get('checklist_summary', {})}")
-                                else:
-                                    logger.error(f"[reA1-S2] [reA2] batch2 실패: {a2_result.get('error')}")
-                            except Exception as e:
-                                logger.error(f"[reA1-S2] [reA2] batch2 실패: {e}")
-
-                            try:
-                                a3_result = future_a3.result()
-                                if a3_result.get('status') == 'completed':
-                                    logger.info(f"[reA1-S2] [reA3] batch2 완료: {a3_result.get('analysis_summary', {})}")
-                                else:
-                                    logger.error(f"[reA1-S2] [reA3] batch2 실패: {a3_result.get('error')}")
-                            except Exception as e:
-                                logger.error(f"[reA1-S2] [reA3] batch2 실패: {e}")
-
-                        logger.info(f"[reA1-S2] ========== batch2 완료 ==========")
-
-                    except Exception as e:
-                        logger.error(f"[reA1-S2] batch2 트리거 실패: {e}")
-
-                # batch2 실행 및 완료 대기
-                import threading
-                batch2_thread = threading.Thread(target=trigger_batch2, daemon=False)
-                batch2_thread.start()
-                
-                logger.info(f"[reA1-S2] batch2 스레드 시작, 완료 대기 중...")
-                batch2_thread.join()  # batch2 완료까지 대기
-                logger.info(f"[reA1-S2] batch2 완료 확인")
+                logger.info(f"[A1-S2] recovered_matching_details DB 저장 완료")
+                has_batch2 = True
             else:
-                logger.error(f"[reA1-S2] recovered_matching_details 저장 실패")
+                logger.error(f"[A1-S2] recovered_matching_details 저장 실패")
         else:
-            logger.info(f"[A1-S2] 오탐지 없음, batch2 건너뜀")
+            logger.info(f"[A1-S2] 오탐지 없음, batch2 불필요")
 
-        logger.info(f"[A1-S2] Task 완료: {contract_id}")
+        logger.info(f"[A1-S2] Task 완료: {contract_id}, has_batch2={has_batch2}")
 
         return {
             "status": "completed",
             "contract_id": contract_id,
+            "has_batch2": has_batch2,
             "missing_summary": {
                 "verified_missing": len(missing_article_analysis),
                 "recovered_matching": len(recovered_matching_details),
@@ -914,6 +865,78 @@ def analyze_content_parallel_task(self, contract_id: str, matching_types: List[s
     return result
 
 
+@celery_app.task(bind=True, name="consistency.run_batch2", queue="consistency_validation")
+def run_batch2_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
+    """
+    batch2 실행: recovered 매칭에 대한 A2, A3 병렬 실행
+    
+    Args:
+        contract_id: 검증할 계약서 ID
+        text_weight: 본문 가중치
+        title_weight: 제목 가중치
+        dense_weight: 시멘틱 가중치
+    
+    Returns:
+        batch2 실행 결과
+    """
+    logger.info(f"[batch2] 시작: {contract_id}")
+    
+    try:
+        # DB에서 recovered_matching_details 확인
+        db = next(get_db())
+        try:
+            existing_result = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+            
+            if not existing_result or not existing_result.completeness_check:
+                logger.info(f"[batch2] 검증 결과 없음, 건너뜀")
+                return {"status": "skipped", "contract_id": contract_id}
+            
+            recovered_details = existing_result.completeness_check.get('recovered_matching_details', [])
+            
+            if not recovered_details:
+                logger.info(f"[batch2] recovered 매칭 없음, 건너뜀")
+                return {"status": "skipped", "contract_id": contract_id}
+            
+            logger.info(f"[batch2] recovered 매칭 {len(recovered_details)}개 발견, A2/A3 실행")
+        finally:
+            db.close()
+        
+        # A2, A3 병렬 실행
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_a2 = executor.submit(
+                check_checklist_task, contract_id, ["recovered"]
+            )
+            future_a3 = executor.submit(
+                analyze_content_task, contract_id, ["recovered"],
+                text_weight, title_weight, dense_weight
+            )
+            
+            # 결과 수집
+            a2_result = future_a2.result()
+            a3_result = future_a3.result()
+        
+        logger.info(f"[batch2] 완료: {contract_id}")
+        
+        return {
+            "status": "completed",
+            "contract_id": contract_id,
+            "a2_summary": a2_result.get('checklist_summary'),
+            "a3_summary": a3_result.get('analysis_summary')
+        }
+        
+    except Exception as e:
+        logger.error(f"[batch2] 실패: {contract_id}, 오류: {e}")
+        import traceback
+        logger.error(f"[batch2] {traceback.format_exc()}")
+        return {
+            "status": "failed",
+            "contract_id": contract_id,
+            "error": str(e)
+        }
+
+
 @celery_app.task(bind=True, name="consistency.validate_contract_parallel", queue="consistency_validation")
 def validate_contract_parallel_task(self, contract_id: str, text_weight: float = 0.7, title_weight: float = 0.3, dense_weight: float = 0.85):
     """
@@ -976,7 +999,7 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
             a2_result = future_a2.result()
             a3_result = future_a3.result()
 
-        logger.info(f"[PARALLEL] [2/2] 병렬 실행 완료")
+        logger.info(f"[PARALLEL] [2/2] batch1 병렬 실행 완료")
 
         # 부분 실패 처리
         all_success = all(
@@ -990,16 +1013,69 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
             logger.warning(f"[PARALLEL] 일부 노드 실패: A1-Stage2={a1_stage2_result.get('status')}, "
                           f"A2={a2_result.get('status')}, A3={a3_result.get('status')}")
 
+        # batch2 실행 여부 확인
+        has_batch2 = a1_stage2_result.get('has_batch2', False)
+        
+        if has_batch2:
+            logger.info(f"[PARALLEL] batch2 실행 필요, recovered 매칭 처리 중...")
+            
+            # batch2를 직접 실행 (Celery task가 아닌 일반 함수로)
+            # ThreadPoolExecutor를 사용하여 동기적으로 완료 대기
+            try:
+                # DB에서 recovered_matching_details 확인
+                db = next(get_db())
+                try:
+                    existing_result = db.query(ValidationResult).filter(
+                        ValidationResult.contract_id == contract_id
+                    ).first()
+                    
+                    if not existing_result or not existing_result.completeness_check:
+                        logger.info(f"[PARALLEL] batch2: 검증 결과 없음, 건너뜀")
+                        has_batch2 = False
+                    else:
+                        recovered_details = existing_result.completeness_check.get('recovered_matching_details', [])
+                        
+                        if not recovered_details:
+                            logger.info(f"[PARALLEL] batch2: recovered 매칭 없음, 건너뜀")
+                            has_batch2 = False
+                        else:
+                            logger.info(f"[PARALLEL] batch2: recovered 매칭 {len(recovered_details)}개 발견, A2/A3 실행")
+                finally:
+                    db.close()
+                
+                if has_batch2:
+                    # A2, A3 병렬 실행 (동기적으로 완료 대기)
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        future_a2 = executor.submit(
+                            check_checklist_task, contract_id, ["recovered"]
+                        )
+                        future_a3 = executor.submit(
+                            analyze_content_task, contract_id, ["recovered"],
+                            text_weight, title_weight, dense_weight
+                        )
+                        
+                        # 결과 수집 (블로킹)
+                        batch2_a2_result = future_a2.result()
+                        batch2_a3_result = future_a3.result()
+                    
+                    logger.info(f"[PARALLEL] batch2 완료: A2={batch2_a2_result.get('status')}, A3={batch2_a3_result.get('status')}")
+            
+            except Exception as batch2_error:
+                logger.error(f"[PARALLEL] batch2 실패: {batch2_error}")
+                import traceback
+                logger.error(f"[PARALLEL] {traceback.format_exc()}")
+        else:
+            logger.info(f"[PARALLEL] batch2 불필요 (recovered 매칭 없음)")
+        
         logger.info(f"[PARALLEL] 통합 검증 완료: {contract_id}, status={status}")
         
-        # batch1 완료 (batch2도 A1-Stage2에서 대기했으므로 완료됨)
-        # Report Agent 트리거
+        # 모든 batch 완료 후 Report Agent 트리거
         if status == "completed":
             logger.info(f"[PARALLEL] Report Agent 트리거: {contract_id}")
             try:
                 from backend.report_agent.tasks import generate_report_task
-                generate_report_task.delay(contract_id)
-                logger.info(f"[PARALLEL] Report Agent 태스크 제출 완료")
+                generate_report_task.apply_async(args=[contract_id], queue="report_generation")
+                logger.info(f"[PARALLEL] Report Agent 태스크 제출 완료 (queue=report_generation)")
             except Exception as report_error:
                 logger.error(f"[PARALLEL] Report Agent 트리거 실패: {report_error}")
 

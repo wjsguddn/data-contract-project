@@ -10,7 +10,8 @@ celery_app = Celery(
     include=[
         'backend.classification_agent.agent',
         'backend.consistency_agent.agent',
-        'backend.report_agent.agent'
+        'backend.report_agent.agent',
+        'backend.report_agent.tasks'
     ]
 )
 

@@ -150,9 +150,12 @@ def show_report_page(contract_id: str):
             for article in user_articles:
                 user_article_no = article.get('user_article_no', 0)
                 user_article_title = article.get('user_article_title', '')
-                matched = article.get('matched', [])
-                insufficient = article.get('insufficient', [])
-                missing = article.get('missing', [])
+                
+                # Step5 이후 필드명 (우선 사용)
+                matched = article.get('matched_standard_articles', article.get('matched', []))
+                insufficient = article.get('insufficient_items', article.get('insufficient', []))
+                missing = article.get('missing_items', article.get('missing', []))
+                checklist_results = article.get('checklist_results', [])
                 
                 # 조항 헤더
                 if user_article_no == 0:
@@ -169,7 +172,14 @@ def show_report_page(contract_id: str):
                         if matched:
                             st.markdown("**✅ 매칭된 표준 조항:**")
                             for m in matched:
-                                st.markdown(f"- {m.get('std_clause_title', '')} (`{m.get('std_clause_id', '')}`)")
+                                std_clause_title = m.get('std_clause_title', '')
+                                std_clause_id = m.get('std_clause_id', '')
+                                analysis = m.get('analysis', '')
+                                
+                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                if analysis and analysis != "표준 조항과 매칭됨":
+                                    # 들여쓰기를 위해 > 사용
+                                    st.markdown(f"> {analysis}")
                         
                         # 불충분한 조항
                         if insufficient:
@@ -196,16 +206,48 @@ def show_report_page(contract_id: str):
                                 if analysis:
                                     # 들여쓰기를 위해 > 사용
                                     st.markdown(f"> {analysis}")
+                        
+                        # 🔥 체크리스트 결과 (디버그용)
+                        if checklist_results:
+                            st.markdown("**📋 체크리스트 검증 결과:**")
+                            st.json(checklist_results)  # JSON으로 출력
                 
                 elif matched:
                     # 문제 없는 조항 (매칭만 있음)
                     with st.expander(f"✅ {article_header}", expanded=False):
                         st.markdown("**✅ 매칭된 표준 조항:**")
                         for m in matched:
-                            st.markdown(f"- {m.get('std_clause_title', '')} (`{m.get('std_clause_id', '')}`)")
+                            std_clause_title = m.get('std_clause_title', '')
+                            std_clause_id = m.get('std_clause_id', '')
+                            analysis = m.get('analysis', '')
+                            
+                            st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                            if analysis and analysis != "표준 조항과 매칭됨":
+                                st.markdown(f"> {analysis}")
+                        
+                        # 🔥 체크리스트 결과 (디버그용)
+                        if checklist_results:
+                            st.markdown("**📋 체크리스트 검증 결과:**")
+                            st.json(checklist_results)  # JSON으로 출력
+        
+        # 조항별 서술형 보고서 출력
+        st.markdown("---")
+        st.markdown("## 📝 조항별 종합 분석")
+        st.markdown("각 조항에 대한 상세 분석 보고서입니다.")
+        
+        for article in user_articles:
+            user_article_title = article.get('user_article_title', 'N/A')
+            narrative_report = article.get('narrative_report', None)
+            
+            if narrative_report:
+                with st.expander(f"📄 {user_article_title} - 상세 분석", expanded=False):
+                    st.markdown(narrative_report)
+            else:
+                # narrative_report가 없는 경우 (아직 생성 안됨)
+                pass
         
         st.markdown("---")
-        st.markdown("### 보고서 끝")
+        st.markdown("### ✅ 보고서 끝")
     
     except Exception as e:
         st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
@@ -625,10 +667,27 @@ def main() -> None:
             
             # 보고서 버튼 표시
             if report_ready:
-                if st.button("📊 최종 보고서 보기", type="primary", use_container_width=True):
-                    st.session_state.show_report = True
-                    st.session_state.contract_id = contract_id  # contract_id 저장
-                    st.rerun()
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    if st.button("📊 최종 보고서 보기", type="primary", use_container_width=True):
+                        st.session_state.show_report = True
+                        st.session_state.contract_id = contract_id  # contract_id 저장
+                        st.rerun()
+                with col2:
+                    if st.button("🔄 재생성", use_container_width=True):
+                        try:
+                            regenerate_url = f"http://localhost:8000/api/report/{contract_id}/generate"
+                            regen_resp = requests.post(regenerate_url, timeout=30)
+                            
+                            if regen_resp.status_code == 200:
+                                st.success("✅ 보고서 재생성이 시작되었습니다!")
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                error_detail = regen_resp.json().get('detail', '알 수 없는 오류')
+                                st.error(f"❌ 재생성 실패: {error_detail}")
+                        except Exception as e:
+                            st.error(f"❌ 재생성 요청 실패: {str(e)}")
             elif report_generating:
                 st.info("📝 최종 보고서 생성 중입니다...")
                 time.sleep(3)
@@ -950,6 +1009,32 @@ def display_validation_result(validation_data: dict):
                             # 개행을 markdown 개행으로 변환하여 표시
                             formatted_text = analysis_text.replace('\n', '  \n')
                             st.markdown(formatted_text)
+                        
+                        # missing_items 표시 (JSON 구조)
+                        missing_items = suggestion.get('missing_items', [])
+                        if missing_items:
+                            st.markdown("**📋 누락된 조항:**")
+                            for item in missing_items:
+                                if isinstance(item, dict):
+                                    std_article = item.get('std_article', '')
+                                    std_clause = item.get('std_clause', '')
+                                    reason = item.get('reason', '')
+                                    st.markdown(f"- **{std_article} {std_clause}**: {reason}")
+                                elif isinstance(item, str):
+                                    st.markdown(f"- {item}")
+                        
+                        # insufficient_items 표시 (JSON 구조)
+                        insufficient_items = suggestion.get('insufficient_items', [])
+                        if insufficient_items:
+                            st.markdown("**⚠️ 불충분한 조항:**")
+                            for item in insufficient_items:
+                                if isinstance(item, dict):
+                                    std_article = item.get('std_article', '')
+                                    std_clause = item.get('std_clause', '')
+                                    reason = item.get('reason', '')
+                                    st.markdown(f"- **{std_article} {std_clause}**: {reason}")
+                                elif isinstance(item, str):
+                                    st.markdown(f"- {item}")
 
                         st.markdown("")  # 여백
                     else:
@@ -1238,6 +1323,32 @@ def display_validation_result(validation_data: dict):
                             if analysis_text:
                                 formatted_text = analysis_text.replace('\n', '  \n')
                                 st.markdown(formatted_text)
+                            
+                            # missing_items 표시 (JSON 구조)
+                            missing_items = suggestion.get('missing_items', [])
+                            if missing_items:
+                                st.markdown("**📋 누락된 조항:**")
+                                for item in missing_items:
+                                    if isinstance(item, dict):
+                                        std_article = item.get('std_article', '')
+                                        std_clause = item.get('std_clause', '')
+                                        reason = item.get('reason', '')
+                                        st.markdown(f"- **{std_article} {std_clause}**: {reason}")
+                                    elif isinstance(item, str):
+                                        st.markdown(f"- {item}")
+                            
+                            # insufficient_items 표시 (JSON 구조)
+                            insufficient_items = suggestion.get('insufficient_items', [])
+                            if insufficient_items:
+                                st.markdown("**⚠️ 불충분한 조항:**")
+                                for item in insufficient_items:
+                                    if isinstance(item, dict):
+                                        std_article = item.get('std_article', '')
+                                        std_clause = item.get('std_clause', '')
+                                        reason = item.get('reason', '')
+                                        st.markdown(f"- **{std_article} {std_clause}**: {reason}")
+                                    elif isinstance(item, str):
+                                        st.markdown(f"- {item}")
                             
                             st.markdown("")
                         else:

@@ -109,10 +109,31 @@ class MatchingVerifier:
 
         logger.info(f"  매칭 검증 완료: {len(selected_article_ids)}개 조항 선택")
 
+        # verification_details 생성: 선택된 조항들의 상세 정보
+        verification_details = []
+        for article_id in selected_article_ids:
+            # 해당 조항 찾기
+            article_info = None
+            for candidate in top_candidates:
+                if candidate['parent_id'] == article_id:
+                    article_info = candidate
+                    break
+            
+            if article_info:
+                verification_details.append({
+                    "article_id": article_id,
+                    "title": article_info.get('title', ''),
+                    "score": article_info.get('score', 0.0),
+                    "matched_sub_items": article_info.get('matched_sub_items', []),
+                    "num_sub_items": article_info.get('num_sub_items', 0),
+                    "verification_method": "LLM_selection",
+                    "confidence": "high"  # LLM이 명시적으로 선택한 조항
+                })
+
         return {
             "matched": True,
             "selected_articles": selected_article_ids,
-            "verification_details": [],  # TODO: 필요시 상세 정보 추가
+            "verification_details": verification_details,
             "prompt_tokens": selection_result.get('prompt_tokens', 0),
             "completion_tokens": selection_result.get('completion_tokens', 0),
             "total_tokens": selection_result.get('prompt_tokens', 0) + selection_result.get('completion_tokens', 0)

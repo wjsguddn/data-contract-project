@@ -29,14 +29,14 @@ class ChecklistVerifier:
     def __init__(
         self,
         azure_client: AzureOpenAI,
-        model: str = "gpt-4o"
+        model: str = "gpt-4o-mini"  # 🔥 A2는 mini 모델 사용 (속도 향상)
     ):
         """
         ChecklistVerifier 초기화
         
         Args:
             azure_client: Azure OpenAI 클라이언트
-            model: 사용할 모델명 (기본: gpt-4o)
+            model: 사용할 모델명 (기본: gpt-4o-mini)
         """
         self.azure_client = azure_client
         self.model = model

@@ -42,14 +42,30 @@ class Step2Aggregator:
         
         # user_articles 순회
         for user_article_no, data in step1_result["user_articles"].items():
-            for status in ["insufficient", "missing"]:
-                for std_clause_id in data.get(status, []):
+            # matched, insufficient, missing 모두 처리
+            for status in ["matched", "insufficient", "missing"]:
+                items = data.get(status, [])
+                
+                # 모두 {"std_clause_id": ..., "analysis": ...} 형식으로 통일
+                for item in items:
+                    if isinstance(item, dict):
+                        std_clause_id = item.get("std_clause_id")
+                        analysis = item.get("analysis", "")
+                    else:
+                        # 하위 호환성: 문자열인 경우
+                        std_clause_id = item
+                        analysis = ""
+                    
+                    # matched → sufficient로 변환
+                    actual_status = "sufficient" if status == "matched" else status
+                    
                     if std_clause_id not in aggregated:
                         aggregated[std_clause_id] = {"evaluations": []}
                     
                     aggregated[std_clause_id]["evaluations"].append({
                         "user_article": user_article_no,
-                        "status": status
+                        "status": actual_status,  # sufficient, insufficient, missing
+                        "analysis": analysis
                     })
         
         # 충돌 감지

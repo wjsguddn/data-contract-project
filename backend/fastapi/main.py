@@ -1001,6 +1001,89 @@ async def get_report(contract_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/report/{contract_id}/generate")
+async def generate_report_only(contract_id: str, db: Session = Depends(get_db)):
+    """
+    이미 완료된 검증 결과로 보고서만 다시 생성
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "success": bool,
+            "contract_id": str,
+            "task_id": str,
+            "message": str
+        }
+    """
+    try:
+        # 계약서 존재 확인
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계약서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        # 검증 결과 확인
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation:
+            raise HTTPException(
+                status_code=400,
+                detail="검증 결과가 없습니다. 먼저 /api/validation/{contract_id}/start를 실행하세요."
+            )
+        
+        # 필수 검증 결과 확인
+        if not validation.completeness_check:
+            raise HTTPException(
+                status_code=400,
+                detail="완전성 검증(A1) 결과가 없습니다"
+            )
+        
+        if not validation.checklist_validation:
+            raise HTTPException(
+                status_code=400,
+                detail="체크리스트 검증(A2) 결과가 없습니다"
+            )
+        
+        if not validation.content_analysis:
+            raise HTTPException(
+                status_code=400,
+                detail="내용 분석(A3) 결과가 없습니다"
+            )
+        
+        # Report Agent 트리거
+        from backend.report_agent.tasks import generate_report_task
+        
+        task = generate_report_task.apply_async(
+            args=[contract_id],
+            queue="report_generation"
+        )
+        
+        logger.info(f"보고서 생성 작업 시작: {contract_id}, task_id: {task.id}")
+        
+        return {
+            "success": True,
+            "contract_id": contract_id,
+            "task_id": task.id,
+            "message": "보고서 생성이 시작되었습니다. /api/report/{contract_id}/status로 진행 상황을 확인하세요."
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"보고서 생성 시작 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/report/{contract_id}/status")
 async def get_report_status(contract_id: str, db: Session = Depends(get_db)):
     """

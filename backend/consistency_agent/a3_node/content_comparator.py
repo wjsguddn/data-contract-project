@@ -4,6 +4,7 @@ ContentComparator - LLM 기반 조항 내용 비교
 """
 
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from openai import AzureOpenAI
 
@@ -226,8 +227,10 @@ class ContentComparator:
 - 비교의 기준은 "표준계약서가 권장하는 핵심 의미가 사용자 계약서에 포함되어 있는가"입니다.  
 - 표준보다 구체적이거나 특화된 내용은 '포괄성이 줄었다'고 보지 말고, **표준의 정신을 실제 상황에 맞게 반영한 합리적 구체화**로 해석하십시오.
 - 오히려 사용자 계약의 특성에 맞추어 구체화 되어야 할 부분이 표준계약서의 그것과 동일하게 포괄적인 의미만을 담고 있다면 문제될 수 있습니다.
-- 누락 판정은 표준조항의 **핵심 내용이나 의무가 의미적으로 결여된 경우에만** 해당됩니다.
-- 불충분 판정은 **핵심 취지의 결여나, 표현의 모호함, 명확한 정립의 필요성** 등을 판단합니다.
+- **누락(missing) 판정**: 표준조항의 핵심 요소(주체·의무·행위·조건 등)가 사용자 계약서에서 어떠한 방식으로도 나타나지 않을 때만 해당합니다. 직접적인 표현뿐 아니라 유사·간접·축약 표현까지 모두 고려했을 때,해당 기능을 수행하는 문장이 전혀 없을 경우에만 누락으로 판단합니다.
+  * 예: "제3자 제공 금지 조항이 계약서에 전혀 없음"
+  * 예: "데이터 보유 기간에 대한 언급이 전혀 없음"
+- 불충분 판정은 표준조항의 핵심 요소가 일부 존재하지만, 범위가 부족하거나, 표현이 모호하거나, 법적 효과를 충분히 충족하지 못하는 불완전한 상태를 의미합니다. 즉 ‘주제는 존재하나’, 표준조항의 취지와 구조를 충분히 실현하지 못할 때 불충분으로 판단합니다.
 
 **표현 형식에 대한 원칙**
 - 목록·표 형식과 서술형 표현의 차이는 중요하지 않습니다.  
@@ -249,7 +252,15 @@ class ContentComparator:
    - 인용 시: "제○조에서는 ~" 또는 "제○조에 따르면 ~"
 
 이러한 참고 자료는 표준계약서의 취지를 이해하고 사용자 계약서를 평가하는 데 중요한 근거가 됩니다.
-이 원칙에 따라 사용자의 조항이 표준과 활용의 취지를 얼마나 충실히 반영했는지, 논리적·실질적 측면에서 분석하십시오."""
+이 원칙에 따라 사용자의 조항이 표준과 활용의 취지를 얼마나 충실히 반영했는지, 논리적·실질적 측면에서 분석하십시오.
+
+**출력 형식 준수 (매우 중요)**
+- 누락/불충분 항목을 작성할 때는 반드시 "표준계약서 제X조 제Y항: [해당 항에 대한 구체적 설명]" 형식을 사용해야 합니다.
+- 항 번호 없이 "표준계약서 제X조: [설명]" 형식은 절대 사용하지 마십시오.
+- 여러 항이 관련된 경우 "제X조 제Y항 및 제Z항" 형식이 아닌, 각 항을 별도 항목으로 분리하십시오.
+- **각 항목은 고유한 분석을 포함해야 하며, 같은 설명을 여러 항에 복사하지 마십시오.**
+- 예: "제28조 제1항"과 "제28조 제2항"은 서로 다른 내용이므로 각각 다른 분석을 작성해야 합니다.
+- 이 형식을 지키지 않으면 시스템이 결과를 처리할 수 없습니다."""
 
     def _format_standard_article(self, chunks: List[Dict[str, Any]]) -> str:
         """
@@ -501,18 +512,96 @@ class ContentComparator:
 
 {instruction}
 
-답변은 다음 형식을 반드시 지키시오:
+답변은 다음 JSON 형식을 반드시 지키시오:
 
-**문제 여부**: [있음/없음]
+```json
+{{
+  "has_issues": true,
+  "missing_items": [
+    {{
+      "std_article": "제X조",
+      "std_clause": "제Y항",
+      "reason": "누락된 내용에 대한 구체적 설명"
+    }}
+  ],
+  "insufficient_items": [
+    {{
+      "std_article": "제X조",
+      "std_clause": "제Y항",
+      "reason": "불충분한 내용에 대한 구체적 설명"
+    }}
+  ],
+  "analysis": "종합 분석 내용"
+}}
+```
 
-**누락된 내용**:
-- [{missing_desc}]
+**JSON 형식 규칙**:
+1. **반드시 유효한 JSON**으로 출력 (쉼표, 괄호, 따옴표 주의)
+2. **std_article**: "제X조" 형식 (예: "제11조", "제2조")
+3. **std_clause**: 
+   - 항이 있는 경우: "제Y항" 형식 (예: "제1항", "제2항")
+   - 호가 있는 경우: "제Y호" 형식 (예: "제1호", "제2호")
+   - **조본문만 있는 경우 (항/호 없음): "조본문"** (예: 제1조에 항이 없으면 "조본문")
+4. **각 항목은 고유한 reason** (같은 설명 중복 금지)
+5. 누락/불충분 항목이 없으면 빈 배열 `[]`
+6. JSON 외 다른 텍스트 출력 금지
 
-**불충분한 내용**:
-- [표준계약서에 비해 불충분하거나 모호한 내용이 있다면 구체적으로 나열, 없으면 "없음"]
+**missing vs insufficient 구분 기준**:
 
-**종합 분석**:
-[{analysis_desc}]
+- **missing_items (누락)**:
+  표준 조항의 핵심 요소(주체·의무·행위·조건 등)가 사용자 계약서에서 **어떠한 방식으로도 나타나지 않을 때**만 해당합니다.
+  - 직접적인 표현뿐 아니라 유사·간접·축약 표현까지 모두 고려했을 때, 해당 기능을 수행하는 문장이 **전혀 없을 경우**에만 누락으로 판단합니다.
+  - 예: "제3자 제공 금지 조항이 계약서에 전혀 없음"
+  - 예: "데이터 보유 기간에 대한 언급이 전혀 없음"
+  - 예: 표준 "배상 책임" → 사용자 조항에 배상, 책임, 손해 등 관련 개념 자체가 없음
+
+- **insufficient_items (불충분)**:
+  표준 조항의 핵심 요소가 **일부 존재**하지만, 범위가 부족하거나, 표현이 모호하거나, 법적 효과를 충분히 충족하지 못하는 불완전한 상태를 의미합니다.
+  - 즉 '주제는 존재하나', 표준 조항의 취지와 구조를 충분히 실현하지 못할 때 불충분으로 판단합니다.
+  - 예: 표준 "서면 동의" → 사용자 "동의" (서면 조건 누락)
+  - 예: 표준 "즉시 통지" → 사용자 "통지" (시간 요건 누락)
+  - 예: 표준 "별지1에 기재" → 사용자 "명시" (구체성 부족)
+
+**판단 순서**:
+1. 관련 개념이나 키워드가 **어떤 형태로든** 존재하는가?
+   - 전혀 없음 → **missing**
+   - 일부라도 있음 → 2번으로
+2. 핵심 내용이 충분히 포함되었는가?
+   - 충분함 → sufficient (이 항목은 지적하지 않음)
+   - 불충분함 → **insufficient**
+
+**중요**: 같은 항목을 missing과 insufficient 둘 다에 넣지 마세요!
+
+**올바른 예시**:
+```json
+{{
+  "has_issues": true,
+  "missing_items": [
+    {{
+      "std_article": "제1조",
+      "std_clause": "조본문",
+      "reason": "계약의 목적에 데이터 제공 및 이용 대가 지급에 관한 명시적 언급이 누락되었습니다."
+    }},
+    {{
+      "std_article": "제11조",
+      "std_clause": "제1항",
+      "reason": "가공서비스 변경 시 상대방의 사전 동의를 받아야 한다는 내용이 누락되었습니다."
+    }},
+    {{
+      "std_article": "제11조",
+      "std_clause": "제2항",
+      "reason": "변경으로 인한 계약기간 또는 대가 조정을 요구할 수 있는 권리가 명시되지 않았습니다."
+    }},
+    {{
+      "std_article": "제15조",
+      "std_clause": "제2호",
+      "reason": "데이터 품질 보증 기준이 구체적으로 명시되지 않았습니다."
+    }}
+  ],
+  "insufficient_items": [],
+  "analysis": "사용자 계약서는 기본 절차를 포함하고 있으나 구체적인 보증 내용이 부족합니다."
+}}
+```
 
 ---
 
@@ -523,6 +612,20 @@ class ContentComparator:
 - 누락된 내용의 경우 단순 단어나 표현에 대한 누락이 아닌, 의미상의 누락을 감지해야 한다.
 - 실질적으로 누락되었거나 불충분한 내용만 지적해라.
 - 어투는 경어체로 통일하라.
+
+**조항 참조 필수 (매우 중요)**:
+- 누락된 내용과 불충분한 내용을 지적할 때는 **반드시** 표준계약서의 조항 번호를 명시해야 한다.
+- **필수 형식**: "표준계약서 제X조 제Y항: [해당 항에 대한 구체적 설명]" (항 번호 필수)
+- 조만 언급하는 것은 금지: "표준계약서 제X조: [설명]" (X - 잘못됨)
+- **각 항마다 별도의 항목으로 작성하고, 각 항에 대한 고유한 분석을 제공**:
+  - 잘못된 예: "표준계약서 제11조 제1항 및 제2항: 설명"
+  - 잘못된 예: "표준계약서 제4조: 설명" (항 번호 없음)
+  - 잘못된 예: 같은 설명을 여러 항에 복사
+  - 올바른 예: 
+    - "표준계약서 제11조 제1항: 제1항의 상대방 동의 요건이 누락되었습니다."
+    - "표준계약서 제11조 제2항: 제2항의 대가 조정 권리가 명시되지 않았습니다."
+    - "표준계약서 제4조 제1항: 제1항의 계약 종료 통지 절차가 불명확합니다."
+- **이 형식을 지키지 않으면 시스템이 결과를 처리할 수 없으므로 반드시 준수해야 한다.**
 
 **참고 자료 활용 필수**:
 - [해설]이 있다면: "활용안내서에서는 ~" 또는 "활용안내서에 따르면 ~"로 반드시 인용
@@ -611,71 +714,64 @@ class ContentComparator:
 
     def _parse_llm_response(self, response_text: str) -> Dict[str, Any]:
         """
-        LLM 응답 파싱
+        LLM 응답 파싱 (JSON 형식)
 
         Args:
-            response_text: LLM 응답 텍스트
+            response_text: LLM 응답 텍스트 (JSON)
 
         Returns:
             {
                 "has_issues": bool,
-                "missing_items": List[str],
-                "insufficient_items": List[str],
+                "missing_items": List[Dict],
+                "insufficient_items": List[Dict],
                 "analysis": str
             }
         """
-        lines = response_text.split('\n')
-
-        has_issues = False
-        missing_items = []
-        insufficient_items = []
-        analysis = response_text  # 전체 분석 내용
-
-        # "문제 여부" 파싱
-        for line in lines:
-            if '문제 여부' in line or '문제여부' in line:
-                if '있음' in line:
-                    has_issues = True
-                break
-
-        # "누락된 내용" 섹션 파싱
-        in_missing_section = False
-        in_insufficient_section = False
-
-        for line in lines:
-            line_stripped = line.strip()
-
-            if '누락된 내용' in line_stripped:
-                in_missing_section = True
-                in_insufficient_section = False
-                continue
-            elif '불충분한 내용' in line_stripped:
-                in_missing_section = False
-                in_insufficient_section = True
-                continue
-            elif '종합 분석' in line_stripped or '**종합' in line_stripped:
-                in_missing_section = False
-                in_insufficient_section = False
-                continue
-
-            # 리스트 항목 파싱
-            if in_missing_section and line_stripped.startswith('-'):
-                item = line_stripped[1:].strip()
-                if item and item.lower() != '없음':
-                    missing_items.append(item)
-
-            if in_insufficient_section and line_stripped.startswith('-'):
-                item = line_stripped[1:].strip()
-                if item and item.lower() != '없음':
-                    insufficient_items.append(item)
-
-        # 실제로 문제가 있는지 재확인
-        if not missing_items and not insufficient_items:
-            has_issues = False
-
-        return {
-            "has_issues": has_issues,
-            "missing_items": missing_items,
-            "insufficient_items": insufficient_items,
-            "analysis": analysis
-        }
+        try:
+            # JSON 추출 (```json ... ``` 블록 제거)
+            json_text = response_text.strip()
+            if '```json' in json_text:
+                json_text = json_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in json_text:
+                json_text = json_text.split('```')[1].split('```')[0].strip()
+            
+            # JSON 파싱
+            data = json.loads(json_text)
+            
+            # 검증
+            has_issues = data.get('has_issues', False)
+            missing_items = data.get('missing_items', [])
+            insufficient_items = data.get('insufficient_items', [])
+            analysis = data.get('analysis', '')
+            
+            # 실제로 문제가 있는지 재확인
+            if not missing_items and not insufficient_items:
+                has_issues = False
+            
+            logger.info(f"  JSON 파싱 성공: missing={len(missing_items)}, insufficient={len(insufficient_items)}")
+            
+            return {
+                "has_issues": has_issues,
+                "missing_items": missing_items,
+                "insufficient_items": insufficient_items,
+                "analysis": analysis
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"  JSON 파싱 실패: {e}")
+            logger.error(f"  응답 텍스트: {response_text[:200]}...")
+            # Fallback: 빈 결과 반환
+            return {
+                "has_issues": False,
+                "missing_items": [],
+                "insufficient_items": [],
+                "analysis": f"JSON 파싱 오류: {str(e)}"
+            }
+        except Exception as e:
+            logger.error(f"  예상치 못한 오류: {e}")
+            return {
+                "has_issues": False,
+                "missing_items": [],
+                "insufficient_items": [],
+                "analysis": f"파싱 오류: {str(e)}"
+            }

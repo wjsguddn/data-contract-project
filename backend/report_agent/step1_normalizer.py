@@ -66,7 +66,7 @@ class Step1Normalizer:
                        f"매칭된 사용자 조항 {len(user_articles)}개")
             
             # A3 파싱 (기존 user_articles에 추가)
-            self._parse_a3_results(a3_result, user_articles)
+            self._parse_a3_results(a3_result, user_articles, contract_type)
             logger.info(f"A3 파싱 완료: 총 사용자 조항 {len(user_articles)}개")
             
             # 중복 제거
@@ -123,8 +123,32 @@ class Step1Normalizer:
             if detail.get("matched"):
                 user_article_no = f"user_article_{detail['user_article_no']}"
                 matched_ids = detail.get("matched_articles_global_ids", [])
+                
+                # verification_details에서 reasoning 추출
+                matched_with_reasoning = []
+                verification_details = detail.get("verification_details", [])
+                
+                for std_id in matched_ids:
+                    # 해당 std_id의 reasoning 찾기
+                    reasoning = ""
+                    for verification in verification_details:
+                        candidate_id = verification.get("candidate_id", "")
+                        if candidate_id in std_id or std_id.endswith(candidate_id):
+                            if verification.get("is_match"):
+                                reasoning = verification.get("reasoning", "")
+                                logger.debug(f"  {std_id}: reasoning 발견 - {reasoning[:50]}...")
+                                break
+                    
+                    if not reasoning:
+                        logger.warning(f"  {std_id}: reasoning 없음 (verification_details: {len(verification_details)}개)")
+                    
+                    matched_with_reasoning.append({
+                        "std_clause_id": std_id,
+                        "analysis": reasoning if reasoning else "표준 조항과 매칭됨"
+                    })
+                
                 user_articles[user_article_no] = {
-                    "matched": matched_ids,
+                    "matched": matched_with_reasoning,
                     "insufficient": [],
                     "missing": []
                 }
@@ -132,7 +156,7 @@ class Step1Normalizer:
         
         return user_articles
     
-    def _parse_a3_results(self, a3_result: Dict[str, Any], user_articles: Dict[str, Dict]):
+    def _parse_a3_results(self, a3_result: Dict[str, Any], user_articles: Dict[str, Dict], contract_type: str):
         """
         A3 결과를 user_articles에 추가 (matched, insufficient, missing)
         
@@ -151,31 +175,250 @@ class Step1Normalizer:
                     "missing": []
                 }
             
-            # A3 matched_articles 추가 (A1 오탐지 복구)
+            # A3 matched_articles 추가 (항 단위로 분해)
             if article.get("matched_articles"):
+                logger.info(f"{user_article_no}: A3 matched_articles {len(article['matched_articles'])}개")
                 for matched in article["matched_articles"]:
-                    global_id = matched.get("global_id")
-                    if global_id and global_id not in user_articles[user_article_no]["matched"]:
-                        user_articles[user_article_no]["matched"].append(global_id)
+                    # matched_chunks에서 실제 매칭된 하위 항목의 global_id 추출
+                    matched_chunks = matched.get("matched_chunks", [])
+                    matched_sub_items = matched.get("matched_sub_items", [])
+                    sub_items = matched.get("sub_items", [])  # A3 상세 분석 결과
+                    
+                    logger.info(f"  - 표준 조항: {matched.get('global_id')}, "
+                               f"청크 {len(matched_chunks)}개, matched_sub_items: {matched_sub_items}, "
+                               f"sub_items: {len(sub_items)}개")
+                    
+                    if matched_chunks:
+                        # matched_sub_items가 있으면 해당 인덱스만 사용
+                        if matched_sub_items:
+                            logger.info(f"    matched_sub_items 사용: {matched_sub_items}")
+                            for idx in matched_sub_items:
+                                if idx < len(matched_chunks):
+                                    chunk_global_id = matched_chunks[idx].get("global_id")
+                                    logger.info(f"      [{idx}] {chunk_global_id}")
+                                    
+                                    # A3 sub_items에서 해당 인덱스의 summary 찾기
+                                    summary = ""
+                                    for sub_item in sub_items:
+                                        if sub_item.get("index") == idx and sub_item.get("fidelity") == "sufficient":
+                                            summary = sub_item.get("summary", "")
+                                            break
+                                    
+                                    if chunk_global_id:
+                                        # 중복 체크: matched, insufficient, missing 모두 확인
+                                        existing_in_matched = [m.get("std_clause_id") if isinstance(m, dict) else m 
+                                                              for m in user_articles[user_article_no]["matched"]]
+                                        existing_in_insufficient = [m.get("std_clause_id") if isinstance(m, dict) else m 
+                                                                   for m in user_articles[user_article_no]["insufficient"]]
+                                        existing_in_missing = [m.get("std_clause_id") if isinstance(m, dict) else m 
+                                                              for m in user_articles[user_article_no]["missing"]]
+                                        
+                                        if chunk_global_id in existing_in_insufficient or chunk_global_id in existing_in_missing:
+                                            logger.info(f"        → matched 추가 스킵 (insufficient/missing에 이미 존재)")
+                                        elif chunk_global_id not in existing_in_matched:
+                                            logger.info(f"        → matched에 추가 (summary: {summary[:50] if summary else 'N/A'})")
+                                            user_articles[user_article_no]["matched"].append({
+                                                "std_clause_id": chunk_global_id,
+                                                "analysis": summary if summary else "A3 상세 분석에서 매칭됨"
+                                            })
+                                        else:
+                                            logger.info(f"        → 이미 존재 (중복 제거)")
+                        else:
+                            # matched_sub_items가 없으면 모든 청크 사용
+                            for idx, chunk in enumerate(matched_chunks):
+                                chunk_global_id = chunk.get("global_id")
+                                
+                                # A3 sub_items에서 해당 인덱스의 summary 찾기
+                                summary = ""
+                                for sub_item in sub_items:
+                                    if sub_item.get("index") == idx and sub_item.get("fidelity") == "sufficient":
+                                        summary = sub_item.get("summary", "")
+                                        break
+                                
+                                if chunk_global_id:
+                                    # 중복 체크 (std_clause_id 기준)
+                                    existing_ids = [m.get("std_clause_id") if isinstance(m, dict) else m 
+                                                   for m in user_articles[user_article_no]["matched"]]
+                                    if chunk_global_id not in existing_ids:
+                                        user_articles[user_article_no]["matched"].append({
+                                            "std_clause_id": chunk_global_id,
+                                            "analysis": summary if summary else "A3 상세 분석에서 매칭됨"
+                                        })
+                    else:
+                        # fallback: 조 단위 global_id 사용
+                        global_id = matched.get("global_id")
+                        if global_id:
+                            # 중복 체크 (std_clause_id 기준)
+                            existing_ids = [m.get("std_clause_id") if isinstance(m, dict) else m 
+                                           for m in user_articles[user_article_no]["matched"]]
+                            if global_id not in existing_ids:
+                                user_articles[user_article_no]["matched"].append({
+                                    "std_clause_id": global_id,
+                                    "analysis": "A3 상세 분석에서 매칭됨"
+                                })
             
-            # insufficient/missing 파싱
+            # insufficient/missing 파싱 (JSON 구조)
+            # A3 matched_articles에서 sub_items를 먼저 수집 (summary 활용)
+            # 모든 fidelity 값 포함 (sufficient, insufficient, missing)
+            sub_items_by_global_id = {}
+            for matched in article.get("matched_articles", []):
+                for sub_item in matched.get("sub_items", []):
+                    # 각 sub_item의 global_id 찾기
+                    idx = sub_item.get("index")
+                    matched_chunks = matched.get("matched_chunks", [])
+                    if idx is not None and idx < len(matched_chunks):
+                        chunk_global_id = matched_chunks[idx].get("global_id")
+                        if chunk_global_id:
+                            sub_items_by_global_id[chunk_global_id] = sub_item
+                            logger.debug(f"    sub_item 매핑: {chunk_global_id} -> {sub_item.get('fidelity')} ({sub_item.get('summary', '')[:50]})")
+            
             suggestions = article.get("suggestions", [])
             for suggestion in suggestions:
-                # missing_items는 이미 global_id 리스트
+                # missing_items는 이제 JSON 객체 리스트
                 missing_items = suggestion.get("missing_items", [])
-                if missing_items:
-                    user_articles[user_article_no]["missing"].extend(missing_items)
-                    logger.debug(f"{user_article_no}: missing {len(missing_items)}개 추가")
+                for item in missing_items:
+                    if isinstance(item, dict):
+                        # JSON 구조: {"std_article": "제X조", "std_clause": "제Y항", "reason": "..."}
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        # global_id 매핑
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            # A3 sub_items에서 summary 찾기
+                            sub_item = sub_items_by_global_id.get(global_id)
+                            if sub_item and sub_item.get("fidelity") == "missing":
+                                summary = sub_item.get("summary", "")
+                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                                logger.info(f"    missing: {global_id} -> A3 summary 사용")
+                            else:
+                                analysis = f"{std_article} {std_clause}: {reason}"
+                                logger.info(f"    missing: {global_id} -> reason 사용 (sub_item 없음)")
+                            
+                            user_articles[user_article_no]["missing"].append({
+                                "std_clause_id": global_id,
+                                "analysis": analysis
+                            })
+                        else:
+                            logger.warning(f"{user_article_no}: global_id 매핑 실패: {std_article} {std_clause}")
+                    elif isinstance(item, str):
+                        # Fallback: 텍스트 형식 (하위 호환성)
+                        logger.warning(f"{user_article_no}: 텍스트 형식 감지 (JSON 권장): {item[:50]}...")
+                        user_articles[user_article_no]["missing"].append({
+                            "std_clause_id": item,
+                            "analysis": item
+                        })
                 
-                # insufficient_items도 이미 global_id 리스트
+                logger.debug(f"{user_article_no}: missing {len(missing_items)}개 추가")
+                
+                # insufficient_items도 동일하게 처리
                 insufficient_items = suggestion.get("insufficient_items", [])
-                if insufficient_items:
-                    user_articles[user_article_no]["insufficient"].extend(insufficient_items)
-                    logger.debug(f"{user_article_no}: insufficient {len(insufficient_items)}개 추가")
+                for item in insufficient_items:
+                    if isinstance(item, dict):
+                        # JSON 구조
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        # global_id 매핑
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            # A3 sub_items에서 summary 찾기
+                            sub_item = sub_items_by_global_id.get(global_id)
+                            if sub_item and sub_item.get("fidelity") == "insufficient":
+                                summary = sub_item.get("summary", "")
+                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                                logger.info(f"    insufficient: {global_id} -> A3 summary 사용")
+                            else:
+                                analysis = f"{std_article} {std_clause}: {reason}"
+                                logger.info(f"    insufficient: {global_id} -> reason 사용 (sub_item 없음)")
+                            
+                            user_articles[user_article_no]["insufficient"].append({
+                                "std_clause_id": global_id,
+                                "analysis": analysis
+                            })
+                        else:
+                            logger.warning(f"{user_article_no}: global_id 매핑 실패: {std_article} {std_clause}")
+                    elif isinstance(item, str):
+                        # Fallback: 텍스트 형식
+                        logger.warning(f"{user_article_no}: 텍스트 형식 감지 (JSON 권장): {item[:50]}...")
+                        user_articles[user_article_no]["insufficient"].append({
+                            "std_clause_id": item,
+                            "analysis": item
+                        })
+                
+                logger.debug(f"{user_article_no}: insufficient {len(insufficient_items)}개 추가")
+    
+    def _map_to_global_id(self, std_article: str, std_clause: str, contract_type: str) -> str:
+        """
+        표준계약서 조항을 global_id로 매핑
+        
+        Args:
+            std_article: "제X조" 형식
+            std_clause: "제Y항" 또는 "제Y호" 형식
+            contract_type: 계약 유형
+            
+        Returns:
+            global_id (예: "urn:std:provide:art:005:cla:001")
+        """
+        if not self.std_chunks:
+            logger.warning("표준계약서 청크가 로드되지 않음")
+            return ""
+        
+        # 조 번호 추출
+        article_match = re.search(r'제(\d+)조', std_article)
+        if not article_match:
+            logger.warning(f"조 번호 추출 실패: {std_article}")
+            return ""
+        article_no = int(article_match.group(1))
+        
+        # 항/호 번호 추출
+        clause_no = None
+        sub_no = None
+        is_article_text = False  # 조본문 여부
+        
+        if '조본문' in std_clause or std_clause.strip() == '':
+            # 조본문 (항/호 없음)
+            is_article_text = True
+        elif '항' in std_clause:
+            clause_match = re.search(r'제(\d+)항', std_clause)
+            if clause_match:
+                clause_no = int(clause_match.group(1))
+        elif '호' in std_clause:
+            sub_match = re.search(r'제(\d+)호', std_clause)
+            if sub_match:
+                sub_no = int(sub_match.group(1))
+        
+        # global_id 찾기
+        for chunk in self.std_chunks:
+            global_id = chunk.get("global_id", "")
+            
+            # 조 번호 매칭
+            if f":art:{article_no:03d}" not in global_id:
+                continue
+            
+            # 조본문 매칭 (:att)
+            if is_article_text:
+                if ":att" in global_id:
+                    return global_id
+            # 항 번호 매칭 (cla)
+            elif clause_no is not None:
+                if f":cla:{clause_no:03d}" in global_id:
+                    return global_id
+            # 호 번호 매칭 (sub)
+            elif sub_no is not None:
+                if f":sub:{sub_no:03d}" in global_id:
+                    return global_id
+        
+        logger.warning(f"global_id를 찾을 수 없음: {std_article} {std_clause}")
+        return ""
     
     def _extract_clause_references(self, text: str) -> List[str]:
         """
         정규식으로 "제N조", "제N조 제M항", "제N조 제M호" 추출 및 global_id 매핑
+        
+        "표준계약서 제X조 제Y항: 설명" 형식도 처리
         
         Args:
             text: 분석 텍스트
@@ -185,39 +428,60 @@ class Step1Normalizer:
         """
         clause_ids = []
         
-        # 정규식 패턴
+        # 정규식 패턴 (우선순위 순서)
+        # 주의: "및" 패턴은 A3 프롬프트에서 금지했으므로 경고용으로만 유지
         patterns = [
-            r'제(\d+)조\s*제(\d+)호',  # 제N조 제M호
-            r'제(\d+)조\s*제(\d+)항',  # 제N조 제M항
-            r'제(\d+)조'              # 제N조
+            # "표준계약서 제N조 제M항 및 제K항" 형식 (경고: 이 형식은 사용하지 말아야 함)
+            (r'표준계약서\s*제(\d+)조\s*제(\d+)항\s*및\s*제(\d+)항', 'multi_sub_warning'),
+            # "표준계약서 제N조 제M항" 형식
+            (r'표준계약서\s*제(\d+)조\s*제(\d+)항', 'sub'),
+            # "표준계약서 제N조 제M호" 형식
+            (r'표준계약서\s*제(\d+)조\s*제(\d+)호', 'item'),
+            # "표준계약서 제N조 (제목)" 형식 (괄호 포함)
+            (r'표준계약서\s*제(\d+)조\s*\([^)]+\)', 'article'),
+            # "표준계약서 제N조" 형식
+            (r'표준계약서\s*제(\d+)조', 'article'),
+            # "제N조 제M항 및 제K항" 형식 (경고)
+            (r'제(\d+)조\s*제(\d+)항\s*및\s*제(\d+)항', 'multi_sub_warning'),
+            # "제N조 제M호" 형식
+            (r'제(\d+)조\s*제(\d+)호', 'item'),
+            # "제N조 제M항" 형식
+            (r'제(\d+)조\s*제(\d+)항', 'sub'),
+            # "제N조 (제목)" 형식 (괄호 포함)
+            (r'제(\d+)조\s*\([^)]+\)', 'article'),
+            # "제N조" 형식
+            (r'제(\d+)조', 'article')
         ]
         
-        for pattern in patterns:
+        for pattern, pattern_type in patterns:
             matches = re.findall(pattern, text)
             for match in matches:
-                if isinstance(match, tuple):
-                    if len(match) == 2:
-                        # 제N조 제M항 or 제N조 제M호
-                        article_no = int(match[0])
-                        sub_no = int(match[1])
-                        # 조 단위 참조인 경우 확장
-                        if '호' in pattern:
-                            # 제N조 제M호 형식
-                            clause_ref = f"제{article_no}조 제{sub_no}호"
-                        else:
-                            # 제N조 제M항 형식
-                            clause_ref = f"제{article_no}조 제{sub_no}항"
-                        ids = self._expand_article_to_clauses(clause_ref)
-                        clause_ids.extend(ids)
-                    else:
-                        # 제N조만
-                        article_no = int(match)
-                        clause_ref = f"제{article_no}조"
-                        ids = self._expand_article_to_clauses(clause_ref)
-                        clause_ids.extend(ids)
-                else:
+                if pattern_type == 'multi_sub_warning':
+                    # 제N조 제M항 및 제K항 (A3 프롬프트 위반)
+                    logger.warning(f"A3가 '및' 형식을 사용했습니다 (프롬프트 위반): {text[:100]}")
+                    # 첫 번째 항만 사용
+                    article_no = int(match[0])
+                    sub_no1 = int(match[1])
+                    clause_ref = f"제{article_no}조 제{sub_no1}항"
+                    ids = self._expand_article_to_clauses(clause_ref)
+                    clause_ids.extend(ids)
+                elif pattern_type == 'sub':
+                    # 제N조 제M항
+                    article_no = int(match[0])
+                    sub_no = int(match[1])
+                    clause_ref = f"제{article_no}조 제{sub_no}항"
+                    ids = self._expand_article_to_clauses(clause_ref)
+                    clause_ids.extend(ids)
+                elif pattern_type == 'item':
+                    # 제N조 제M호
+                    article_no = int(match[0])
+                    item_no = int(match[1])
+                    clause_ref = f"제{article_no}조 제{item_no}호"
+                    ids = self._expand_article_to_clauses(clause_ref)
+                    clause_ids.extend(ids)
+                elif pattern_type == 'article':
                     # 제N조만
-                    article_no = int(match)
+                    article_no = int(match) if isinstance(match, str) else int(match[0])
                     clause_ref = f"제{article_no}조"
                     ids = self._expand_article_to_clauses(clause_ref)
                     clause_ids.extend(ids)
@@ -226,10 +490,10 @@ class Step1Normalizer:
     
     def _expand_article_to_clauses(self, article_ref: str) -> List[str]:
         """
-        조 단위 참조를 모든 하위 항목 ID로 확장
+        조항 참조를 global_id로 변환
         
         Args:
-            article_ref: 조항 참조 (예: "제23조", "urn:std:provide:art:023")
+            article_ref: 조항 참조 (예: "제23조", "제23조 제2항", "제23조 제3호")
             
         Returns:
             global_id 목록
@@ -238,31 +502,55 @@ class Step1Normalizer:
             logger.warning("표준계약서 청크가 로드되지 않음")
             return []
         
-        # article_ref에서 조 번호 추출
-        if article_ref.startswith("urn:"):
-            # 이미 global_id 형식
-            article_no_match = re.search(r':art:(\d+)', article_ref)
-            if article_no_match:
-                article_no = int(article_no_match.group(1))
-            else:
-                return [article_ref]
-        else:
-            # "제N조" 형식
-            article_no_match = re.search(r'제(\d+)조', article_ref)
-            if not article_no_match:
-                logger.warning(f"조항 번호 추출 실패: {article_ref}")
-                return []
-            article_no = int(article_no_match.group(1))
+        # article_ref 파싱
+        article_no = None
+        clause_no = None  # 항 (cla)
+        sub_no = None  # 호 (sub)
         
-        # 해당 조의 모든 청크 찾기
+        # "제N조 제M항" 형식
+        match = re.search(r'제(\d+)조\s*제(\d+)항', article_ref)
+        if match:
+            article_no = int(match.group(1))
+            clause_no = int(match.group(2))
+        else:
+            # "제N조 제M호" 형식
+            match = re.search(r'제(\d+)조\s*제(\d+)호', article_ref)
+            if match:
+                article_no = int(match.group(1))
+                sub_no = int(match.group(2))
+            else:
+                # "제N조" 형식
+                match = re.search(r'제(\d+)조', article_ref)
+                if match:
+                    article_no = int(match.group(1))
+        
+        if not article_no:
+            logger.warning(f"조항 번호 추출 실패: {article_ref}")
+            return []
+        
+        # 해당 조항의 청크 찾기
         clause_ids = []
         for chunk in self.std_chunks:
             global_id = chunk.get("global_id", "")
-            if f":art:{article_no:03d}" in global_id:
+            
+            # 조 번호 매칭
+            if f":art:{article_no:03d}" not in global_id:
+                continue
+            
+            # 항 번호가 지정된 경우 (cla)
+            if clause_no is not None:
+                if f":cla:{clause_no:03d}" in global_id:
+                    clause_ids.append(global_id)
+            # 호 번호가 지정된 경우 (sub)
+            elif sub_no is not None:
+                if f":sub:{sub_no:03d}" in global_id:
+                    clause_ids.append(global_id)
+            # 조만 지정된 경우 (모든 하위 항목 포함)
+            else:
                 clause_ids.append(global_id)
         
         if not clause_ids:
-            logger.warning(f"제{article_no}조에 대한 조항을 찾을 수 없음")
+            logger.warning(f"{article_ref}에 대한 조항을 찾을 수 없음")
         
         return clause_ids
     
@@ -284,8 +572,18 @@ class Step1Normalizer:
         # user_articles의 모든 insufficient/missing ID 수집
         mentioned_ids = set()
         for article_data in user_articles.values():
-            mentioned_ids.update(article_data.get("insufficient", []))
-            mentioned_ids.update(article_data.get("missing", []))
+            # 이제 insufficient/missing이 딕셔너리 리스트이므로 std_clause_id 추출
+            for item in article_data.get("insufficient", []):
+                if isinstance(item, dict):
+                    mentioned_ids.add(item.get("std_clause_id"))
+                else:
+                    mentioned_ids.add(item)  # 하위 호환성
+            
+            for item in article_data.get("missing", []):
+                if isinstance(item, dict):
+                    mentioned_ids.add(item.get("std_clause_id"))
+                else:
+                    mentioned_ids.add(item)  # 하위 호환성
         
         # overall_missing에서 제거 (A3에서 언급된 것은 전역 누락 아님)
         filtered = [id for id in overall_missing if id not in mentioned_ids]

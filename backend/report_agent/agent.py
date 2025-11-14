@@ -15,6 +15,7 @@ from backend.report_agent.step1_normalizer import Step1Normalizer
 from backend.report_agent.step2_aggregator import Step2Aggregator
 from backend.report_agent.step3_resolver import Step3Resolver
 from backend.report_agent.step4_reporter import Step4Reporter
+from backend.report_agent.step5_final_integrator import Step5FinalIntegrator
 from backend.shared.database import SessionLocal, ValidationResult, ContractDocument
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,8 @@ class ReportAgent:
         self.step1 = Step1Normalizer(self.kb_loader)
         self.step2 = Step2Aggregator()
         self.step3 = Step3Resolver(self.azure_client)
-        self.step4 = Step4Reporter()
+        self.step4 = Step4Reporter(self.kb_loader)  # kb_loader 전달
+        self.step5 = Step5FinalIntegrator()
         
         logger.info("ReportAgent 초기화 완료")
     
@@ -72,54 +74,45 @@ class ReportAgent:
             db = SessionLocal()
             
             # Step 0: 입력 데이터 로드
-            logger.info(f"[Step 0] 입력 데이터 로드 중...")
             input_data = self._load_input_data(db, contract_id)
             
             # Step 1: 정규화
-            logger.info(f"[Step 1] 정규화 시작...")
             step1_result = self.step1.normalize(
                 a1_result=input_data['a1_result'],
                 a3_result=input_data['a3_result'],
                 contract_type=input_data['contract_type']
             )
-            logger.info(f"[Step 1] 정규화 완료: "
-                       f"전역 누락 {len(step1_result['overall_missing_clauses'])}개, "
-                       f"사용자 조항 {len(step1_result['user_articles'])}개")
-            
-            # Step 1 결과 저장
             self._save_step_result(db, contract_id, "report_step1_normalized", step1_result)
             
             # Step 2: 재집계
-            logger.info(f"[Step 2] 재집계 시작...")
             step2_result = self.step2.aggregate(step1_result)
-            logger.info(f"[Step 2] 재집계 완료: "
-                       f"충돌 {step2_result['conflict_count']}개")
-            
-            # Step 2 결과 저장
             self._save_step_result(db, contract_id, "report_step2_aggregated", step2_result)
             
             # Step 3: 충돌 해소
-            logger.info(f"[Step 3] 충돌 해소 시작...")
             step3_result = self.step3.resolve(
                 step2_result=step2_result,
                 a3_result=input_data['a3_result'],
-                step1_result=step1_result
+                step1_result=step1_result,
+                user_contract_data=input_data['user_contract_data']
             )
-            logger.info(f"[Step 3] 충돌 해소 완료: "
-                       f"해소된 충돌 {step3_result.get('resolved_conflicts', 0)}개")
-            
-            # Step 3 결과 저장
             self._save_step_result(db, contract_id, "report_step3_resolved", step3_result)
             
-            # Step 4: 최종 보고서 생성
-            logger.info(f"[Step 4] 최종 보고서 생성 시작...")
-            final_report = self.step4.generate_final_report(
+            # Step 4: 포맷팅
+            step4_result = self.step4.generate_final_report(
                 step3_result=step3_result,
                 contract_id=contract_id,
                 contract_type=input_data['contract_type'],
                 user_contract_data=input_data['user_contract_data']
             )
-            logger.info(f"[Step 4] 최종 보고서 생성 완료")
+            logger.info(f"[Step 4] 포맷팅 완료")
+            self._save_step_result(db, contract_id, "report_step4_formatted", step4_result)
+            
+            # Step 5: 체크리스트 통합 + 최종 보고서
+            final_report = self.step5.integrate(
+                step4_result=step4_result,
+                a2_result=input_data['a2_result']
+            )
+            logger.info(f"[Step 5] 최종 통합 완료")
             
             # 최종 보고서 저장
             self._save_final_report(db, contract_id, final_report)
@@ -169,6 +162,10 @@ class ReportAgent:
         if not validation_result.completeness_check:
             raise ValueError(f"A1 완전성 검증 결과가 없습니다: {contract_id}")
         
+        # A2 결과 확인 (선택적 - 없어도 진행)
+        if not validation_result.checklist_validation:
+            logger.warning(f"A2 체크리스트 검증 결과가 없습니다: {contract_id}")
+        
         # A3 결과 확인
         if not validation_result.content_analysis:
             raise ValueError(f"A3 내용 분석 결과가 없습니다: {contract_id}")
@@ -181,10 +178,14 @@ class ReportAgent:
         if not contract or not contract.parsed_data:
             raise ValueError(f"계약서 원본 데이터를 찾을 수 없습니다: {contract_id}")
         
-        logger.info(f"입력 데이터 로드 완료: A1, A3, 계약서 원본")
+        # A2 결과 로드 (없으면 빈 딕셔너리)
+        a2_result = validation_result.checklist_validation or {"matched_articles": []}
+        
+        logger.info(f"입력 데이터 로드 완료: A1, A2 ({len(a2_result.get('matched_articles', []))}개 조항), A3, 계약서 원본")
         
         return {
             "a1_result": validation_result.completeness_check,
+            "a2_result": a2_result,  # A2 체크리스트 (없으면 빈 딕셔너리)
             "a3_result": validation_result.content_analysis,
             "contract_type": validation_result.contract_type,
             "user_contract_data": contract.parsed_data
