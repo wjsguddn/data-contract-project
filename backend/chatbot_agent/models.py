@@ -30,24 +30,7 @@ class ToolResult(BaseModel):
 
 
 # ============================================
-# 1. StructureTool 응답 스키마
-# ============================================
-class ContractStructureData(BaseModel):
-    """계약서 구조 데이터"""
-    articles: List[str] = Field(description="조 목록 (예: ['제1조(목적)', '제2조(정의)'])")
-    exhibits: List[str] = Field(description="별지 목록 (예: ['별지1 대상데이터'])")
-    total_articles: int = Field(description="총 조 개수")
-    total_exhibits: int = Field(description="총 별지 개수")
-
-
-class StructureToolResult(ToolResult):
-    """StructureTool 실행 결과"""
-    tool_name: str = "get_contract_structure"
-    data: Optional[ContractStructureData] = None
-
-
-# ============================================
-# 2. HybridSearchTool 응답 스키마
+# 1. HybridSearchTool 응답 스키마
 # ============================================
 class ArticleContent(BaseModel):
     """조 내용"""
@@ -73,7 +56,7 @@ class HybridSearchToolResult(ToolResult):
 
 
 # ============================================
-# 3. ArticleIndexTool 응답 스키마
+# 2. ArticleIndexTool 응답 스키마
 # ============================================
 class ArticleIndexData(BaseModel):
     """조 번호 조회 결과"""
@@ -88,7 +71,7 @@ class ArticleIndexToolResult(ToolResult):
 
 
 # ============================================
-# 4. ArticleTitleTool 응답 스키마
+# 3. ArticleTitleTool 응답 스키마
 # ============================================
 class ArticleTitleData(BaseModel):
     """조 제목 조회 결과"""
@@ -138,7 +121,6 @@ class StandardContractToolResult(ToolResult):
 # 툴 결과 타입 유니온
 # ============================================
 ToolResultType = Union[
-    StructureToolResult,
     HybridSearchToolResult,
     ArticleIndexToolResult,
     ArticleTitleToolResult,
