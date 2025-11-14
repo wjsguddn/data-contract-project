@@ -178,8 +178,6 @@ respond (최종 답변 생성)
    - ...
    
    사용 가능한 툴:
-   - **get_contract_structure**: 사용자 계약서의 구조(조 목록, 별지 목록)를 파악합니다.
-     파라미터: {"contract_id": "계약서 ID (자동 제공)"}
    
    - **hybrid_search**: 키워드 기반 하이브리드 검색으로 관련 조항을 찾습니다.
      파라미터: {
@@ -257,7 +255,6 @@ respond (최종 답변 생성)
    - `contract_structure` 업데이트 (구조 파악 툴인 경우)
 
 **병렬 실행 조건**:
-- 첫 번째 툴이 `hybrid_search`인 경우 → `get_contract_structure`와 병렬 실행
 - `get_article_by_index`에서 여러 조 번호 조회 시 → 각 조별로 병렬 실행
 
 ---
@@ -287,14 +284,12 @@ respond (최종 답변 생성)
    
    질문: {user_message}
    
-   수집된 정보: {len(collected_info)}개
-   1. get_contract_structure: 15개 조
-   2. hybrid_search: 3개 조 검색됨
-   ...
+   탐색 상태:
+   - 탐색한 조항: 3개 (제1조(목적), 제2조(정의), 제3조(계약기간))
+   - 미탐색 조항: 12개 (제4조(계약금액), 제5조(지급방법), ...)
    
-   수집된 정보 상세:
-   1. get_contract_structure: 15개 조
-   2. hybrid_search: 3개 조 검색됨
+   수집된 정보: {len(collected_info)}개
+   1. hybrid_search: 3개 조 검색됨
    ...
    
    평가 기준:
@@ -420,8 +415,8 @@ respond (최종 답변 생성)
     "contract_structure": Dict,      # 계약서 구조 (조 목록 등)
     "tool_history": List[Dict],      # 툴 실행 기록
     "collected_info": List[Dict],    # 수집된 정보
-    "explored_articles": List[int],  # 탐색한 조 번호
-    "unexplored_articles": List[int],# 미탐색 조 번호
+    "explored_articles": List[str],  # 탐색한 조 목록 (예: ['제1조(목적)', '제2조(정의)'])
+    "unexplored_articles": List[str],# 미탐색 조 목록
     "iteration_count": int,          # 반복 횟수
     "max_iterations": int,           # 최대 반복 횟수 (기본 5)
     "decision_log": List[Dict],      # 의사결정 로그
@@ -476,8 +471,8 @@ respond (최종 답변 생성)
    - LLM 계획: `hybrid_search` 선택
    - 파라미터: `topics=[{"topic_name": "해지", "queries": ["해지", "계약 종료"]}]`
 
-3. **parallel_executor**
-   - `get_contract_structure` + `hybrid_search` 병렬 실행
+3. **sequential_executor**
+   - `hybrid_search` 실행
    - 결과: 제10조 "계약의 해지" 검색됨
 
 4. **evaluator (1차)**
