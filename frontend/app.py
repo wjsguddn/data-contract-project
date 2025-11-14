@@ -1388,10 +1388,8 @@ def display_chatbot_sidebar(contract_id: str):
         contract_id: 계약서 ID
     """
     # 채팅 컨테이너 높이 설정
-    # 작업표시줄 on:
-    # 그램: 544  모니터: 758
-    # 작업표시줄 off:
-    # 그램: 591  모니터: 805
+    # 작업표시줄 on:    그램 544  모니터 758
+    # 작업표시줄 off:   그램 591  모니터 805
     CHAT_CONTAINER_HEIGHT = 591
     
     # CSS로 스크롤바 숨기기 및 채팅 스타일링 (헤더보다 먼저 배치)
