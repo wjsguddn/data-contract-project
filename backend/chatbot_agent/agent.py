@@ -64,9 +64,7 @@ class ChatbotOrchestrator:
             tool_registry.register(ArticleTitleTool())
             
             # 신규 도구 등록
-            from backend.chatbot_agent.tools.structure_tool import StructureTool
             from backend.chatbot_agent.tools.standard_contract_tool import StandardContractTool
-            tool_registry.register(StructureTool())
             tool_registry.register(StandardContractTool(azure_client))
         
         self.tool_registry = tool_registry
