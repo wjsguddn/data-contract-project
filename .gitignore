@@ -104,5 +104,5 @@ data/user_contract_indexes/whoosh/*
 .python-version
 
 # .kiro
-.kiro/specs/contract-chatbot
+.kiro/specs
 .kiro/hooks
