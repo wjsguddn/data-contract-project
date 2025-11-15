@@ -103,21 +103,40 @@ def _format_contract_type(contract_type: str) -> str:
     return type_map.get(contract_type, contract_type)
 
 
-def show_report_page(contract_id: str):
+def show_validation_results_page(contract_id: str):
     """
-    최종 보고서 페이지 표시
+    검증 결과 페이지 표시 (탭 구조)
     
     Args:
         contract_id: 계약서 ID
     """
     # 뒤로 가기 버튼
-    if st.button("← 검증 결과로 돌아가기"):
-        st.session_state.show_report = False
+    if st.button("← 메인으로 돌아가기"):
+        st.session_state.show_validation_results = False
         st.rerun()
     
-    st.markdown("# 📊 최종 검증 보고서")
+    st.markdown("# 📊 계약서 검증 결과")
     st.markdown("---")
     
+    # 탭 생성
+    tab1, tab2 = st.tabs(["📄 최종 보고서", "🔍 기술 검증 상세"])
+    
+    # 탭 1: 최종 보고서 (메인)
+    with tab1:
+        display_final_report_tab(contract_id)
+    
+    # 탭 2: 기술 검증 상세
+    with tab2:
+        display_technical_validation_tab(contract_id)
+
+
+def display_final_report_tab(contract_id: str):
+    """
+    최종 보고서 탭 표시 (사용자 친화적)
+    
+    Args:
+        contract_id: 계약서 ID
+    """
     # 보고서 로딩
     try:
         report_url = f"http://localhost:8000/api/report/{contract_id}"
@@ -170,22 +189,6 @@ def show_report_page(contract_id: str):
         
         st.markdown("---")
         
-        # 전체 계약서에서 누락된 조항
-        overall_missing = report.get('overall_missing_clauses', [])
-        if overall_missing:
-            st.markdown("## ❌ 전체 계약서에서 누락된 조항")
-            st.markdown(f"사용자 계약서 전체에서 찾을 수 없는 표준 조항입니다. ({len(overall_missing)}개)")
-            
-            for item in overall_missing:
-                std_clause_id = item.get('std_clause_id', '')
-                std_clause_title = item.get('std_clause_title', '')
-                analysis = item.get('analysis', '')
-                
-                with st.expander(f"🔴 {std_clause_title} ({std_clause_id})"):
-                    st.markdown(analysis)
-            
-            st.markdown("---")
-        
         # 사용자 조항별 상세 분석
         user_articles = report.get('user_articles', [])
         if user_articles:
@@ -209,9 +212,28 @@ def show_report_page(contract_id: str):
                     # user_article_title이 "제n조 (제목)" 형식이므로 그대로 사용
                     article_header = user_article_title if user_article_title else f"제{user_article_no}조"
                 
-                # 모든 조항 표시 (문제 여부와 관계없이)
-                if insufficient or missing:
-                    # 문제가 있는 조항
+                # 서문은 매칭만 표시, 일반 조항은 모두 표시
+                if user_article_no == 0:
+                    # 서문: 매칭된 항목과 체크리스트 표시
+                    if matched or checklist_results:
+                        with st.expander(f"✅ {article_header}", expanded=False):
+                            if matched:
+                                st.markdown("**✅ 매칭된 표준 조항:**")
+                                for m in matched:
+                                    std_clause_title = m.get('std_clause_title', '')
+                                    std_clause_id = m.get('std_clause_id', '')
+                                    analysis = m.get('analysis', '')
+                                    
+                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                    if analysis and analysis != "표준 조항과 매칭됨":
+                                        st.markdown(f"> {analysis}")
+                            
+                            # 체크리스트 결과 표시
+                            if checklist_results:
+                                st.markdown("**📋 체크리스트 검증 결과:**")
+                                st.json(checklist_results)
+                elif insufficient or missing:
+                    # 일반 조항: 문제가 있는 경우
                     with st.expander(f"⚠️ {article_header}", expanded=False):
                         # 매칭된 조항
                         if matched:
@@ -291,6 +313,46 @@ def show_report_page(contract_id: str):
                 # narrative_report가 없는 경우 (아직 생성 안됨)
                 pass
         
+        # 전체 계약서에서 누락된 조항 (맨 아래로 이동)
+        overall_missing = report.get('overall_missing_clauses', [])
+        overall_missing_detailed = report.get('overall_missing_clauses_detailed', [])
+        
+        if overall_missing:
+            st.markdown("---")
+            st.markdown("## ❌ 전체 계약서에서 누락된 조항")
+            st.markdown(f"사용자 계약서 전체에서 찾을 수 없는 표준 조항입니다. ({len(overall_missing)}개)")
+            st.markdown("이 조항들은 계약서 어디에도 포함되지 않았으므로 추가를 검토해야 합니다.")
+            
+            # 상세 정보가 있는 조항 (조 단위 매핑)
+            detailed_article_ids = {item.get('std_article_id') for item in overall_missing_detailed}
+            
+            for item in overall_missing:
+                std_clause_id = item.get('std_clause_id', '')
+                std_clause_title = item.get('std_clause_title', '')
+                analysis = item.get('analysis', '')
+                
+                # 조 단위 ID 추출 (예: "urn:std:provide:art:013:cla:001" → "제13조")
+                import re
+                article_match = re.search(r':art:(\d+)', std_clause_id)
+                article_id = f"제{int(article_match.group(1))}조" if article_match else None
+                
+                # 상세 정보 찾기
+                detailed_info = None
+                if article_id and article_id in detailed_article_ids:
+                    for detail in overall_missing_detailed:
+                        if detail.get('std_article_id') == article_id:
+                            detailed_info = detail
+                            break
+                
+                with st.expander(f"🔴 {std_clause_title} ({std_clause_id})"):
+                    # 상세 정보가 있으면 서술형 보고서 표시
+                    if detailed_info and detailed_info.get('narrative_report'):
+                        st.markdown(detailed_info.get('narrative_report'))
+                        st.markdown(f"\n*이 분석은 {article_id} 전체에 대한 검토 결과입니다.*")
+                    else:
+                        # 서술형 보고서가 없으면 기본 메시지
+                        st.markdown(analysis)
+        
         st.markdown("---")
         st.markdown("### ✅ 보고서 끝")
     
@@ -298,12 +360,41 @@ def show_report_page(contract_id: str):
         st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
 
 
+def display_technical_validation_tab(contract_id: str):
+    """
+    기술 검증 상세 탭 표시 (A1, A2, A3 결과)
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    st.markdown("## 🔍 기술 검증 상세")
+    st.markdown("AI 검증 시스템의 상세 분석 결과입니다. 전문가 검토 또는 디버깅 목적으로 사용하세요.")
+    st.markdown("---")
+    
+    # 검증 결과 조회
+    try:
+        validation_url = f"http://localhost:8000/api/validation/{contract_id}"
+        resp = requests.get(validation_url, timeout=30)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('status') == 'completed':
+                # 기존 display_validation_result 함수 재사용
+                display_validation_result(data)
+            else:
+                st.warning(f"검증 상태: {data.get('status', 'unknown')}")
+        else:
+            st.error(f"검증 결과를 불러올 수 없습니다. (HTTP {resp.status_code})")
+    except Exception as e:
+        st.error(f"검증 결과 조회 실패: {str(e)}")
+
+
 def main() -> None:
-    # 보고서 페이지 라우팅
-    if st.session_state.get('show_report', False):
+    # 검증 결과 페이지 라우팅
+    if st.session_state.get('show_validation_results', False):
         contract_id = st.session_state.get('contract_id')
         if contract_id:
-            show_report_page(contract_id)
+            show_validation_results_page(contract_id)
             return
     
     # 세션 상태 초기화 (가중치)
@@ -433,7 +524,10 @@ def main() -> None:
         </style>
     """, unsafe_allow_html=True)
 
-    file = st.file_uploader("DOCX 파일을 업로드하세요", type=["docx"], accept_multiple_files=False)
+    # 검증 완료 상태가 아닐 때만 파일 업로더 표시
+    file = None
+    if not st.session_state.get('validation_completed', False):
+        file = st.file_uploader("DOCX 파일을 업로드하세요", type=["docx"], accept_multiple_files=False)
 
     # session_state 초기화
     if 'uploaded_contract_data' not in st.session_state:
@@ -530,14 +624,12 @@ def main() -> None:
             start_validation(contract_id)
             st.rerun()  # 상태 업데이트를 반영하기 위해 리렌더링
 
-        st.markdown('<div style="height: 2rem;"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
 
-        # 파일 정보
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**파일명**", f"`{uploaded_data['filename']}`")
-        with col2:
-            st.write("**크기**", f"{uploaded_data['file_size']/1024:.1f} KB")
+        # 파일 정보 - 한 줄로 표시
+        filename = uploaded_data['filename']
+        file_size_kb = uploaded_data['file_size']/1024
+        st.markdown(f"**파일명**: `{filename}` &nbsp;&nbsp;&nbsp; **크기**: {file_size_kb:.1f} KB")
 
         st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
 
@@ -653,72 +745,74 @@ def main() -> None:
                     st.session_state.validation_completed = False  # 실패 시 완료 상태도 False로
         else:
             # 검증 진행 중이 아닐 때만 selectbox와 나머지 UI 표시
-            # 분류 결과가 성공한 경우에만 유형 선택 UI 표시
-            if st.session_state.get('classification_done', False):
-                # 드롭다운으로 유형 선택
-                def on_type_change():
-                    """드롭다운 선택 변경 시 호출되는 콜백"""
-                    selected = st.session_state[f"contract_type_{contract_id}"]
-                    original = st.session_state.get('predicted_type')
+            # 검증 완료 상태가 아닐 때만 계약서 유형과 구조 미리보기 표시
+            if not st.session_state.get('validation_completed', False):
+                # 분류 결과가 성공한 경우에만 유형 선택 UI 표시
+                if st.session_state.get('classification_done', False):
+                    # 드롭다운으로 유형 선택
+                    def on_type_change():
+                        """드롭다운 선택 변경 시 호출되는 콜백"""
+                        selected = st.session_state[f"contract_type_{contract_id}"]
+                        original = st.session_state.get('predicted_type')
 
-                    if selected != original:
-                        try:
-                            confirm_url = f"http://localhost:8000/api/classification/{contract_id}/confirm?confirmed_type={selected}"
-                            confirm_resp = requests.post(confirm_url, timeout=30)
+                        if selected != original:
+                            try:
+                                confirm_url = f"http://localhost:8000/api/classification/{contract_id}/confirm?confirmed_type={selected}"
+                                confirm_resp = requests.post(confirm_url, timeout=30)
 
-                            if confirm_resp.status_code == 200:
-                                st.session_state.predicted_type = selected  # 업데이트
-                                st.session_state.user_modified = True  # 사용자가 수동으로 수정함
-                        except Exception:
-                            pass  # 오류 발생 시 무시
+                                if confirm_resp.status_code == 200:
+                                    st.session_state.predicted_type = selected  # 업데이트
+                                    st.session_state.user_modified = True  # 사용자가 수동으로 수정함
+                            except Exception:
+                                pass  # 오류 발생 시 무시
 
-                st.selectbox(
-                    "계약서 유형",
-                    options=list(type_names.keys()),
-                    format_func=lambda x: type_names[x],
-                    index=list(type_names.keys()).index(st.session_state.get('predicted_type', predicted_type)) if st.session_state.get('predicted_type', predicted_type) in type_names else 0,
-                    key=f"contract_type_{contract_id}",
-                    on_change=on_type_change
-                )
+                    st.selectbox(
+                        "계약서 유형",
+                        options=list(type_names.keys()),
+                        format_func=lambda x: type_names[x],
+                        index=list(type_names.keys()).index(st.session_state.get('predicted_type', predicted_type)) if st.session_state.get('predicted_type', predicted_type) in type_names else 0,
+                        key=f"contract_type_{contract_id}",
+                        on_change=on_type_change
+                    )
 
-            st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
+                st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
 
-        # 계약서 구조 미리보기
-        st.markdown('<p style="font-size: 0.875rem; font-weight: 400; margin-bottom: 0.5rem;">계약서 구조 미리보기</p>', unsafe_allow_html=True)
-        with st.expander(f"인식된 조항: {metadata.get('recognized_articles', 0)}개"):
-            # 좌우 패딩을 위한 마진 추가
-            st.markdown("")  # 약간의 상단 여백
+                # 계약서 구조 미리보기
+                st.markdown('<p style="font-size: 0.875rem; font-weight: 400; margin-bottom: 0.5rem;">계약서 구조 미리보기</p>', unsafe_allow_html=True)
+                with st.expander(f"인식된 조항: {metadata.get('recognized_articles', 0)}개"):
+                    # 좌우 패딩을 위한 마진 추가
+                    st.markdown("")  # 약간의 상단 여백
 
-            structured_data = uploaded_data['structured_data']
-            preamble = structured_data.get('preamble', [])
-            articles = structured_data.get('articles', [])
+                    structured_data = uploaded_data['structured_data']
+                    preamble = structured_data.get('preamble', [])
+                    articles = structured_data.get('articles', [])
 
-            # Preamble 표시 (제1조 이전 텍스트)
-            if preamble:
-                # 첫 번째 문단 (제목) - 조금 크게
-                if len(preamble) > 0:
-                    st.markdown(f"<p style='font-size:1.15rem; font-weight:600; margin-bottom:0.5rem; margin-left:1rem; margin-right:1rem;'>{preamble[0]}</p>", unsafe_allow_html=True)
+                    # Preamble 표시 (제1조 이전 텍스트)
+                    if preamble:
+                        # 첫 번째 문단 (제목) - 조금 크게
+                        if len(preamble) > 0:
+                            st.markdown(f"<p style='font-size:1.15rem; font-weight:600; margin-bottom:0.5rem; margin-left:1rem; margin-right:1rem;'>{preamble[0]}</p>", unsafe_allow_html=True)
 
-                # 나머지 문단들 - 작게 (줄바꿈 보존)
-                if len(preamble) > 1:
-                    for line in preamble[1:]:
-                        # 줄바꿈을 <br>로 변환
-                        line_with_br = line.replace('\n', '<br>')
-                        st.markdown(f"<p style='font-size:0.85rem; margin:0.2rem 1rem; color:#d1d5db;'>{line_with_br}</p>", unsafe_allow_html=True)
+                        # 나머지 문단들 - 작게 (줄바꿈 보존)
+                        if len(preamble) > 1:
+                            for line in preamble[1:]:
+                                # 줄바꿈을 <br>로 변환
+                                line_with_br = line.replace('\n', '<br>')
+                                st.markdown(f"<p style='font-size:0.85rem; margin:0.2rem 1rem; color:#d1d5db;'>{line_with_br}</p>", unsafe_allow_html=True)
 
-            # 조항 목록
-            if articles:
-                st.divider()
-                st.markdown(f"<p style='font-weight:600; margin-bottom:0.5rem; margin-left:1rem; margin-right:1rem;'><strong>총 {len(articles)}개 조항</strong></p>", unsafe_allow_html=True)
+                    # 조항 목록
+                    if articles:
+                        st.divider()
+                        st.markdown(f"<p style='font-weight:600; margin-bottom:0.5rem; margin-left:1rem; margin-right:1rem;'><strong>총 {len(articles)}개 조항</strong></p>", unsafe_allow_html=True)
 
-                # 모든 조항의 타이틀만 표시
-                for i, article in enumerate(articles, 1):
-                    st.markdown(f"<p style='margin:0.2rem 1rem;'>{i}. {article.get('text', 'N/A')}</p>", unsafe_allow_html=True)
+                        # 모든 조항의 타이틀만 표시
+                        for i, article in enumerate(articles, 1):
+                            st.markdown(f"<p style='margin:0.2rem 1rem;'>{i}. {article.get('text', 'N/A')}</p>", unsafe_allow_html=True)
 
-                # 하단 여백
-                st.markdown("<div style='height:2rem;'></div>", unsafe_allow_html=True)
-            else:
-                st.warning("조항을 찾을 수 없습니다.")
+                        # 하단 여백
+                        st.markdown("<div style='height:2rem;'></div>", unsafe_allow_html=True)
+                    else:
+                        st.warning("조항을 찾을 수 없습니다.")
 
         # 검증 결과 표시
         if st.session_state.get('validation_completed', False):
@@ -760,12 +854,12 @@ def main() -> None:
                 st.warning(f"보고서 상태 확인 중 오류가 발생했습니다. 버튼을 클릭하여 보고서를 확인해보세요.")
                 report_ready = True
             
-            # 보고서 버튼 표시
+            # 검증 결과 보기 버튼 (메인 버튼)
             if report_ready:
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    if st.button("📊 최종 보고서 보기", type="primary", use_container_width=True):
-                        st.session_state.show_report = True
+                    if st.button("📊 검증 결과 보기", type="primary", use_container_width=True):
+                        st.session_state.show_validation_results = True
                         st.session_state.contract_id = contract_id  # contract_id 저장
                         st.rerun()
                 with col2:
@@ -783,31 +877,160 @@ def main() -> None:
                                 st.error(f"❌ 재생성 실패: {error_detail}")
                         except Exception as e:
                             st.error(f"❌ 재생성 요청 실패: {str(e)}")
+                
+                # 2단 레이아웃: 사용자 계약서 조항 + 종합 분석
+                st.markdown("---")
+                display_contract_analysis_layout(contract_id, uploaded_data)
+                
             elif report_generating:
                 st.info("📝 최종 보고서 생성 중입니다...")
                 time.sleep(3)
                 st.rerun()
+        
+
+
+
+def display_contract_analysis_layout(contract_id: str, uploaded_data: dict):
+    """
+    검증 완료 후 3단 레이아웃 표시
+    - 왼쪽: 조항 내용
+    - 중앙: 종합 분석
+    - 오른쪽: 조항 목록
+    
+    Args:
+        contract_id: 계약서 ID
+        uploaded_data: 업로드된 계약서 데이터
+    """
+    # 보고서 데이터 로드
+    try:
+        report_url = f"http://localhost:8000/api/report/{contract_id}"
+        response = requests.get(report_url, timeout=60)
+        
+        if response.status_code != 200:
+            st.error("보고서를 불러올 수 없습니다.")
+            return
+        
+        report = response.json()
+        user_articles = report.get('user_articles', [])
+        
+        if not user_articles:
+            st.info("분석 결과가 없습니다.")
+            return
+        
+        # 조항 선택 상태 초기화
+        if 'selected_article_idx' not in st.session_state:
+            st.session_state.selected_article_idx = 0
+        
+        # 3단 레이아웃: 왼쪽(조항 내용) + 중앙(종합 분석) + 오른쪽(조항 목록)
+        left_col, center_col, right_col = st.columns([2, 2, 1])
+        
+        # 선택된 조항 데이터
+        selected_article = user_articles[st.session_state.selected_article_idx]
+        user_article_no = selected_article.get('user_article_no', 0)
+        user_article_title = selected_article.get('user_article_title', '')
+        narrative_report = selected_article.get('narrative_report', '')
+        
+        # 왼쪽: 조항 내용
+        with left_col:
+            st.markdown("### 📄 조항 내용")
+            
+            # 조항 제목
+            if user_article_no == 0:
+                st.markdown("#### 서문")
+            else:
+                st.markdown(f"#### {user_article_title}")
             
             st.markdown("---")
             
-            # 검증 결과 상세 표시
-            if 'validation_result_data' in st.session_state:
-                display_validation_result(st.session_state.validation_result_data)
+            # structured_data에서 해당 조항의 실제 내용 가져오기
+            structured_data = uploaded_data.get('structured_data', {})
+            
+            if user_article_no == 0:
+                # 서문
+                preamble = structured_data.get('preamble', [])
+                if preamble:
+                    preamble_text = '\n\n'.join(preamble)
+                    st.text_area("", value=preamble_text, height=400, disabled=True, key=f"content_{user_article_no}", label_visibility="collapsed")
+                else:
+                    st.info("서문 내용이 없습니다.")
             else:
-                # fallback: API에서 조회
-                try:
-                    validation_url = f"http://localhost:8000/api/validation/{contract_id}"
-                    resp = requests.get(validation_url, timeout=30)
-
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get('status') == 'completed':
-                            st.session_state.validation_result_data = data
-                            display_validation_result(data)
-                except Exception as e:
-                    st.error(f"검증 결과 조회 실패: {str(e)}")
+                # 일반 조항
+                articles = structured_data.get('articles', [])
+                
+                # user_article_no에 해당하는 조항 찾기 (1-based index)
+                if 0 < user_article_no <= len(articles):
+                    article_data = articles[user_article_no - 1]
+                    
+                    # 조항 내용 구성
+                    article_content = []
+                    article_content.append(article_data.get('text', ''))  # 제목
+                    
+                    # 하위 항목들
+                    sub_items = article_data.get('sub_items', [])
+                    for sub_item in sub_items:
+                        item_text = sub_item.get('text', '')
+                        if item_text:
+                            article_content.append(item_text)
+                    
+                    full_content = '\n\n'.join(article_content)
+                    st.text_area("", value=full_content, height=400, disabled=True, key=f"content_{user_article_no}", label_visibility="collapsed")
+                else:
+                    st.warning("조항 내용을 찾을 수 없습니다.")
         
-
+        # 중앙: 종합 분석
+        with center_col:
+            st.markdown("### 📊 종합 분석")
+            
+            # 조항 제목 (간단히)
+            if user_article_no == 0:
+                st.markdown("#### 서문")
+            else:
+                st.markdown(f"#### {user_article_title}")
+            
+            st.markdown("---")
+            
+            # 서술형 보고서 표시
+            if narrative_report:
+                # 스크롤 가능한 컨테이너로 표시
+                st.markdown(
+                    f'<div style="height: 400px; overflow-y: auto; padding: 1rem; background-color: #1e1e1e; border-radius: 0.5rem;">{narrative_report}</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                st.info("분석 결과가 아직 생성되지 않았습니다.")
+        
+        # 오른쪽: 조항 목록
+        with right_col:
+            st.markdown("### 📑 조항 목록")
+            st.markdown("---")
+            
+            # 조항 목록 표시 (클릭 가능한 버튼으로)
+            for idx, article in enumerate(user_articles):
+                article_no = article.get('user_article_no', 0)
+                article_title = article.get('user_article_title', '')
+                
+                # 조항 헤더
+                if article_no == 0:
+                    article_label = "📄 서문"
+                else:
+                    # 제목만 추출 (괄호 안 내용)
+                    import re
+                    title_match = re.search(r'\(([^)]+)\)', article_title)
+                    if title_match:
+                        short_title = title_match.group(1)
+                        article_label = f"제{article_no}조\n({short_title})"
+                    else:
+                        article_label = f"제{article_no}조"
+                
+                # 선택된 조항은 primary 버튼으로 표시
+                button_type = "primary" if idx == st.session_state.selected_article_idx else "secondary"
+                
+                if st.button(article_label, key=f"article_btn_{idx}", type=button_type, use_container_width=True):
+                    st.session_state.selected_article_idx = idx
+                    st.rerun()
+    
+    except Exception as e:
+        st.error(f"레이아웃 표시 중 오류: {str(e)}")
 
 
 def start_validation(contract_id: str):

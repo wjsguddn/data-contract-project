@@ -226,7 +226,9 @@ class Step3Resolver:
         logger.info("A3 원본 분석 텍스트 첨부 완료")
         
         # overall_missing_clauses에 분석 텍스트 추가
-        self._generate_overall_missing_analysis(resolved)
+        # Step1에서 전달된 preamble_analysis_map 사용
+        preamble_analysis_map = step1_result.get("preamble_analysis_map", {})
+        self._generate_overall_missing_analysis(resolved, preamble_analysis_map)
         logger.info("전역 누락 조항 분석 생성 완료")
         
         logger.info("Step 3 충돌 해소 완료")
@@ -565,13 +567,18 @@ class Step3Resolver:
         # 이 단계는 건너뜀 (이미 분석 텍스트가 포함되어 있음)
         pass
     
-    def _generate_overall_missing_analysis(self, resolved: Dict):
+    def _generate_overall_missing_analysis(self, resolved: Dict, preamble_analysis_map: Dict = None):
         """
         overall_missing_clauses에 대한 분석 생성 (중복 제거)
         
         Args:
             resolved: 보정 결과
+            preamble_analysis_map: 서문 항목의 analysis 매핑 (std_clause_id -> analysis)
         """
+        # 서문 항목의 analysis 매핑 (Step1에서 전달)
+        if preamble_analysis_map is None:
+            preamble_analysis_map = {}
+        
         overall_missing_with_analysis = []
         seen_ids = set()
         
@@ -581,9 +588,13 @@ class Step3Resolver:
                 continue
             seen_ids.add(std_clause_id)
             
-            # 간단한 분석 텍스트 생성
-            analysis = f"사용자 계약서 전체에서 해당 조항을 찾을 수 없습니다. " \
-                      f"표준계약서에서는 이 조항이 필수적으로 포함되어야 합니다."
+            # 서문 항목이면 원래 analysis 사용, 아니면 기본 텍스트
+            if std_clause_id in preamble_analysis_map:
+                analysis = preamble_analysis_map[std_clause_id]
+                logger.debug(f"서문 항목 analysis 사용: {std_clause_id}")
+            else:
+                analysis = f"사용자 계약서 전체에서 해당 조항을 찾을 수 없습니다. " \
+                          f"표준계약서에서는 이 조항이 필수적으로 포함되어야 합니다."
             
             overall_missing_with_analysis.append({
                 "std_clause_id": std_clause_id,

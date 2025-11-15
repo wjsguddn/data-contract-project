@@ -79,9 +79,52 @@ class Step1Normalizer:
             overall_missing = self._remove_duplicates(overall_missing, user_articles)
             logger.info(f"중복 제거 후: 전역 누락 {len(overall_missing)}개")
             
+            # 서문(제0조) 처리: 누락과 불충분 모두 overall_missing으로 이동
+            preamble_key = "user_article_0"
+            preamble_analysis_map = {}  # 서문 항목의 analysis 저장
+            
+            if preamble_key in user_articles:
+                preamble_insufficient = user_articles[preamble_key].get("insufficient", [])
+                preamble_missing = user_articles[preamble_key].get("missing", [])
+                
+                logger.info(f"[Step1] 서문 처리 전: insufficient={len(preamble_insufficient)}, missing={len(preamble_missing)}")
+                
+                # 누락 항목을 overall_missing으로 이동
+                for item in preamble_missing:
+                    std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
+                    analysis = item.get("analysis", "") if isinstance(item, dict) else ""
+                    
+                    if std_clause_id and std_clause_id not in overall_missing:
+                        overall_missing.append(std_clause_id)
+                        # analysis 매핑 저장
+                        if analysis:
+                            preamble_analysis_map[std_clause_id] = analysis
+                        logger.debug(f"  → overall_missing에 추가 (누락): {std_clause_id}")
+                
+                # 불충분 항목도 overall_missing으로 이동
+                for item in preamble_insufficient:
+                    std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
+                    analysis = item.get("analysis", "") if isinstance(item, dict) else ""
+                    
+                    if std_clause_id and std_clause_id not in overall_missing:
+                        overall_missing.append(std_clause_id)
+                        # analysis 매핑 저장
+                        if analysis:
+                            preamble_analysis_map[std_clause_id] = analysis
+                        logger.debug(f"  → overall_missing에 추가 (불충분): {std_clause_id}")
+                
+                # 서문에서 누락과 불충분 모두 제거
+                user_articles[preamble_key]["missing"] = []
+                user_articles[preamble_key]["insufficient"] = []
+                
+                total_moved = len(preamble_missing) + len(preamble_insufficient)
+                if total_moved > 0:
+                    logger.info(f"[Step1] 서문의 누락/불충분 항목 {total_moved}개를 overall_missing으로 이동 완료")
+            
             result = {
                 "overall_missing_clauses": overall_missing,
-                "user_articles": user_articles
+                "user_articles": user_articles,
+                "preamble_analysis_map": preamble_analysis_map  # 서문 analysis 전달
             }
             
             logger.info("Step 1 정규화 완료")
@@ -687,22 +730,46 @@ class Step1Normalizer:
         clause_no = None  # 항 (cla)
         sub_no = None  # 호 (sub)
         
-        # "제N조 제M항" 형식
-        match = re.search(r'제(\d+)조\s*제(\d+)항', article_ref)
-        if match:
-            article_no = int(match.group(1))
-            clause_no = int(match.group(2))
-        else:
-            # "제N조 제M호" 형식
-            match = re.search(r'제(\d+)조\s*제(\d+)호', article_ref)
+        # 1. global_id 형식 파싱 (urn:std:provide:art:013)
+        if article_ref.startswith('urn:std:'):
+            parts = article_ref.split(':')
+            if len(parts) >= 5:
+                item_type = parts[3]  # "art" 또는 "ex"
+                item_num_str = parts[4]  # "013"
+                
+                if item_type == 'art':
+                    try:
+                        article_no = int(item_num_str)
+                        # 하위 항목 파싱 (있는 경우)
+                        if len(parts) >= 7:
+                            sub_type = parts[5]  # "cla", "sub", "item"
+                            sub_num_str = parts[6]
+                            if sub_type == 'cla':
+                                clause_no = int(sub_num_str)
+                            elif sub_type == 'sub':
+                                sub_no = int(sub_num_str)
+                    except ValueError:
+                        logger.warning(f"global_id 파싱 실패: {article_ref}")
+                        return []
+        
+        # 2. "제N조" 형식 파싱 (기존 로직)
+        if not article_no:
+            # "제N조 제M항" 형식
+            match = re.search(r'제(\d+)조\s*제(\d+)항', article_ref)
             if match:
                 article_no = int(match.group(1))
-                sub_no = int(match.group(2))
+                clause_no = int(match.group(2))
             else:
-                # "제N조" 형식
-                match = re.search(r'제(\d+)조', article_ref)
+                # "제N조 제M호" 형식
+                match = re.search(r'제(\d+)조\s*제(\d+)호', article_ref)
                 if match:
                     article_no = int(match.group(1))
+                    sub_no = int(match.group(2))
+                else:
+                    # "제N조" 형식
+                    match = re.search(r'제(\d+)조', article_ref)
+                    if match:
+                        article_no = int(match.group(1))
         
         if not article_no:
             logger.warning(f"조항 번호 추출 실패: {article_ref}")

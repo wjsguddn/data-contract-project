@@ -29,12 +29,28 @@ class Step4Reporter:
             kb_loader: KnowledgeBaseLoader 인스턴스 (표준계약서 로드용)
         """
         from backend.shared.services.knowledge_base_loader import KnowledgeBaseLoader
+        from openai import AzureOpenAI
+        import os
+        
         self.kb_loader = kb_loader or KnowledgeBaseLoader()
         self.std_chunks_cache = {}  # 표준계약서 청크 캐시
+        
+        # Azure OpenAI 클라이언트 초기화
+        self.client = None
+        try:
+            self.client = AzureOpenAI(
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version="2024-08-01-preview",
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+            logger.info("Step4Reporter: Azure OpenAI 클라이언트 초기화 성공")
+        except Exception as e:
+            logger.warning(f"Step4Reporter: Azure OpenAI 클라이언트 초기화 실패: {e}. 서술형 보고서 생성 불가")
     
     def generate_final_report(self, step3_result: Dict[str, Any], 
                              contract_id: str, contract_type: str,
-                             user_contract_data: Dict[str, Any]) -> Dict[str, Any]:
+                             user_contract_data: Dict[str, Any],
+                             a1_result: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         최종 보고서 생성
         
@@ -43,6 +59,7 @@ class Step4Reporter:
             contract_id: 계약서 ID
             contract_type: 계약 유형
             user_contract_data: 사용자 계약서 원본 데이터
+            a1_result: A1 완전성 검증 결과 (재검증 정보 포함)
             
         Returns:
             최종 보고서 JSON
@@ -55,18 +72,28 @@ class Step4Reporter:
         # 모든 조항 내용 수집 (사용자 + 표준계약서)
         all_contents = self._collect_all_clause_contents(step3_result, user_contract_data, contract_type)
         
+        # 누락된 조항 상세 정보 생성 (A1 재검증 결과 활용)
+        enriched_missing = self._enrich_missing_clauses(
+            step3_result.get("overall_missing_clauses", []),
+            a1_result,
+            user_contract_data,
+            contract_type
+        )
+        
         report = {
             "contract_id": contract_id,
             "contract_type": contract_type,
             "generated_at": datetime.now().isoformat(),
             "summary": self._calculate_statistics(step3_result, contract_type),
             "overall_missing_clauses": self._format_overall_missing(step3_result),
+            "overall_missing_clauses_detailed": enriched_missing,  # 🔥 새로 추가
             "user_articles": self._format_user_articles(step3_result, user_contract_data),
-            "all_clause_contents": all_contents  # 🔥 추가: 모든 조항 내용
+            "all_clause_contents": all_contents
         }
         
         logger.info(f"Step 4 최종 보고서 생성 완료: "
                    f"전역 누락 {len(report['overall_missing_clauses'])}개, "
+                   f"상세 누락 {len(enriched_missing)}개 조, "
                    f"사용자 조항 {len(report['user_articles'])}개")
         
         return report
@@ -519,3 +546,507 @@ class Step4Reporter:
                    f"전역 누락 {len(collected['overall_missing_std_clauses'])}개")
         
         return collected
+
+    def _enrich_missing_clauses(self, overall_missing: List[Dict], 
+                                a1_result: Dict[str, Any],
+                                user_contract_data: Dict[str, Any],
+                                contract_type: str) -> List[Dict]:
+        """
+        누락된 조항을 조 단위로 그룹핑하고 상세 정보 추가
+        
+        Args:
+            overall_missing: Step3의 overall_missing_clauses
+            a1_result: A1 완전성 검증 결과
+            user_contract_data: 사용자 계약서 원본 데이터
+            contract_type: 계약 유형
+            
+        Returns:
+            [
+                {
+                    "std_article_id": "제13조",
+                    "std_article_title": "이용현황 보고 등",
+                    "std_article_content": {...},
+                    "missing_clause_ids": ["urn:std:provide:art:013:cla:001", ...],
+                    "best_candidate": {
+                        "user_article_no": 9,
+                        "user_article_title": "제9조 (위약 및 손해배상)",
+                        "user_article_content": {...},
+                        "confidence": 0.40,
+                        "match_type": "부분 일치(표현 차이)",
+                        "reasoning": "..."
+                    },
+                    "risk_assessment": "...",
+                    "recommendation": "..."
+                }
+            ]
+        """
+        import re
+        
+        logger.info("누락된 조항 상세 정보 생성 시작")
+        
+        if not a1_result:
+            logger.warning("A1 결과가 없어 상세 정보 생성 불가")
+            return []
+        
+        # 1. 조 단위로 그룹핑
+        grouped = self._group_missing_by_article(overall_missing)
+        logger.info(f"  조 단위 그룹핑 완료: {len(grouped)}개 조")
+        
+        # 2. A1 재검증 결과 파싱
+        missing_analysis = a1_result.get("missing_article_analysis", [])
+        matching_details = a1_result.get("matching_details", [])
+        
+        enriched = []
+        for article_id, clause_ids in grouped.items():
+            # A1 재검증 결과에서 해당 조 찾기 (missing_article_analysis 우선)
+            a1_info = self._find_a1_reverification(missing_analysis, article_id)
+            
+            # missing_article_analysis에 없으면 matching_details에서 찾기
+            if not a1_info:
+                a1_info = self._find_a1_from_matching_details(matching_details, article_id)
+            
+            if not a1_info:
+                logger.warning(f"  {article_id}: A1 재검증 정보 없음 (missing_article_analysis와 matching_details 모두 확인)")
+                continue
+            
+            # 표준계약서 조 내용 로드
+            std_content = self._load_standard_article_content(article_id, contract_type)
+            
+            # 가장 유사도 높은 후보 찾기
+            best_candidate = self._get_best_candidate_from_a1(
+                a1_info, 
+                user_contract_data
+            )
+            
+            # 서술형 보고서 생성
+            narrative_report = self._generate_missing_clause_narrative(
+                article_id=article_id,
+                std_content=std_content,
+                best_candidate=best_candidate,
+                risk_assessment=a1_info.get("risk_assessment", ""),
+                recommendation=a1_info.get("recommendation", ""),
+                evidence=a1_info.get("evidence", "")
+            )
+            
+            enriched.append({
+                "std_article_id": article_id,
+                "std_article_title": std_content.get("title", ""),
+                "std_article_content": std_content,
+                "missing_clause_ids": clause_ids,
+                "best_candidate": best_candidate,
+                "risk_assessment": a1_info.get("risk_assessment", ""),
+                "recommendation": a1_info.get("recommendation", ""),
+                "evidence": a1_info.get("evidence", ""),
+                "narrative_report": narrative_report
+            })
+            
+            logger.info(f"  {article_id}: 상세 정보 생성 완료 (후보: {best_candidate.get('user_article_no') if best_candidate else 'N/A'})")
+        
+        logger.info(f"누락된 조항 상세 정보 생성 완료: {len(enriched)}개 조")
+        return enriched
+    
+    def _group_missing_by_article(self, overall_missing: List[Dict]) -> Dict[str, List[str]]:
+        """
+        누락된 조항을 조 단위로 그룹핑
+        
+        Args:
+            overall_missing: [{std_clause_id, std_clause_title, analysis}]
+            
+        Returns:
+            {"제13조": ["urn:std:provide:art:013:cla:001", ...], ...}
+        """
+        import re
+        
+        grouped = {}
+        
+        for item in overall_missing:
+            std_clause_id = item.get("std_clause_id", "")
+            
+            # art:013 추출
+            match = re.search(r':art:(\d+)', std_clause_id)
+            if match:
+                article_no = int(match.group(1))
+                article_key = f"제{article_no}조"
+                
+                if article_key not in grouped:
+                    grouped[article_key] = []
+                grouped[article_key].append(std_clause_id)
+        
+        return grouped
+    
+    def _find_a1_reverification(self, missing_analysis: List[Dict], 
+                               article_id: str) -> Dict[str, Any]:
+        """
+        A1 재검증 결과에서 해당 조 찾기
+        
+        missing_article_analysis와 matching_details 모두 확인하여
+        해당 조의 재검증 정보를 찾습니다.
+        
+        Args:
+            missing_analysis: A1 전체 결과 (missing_article_analysis 포함)
+            article_id: "제13조" 형식
+            
+        Returns:
+            A1 재검증 정보 또는 None
+        """
+        import re
+        
+        # "제13조" → 13 추출
+        match = re.search(r'제(\d+)조', article_id)
+        if not match:
+            return None
+        
+        article_no = int(match.group(1))
+        
+        # 1. missing_article_analysis에서 찾기
+        for item in missing_analysis:
+            std_article_id = item.get("standard_article_id", "")
+            
+            # global_id 형식 매칭: urn:std:provide:art:013
+            if f":art:{article_no:03d}" in std_article_id:
+                logger.info(f"  {article_id}: missing_article_analysis에서 발견")
+                return item
+        
+        logger.warning(f"  {article_id}: missing_article_analysis에 없음")
+        return None
+    
+    def _find_a1_from_matching_details(self, matching_details: List[Dict],
+                                      article_id: str) -> Dict[str, Any]:
+        """
+        A1 matching_details에서 해당 조의 재검증 정보 찾기
+        
+        매칭되었지만 신뢰도가 낮아 누락으로 처리된 경우,
+        matching_details의 verification_details에 정보가 있습니다.
+        
+        Args:
+            matching_details: A1의 matching_details
+            article_id: "제13조" 형식
+            
+        Returns:
+            재구성된 A1 재검증 정보 또는 None
+        """
+        import re
+        
+        # "제13조" → 13 추출
+        match = re.search(r'제(\d+)조', article_id)
+        if not match:
+            return None
+        
+        article_no = int(match.group(1))
+        
+        # matching_details에서 해당 조 찾기
+        for detail in matching_details:
+            matched_articles = detail.get("matched_articles_global_ids", [])
+            verification_details = detail.get("verification_details", [])
+            
+            # 매칭된 조항 중에 해당 조가 있는지 확인
+            for matched_id in matched_articles:
+                if f":art:{article_no:03d}" in matched_id:
+                    logger.info(f"  {article_id}: matching_details에서 발견 (사용자 조항 {detail.get('user_article_no')})")
+                    
+                    # verification_details에서 해당 조의 정보 추출
+                    candidates_analysis = []
+                    
+                    for verification in verification_details:
+                        candidate_id = verification.get("candidate_id", "")
+                        
+                        # 해당 조의 verification 정보만 수집
+                        if f"제{article_no}조" in candidate_id or f":art:{article_no:03d}" in candidate_id:
+                            candidates_analysis.append({
+                                "candidate_id": candidate_id,
+                                "confidence": verification.get("confidence", 0.0),
+                                "match_type": verification.get("match_type", ""),
+                                "reasoning": verification.get("reasoning", ""),
+                                "risk": verification.get("risk", ""),
+                                "recommendation": verification.get("recommendation", "")
+                            })
+                    
+                    if candidates_analysis:
+                        # missing_article_analysis 형식으로 재구성
+                        return {
+                            "standard_article_id": matched_id,
+                            "candidates_analysis": candidates_analysis,
+                            "risk_assessment": candidates_analysis[0].get("risk", "") if candidates_analysis else "",
+                            "recommendation": candidates_analysis[0].get("recommendation", "") if candidates_analysis else "",
+                            "evidence": f"사용자 조항 제{detail.get('user_article_no')}조와 매칭되었으나 신뢰도가 낮아 누락으로 처리됨"
+                        }
+        
+        return None
+    
+    def _get_best_candidate_from_a1(self, a1_info: Dict[str, Any],
+                                   user_contract_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        A1 재검증 결과에서 가장 유사도 높은 후보 추출
+        
+        Args:
+            a1_info: A1 재검증 정보
+            user_contract_data: 사용자 계약서 원본 데이터
+            
+        Returns:
+            {
+                "user_article_no": 9,
+                "user_article_title": "제9조 (위약 및 손해배상)",
+                "user_article_content": {...},
+                "confidence": 0.40,
+                "match_type": "부분 일치(표현 차이)",
+                "reasoning": "..."
+            }
+        """
+        import re
+        
+        candidates_analysis = a1_info.get("candidates_analysis", [])
+        top_candidates = a1_info.get("top_candidates", [])
+        
+        if not candidates_analysis:
+            logger.warning("candidates_analysis가 비어있음")
+            return None
+        
+        # confidence 기준으로 정렬
+        sorted_candidates = sorted(
+            candidates_analysis,
+            key=lambda x: x.get('confidence', 0.0),
+            reverse=True
+        )
+        
+        best = sorted_candidates[0]
+        
+        # candidate_id에서 조 번호 추출 시도 1: "제9조" 형식
+        candidate_id = best.get('candidate_id', '')
+        match = re.search(r'제(\d+)조', candidate_id)
+        user_article_no = int(match.group(1)) if match else None
+        
+        # 추출 실패 시 top_candidates에서 찾기 (candidate_id가 "후보 1" 형식인 경우)
+        if not user_article_no and top_candidates:
+            # "후보 1" → 0번 인덱스
+            candidate_match = re.search(r'후보\s*(\d+)', candidate_id)
+            if candidate_match:
+                candidate_idx = int(candidate_match.group(1)) - 1  # 1-based → 0-based
+                if 0 <= candidate_idx < len(top_candidates):
+                    top_candidate = top_candidates[candidate_idx]
+                    user_article = top_candidate.get('user_article', {})
+                    user_article_no = user_article.get('number')
+                    logger.info(f"  top_candidates에서 후보 {candidate_idx + 1} 추출: 사용자 조항 {user_article_no}")
+        
+        if not user_article_no:
+            logger.warning(f"candidate_id에서 조 번호 추출 실패: {candidate_id}")
+            return None
+        
+        # 사용자 조항 제목 가져오기
+        user_title = self._get_user_article_title(user_article_no, user_contract_data)
+        
+        # 사용자 조항 내용 로드
+        user_content = self._load_user_article_content(user_article_no, user_contract_data)
+        
+        return {
+            "user_article_no": user_article_no,
+            "user_article_title": user_title,
+            "user_article_content": user_content,
+            "confidence": best.get('confidence', 0.0),
+            "match_type": best.get('match_type', ''),
+            "reasoning": best.get('reasoning', ''),
+            "risk": best.get('risk', ''),
+            "recommendation": best.get('recommendation', '')
+        }
+    
+    def _load_standard_article_content(self, article_id: str, 
+                                      contract_type: str) -> Dict[str, Any]:
+        """
+        표준계약서 조 전체 내용 로드
+        
+        Args:
+            article_id: "제13조" 형식
+            contract_type: 계약 유형
+            
+        Returns:
+            {
+                "title": "이용현황 보고 등",
+                "clauses": [
+                    {"clause_no": 1, "text": "...", "commentary": "..."},
+                    {"clause_no": 2, "text": "...", "commentary": "..."}
+                ]
+            }
+        """
+        import re
+        
+        # "제13조" → 13 추출
+        match = re.search(r'제(\d+)조', article_id)
+        if not match:
+            return {"title": "", "clauses": []}
+        
+        article_no = int(match.group(1))
+        
+        # 표준계약서 청크 로드
+        if contract_type not in self.std_chunks_cache:
+            self.std_chunks_cache[contract_type] = self.kb_loader.load_chunks(contract_type)
+        
+        chunks = self.std_chunks_cache[contract_type]
+        
+        # 해당 조의 모든 청크 찾기
+        article_chunks = []
+        title = ""
+        
+        for chunk in chunks:
+            global_id = chunk.get("global_id", "")
+            
+            # art:013 매칭
+            if f":art:{article_no:03d}" in global_id:
+                article_chunks.append(chunk)
+                
+                # 제목 추출 (첫 번째 청크에서)
+                if not title:
+                    chunk_title = chunk.get("title", "")
+                    if chunk_title:
+                        title = chunk_title
+        
+        # 항별로 정리
+        clauses = []
+        for chunk in article_chunks:
+            clause_info = {
+                "global_id": chunk.get("global_id", ""),
+                "text_raw": chunk.get("text_raw", ""),
+                "text_norm": chunk.get("text_norm", ""),
+                "commentary_summary": chunk.get("commentary_summary", "")
+            }
+            clauses.append(clause_info)
+        
+        return {
+            "title": title,
+            "clauses": clauses
+        }
+
+    def _generate_missing_clause_narrative(self, article_id: str, 
+                                          std_content: Dict[str, Any],
+                                          best_candidate: Dict[str, Any],
+                                          risk_assessment: str,
+                                          recommendation: str,
+                                          evidence: str) -> str:
+        """
+        누락된 조항에 대한 서술형 보고서 생성 (LLM 활용)
+        
+        Args:
+            article_id: 표준 조항 ID (예: "제13조")
+            std_content: 표준계약서 조 내용
+            best_candidate: 가장 유사한 사용자 조항 정보
+            risk_assessment: 위험성 평가
+            recommendation: 권고사항
+            evidence: 근거
+            
+        Returns:
+            서술형 보고서 텍스트
+        """
+        if not self.client:
+            logger.warning("Azure OpenAI 클라이언트 없음. 폴백 보고서 생성")
+            return self._generate_missing_clause_fallback(
+                article_id, std_content, best_candidate, risk_assessment, recommendation
+            )
+        
+        # 표준계약서 내용 요약
+        std_title = std_content.get("title", "")
+        clauses = std_content.get("clauses", [])
+        std_text = "\n".join([
+            f"- {clause.get('text_norm', clause.get('text_raw', ''))}"
+            for clause in clauses[:5]  # 최대 5개 항
+        ])
+        
+        # 후보 정보
+        candidate_info = ""
+        if best_candidate:
+            candidate_info = f"""
+## 가장 유사한 사용자 조항
+- **조항**: {best_candidate.get('user_article_title', 'N/A')}
+- **유사도**: {best_candidate.get('confidence', 0):.0%}
+- **매칭 유형**: {best_candidate.get('match_type', 'N/A')}
+- **분석**: {best_candidate.get('reasoning', 'N/A')}
+"""
+        
+        prompt = f"""당신은 데이터 계약서 검증 전문가입니다. 사용자 계약서에 누락된 표준 조항에 대한 서술형 보고서를 작성해주세요.
+
+## 누락된 표준 조항
+**{article_id} ({std_title})**
+
+## 표준계약서 내용
+{std_text}
+
+{candidate_info}
+
+## 위험성 평가
+{risk_assessment if risk_assessment else "N/A"}
+
+## 권고사항
+{recommendation if recommendation else "N/A"}
+
+## 근거
+{evidence if evidence else "N/A"}
+
+아래 기준에 따라 사용자가 이해하기 쉬운 서술형 보고서를 작성하세요:
+
+### 보고서 구성
+1. 누락 사실 설명: 귀하의 계약서에 {article_id}의 내용이 포함되어 있지 않다는 점을 자연스럽게 전달합니다.
+2. 내용 요약: {article_id}가 일반적으로 어떤 역할을 하는 조항인지 2~3문장으로 간결하게 설명합니다.
+3. 위험성 설명: 이 내용이 없을 경우 발생할 수 있는 실무적·운영상 문제를 현실적인 수준에서 설명합니다.
+4. 유사 조항 분석(후보가 있는 경우): 위에 제공된 "가장 유사한 사용자 조항" 정보를 바탕으로, 해당 조항이 왜 관련된 조항으로 판단되는지 자연스럽게 설명합니다. 유사도 수치는 언급하지 않습니다.
+5. 실질적 권고: 조항을 어디에, 어떤 방식으로 보완하면 좋은지 실무 중심으로 조언합니다. 조문 초안은 작성하지 않습니다.
+
+### 작성 규칙
+- 법무팀이 작성한 정식 검토 보고서 문체를 사용합니다.
+- "표준계약서", "매칭", "유사도", "글로벌ID", "AI" 등 기술적 용어를 사용하지 않습니다.
+- 자연스럽고 읽기 쉬운 단락 중심으로 작성하며, 단락은 3~5문장으로 유지합니다.
+- 입력된 텍스트를 그대로 복붙하지 말고 의미를 재구성해 서술합니다.
+
+### 출력 형식
+- 제목 없이 본문만 작성합니다.
+- 자연스러운 단락 구성으로 작성하며, 필요한 경우에만 최소한의 목록을 사용할 수 있습니다.
+
+"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "당신은 데이터 계약서 검증 전문가입니다. 구조화된 데이터를 사용자 친화적인 서술형 보고서로 변환하는 것이 당신의 역할입니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500
+            )
+            
+            return response.choices[0].message.content.strip()
+        
+        except Exception as e:
+            logger.error(f"서술형 보고서 생성 실패: {e}")
+            return self._generate_missing_clause_fallback(
+                article_id, std_content, best_candidate, risk_assessment, recommendation
+            )
+    
+    def _generate_missing_clause_fallback(self, article_id: str,
+                                         std_content: Dict[str, Any],
+                                         best_candidate: Dict[str, Any],
+                                         risk_assessment: str,
+                                         recommendation: str) -> str:
+        """
+        LLM 호출 실패 시 폴백 보고서 생성
+        
+        Args:
+            article_id: 표준 조항 ID
+            std_content: 표준계약서 내용
+            best_candidate: 가장 유사한 사용자 조항
+            risk_assessment: 위험성 평가
+            recommendation: 권고사항
+            
+        Returns:
+            기본 서술형 보고서
+        """
+        std_title = std_content.get("title", "")
+        
+        report = f"귀하의 계약서에는 표준계약서 {article_id} ({std_title})의 내용이 포함되지 않았습니다.\n\n"
+        
+        if risk_assessment:
+            report += f"**위험성**: {risk_assessment}\n\n"
+        
+        if best_candidate:
+            report += f"**유사 조항**: {best_candidate.get('user_article_title', 'N/A')} (유사도: {best_candidate.get('confidence', 0):.0%})\n\n"
+        
+        if recommendation:
+            report += f"**권고사항**: {recommendation}"
+        
+        return report

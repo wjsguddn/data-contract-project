@@ -103,7 +103,8 @@ class ReportAgent:
                 step3_result=step3_result,
                 contract_id=contract_id,
                 contract_type=input_data['contract_type'],
-                user_contract_data=input_data['user_contract_data']
+                user_contract_data=input_data['user_contract_data'],
+                a1_result=input_data.get('a1_result')  # A1 재검증 정보 전달
             )
             logger.info(f"[Step 4] 포맷팅 완료")
             self._save_step_result(db, contract_id, "report_step4_formatted", step4_result)
