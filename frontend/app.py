@@ -438,9 +438,14 @@ def main() -> None:
     # session_state 초기화
     if 'uploaded_contract_data' not in st.session_state:
         st.session_state.uploaded_contract_data = None
+    
+    # 파일이 업로드되면 세션에 저장
+    if file is not None:
+        st.session_state.uploaded_file = file
 
     # 버튼 레이아웃: 파일 선택 또는 업로드 완료 시 표시
-    if file is not None:
+    # 파일이 있거나 이미 업로드된 계약서가 있으면 버튼 표시
+    if file is not None or st.session_state.uploaded_contract_data is not None:
         is_classification_done = st.session_state.get('classification_done', False)
         col_btn1, _, col_btn3 = st.columns([2, 6, 2])
 
