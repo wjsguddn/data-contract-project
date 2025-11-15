@@ -8,6 +8,11 @@ uvicorn==0.27.0
 ipdb==0.13.13
 
 python-multipart==0.0.6
-pydantic==2.5.3
+pydantic==2.7.4
 pymupdf==1.23.14
 python-docx==1.1.0
+
+# LangGraph & LangChain (챗봇 에이전트)
+langgraph==0.2.45
+langchain-core==0.3.15
+langchain==0.3.7

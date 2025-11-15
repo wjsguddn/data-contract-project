@@ -800,16 +800,14 @@ async def chatbot_message(
             
             # ChatbotOrchestrator 초기화
             from backend.chatbot_agent.agent import ChatbotOrchestrator
-            from openai import AzureOpenAI
+            from openai import OpenAI
             import os
-            
-            azure_client = AzureOpenAI(
-                api_key=os.getenv('AZURE_OPENAI_API_KEY'),
-                azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-                api_version="2024-02-01"
+
+            openai_client = OpenAI(
+                api_key=os.getenv('OPENAI_API_KEY')
             )
-            
-            orchestrator = ChatbotOrchestrator(azure_client=azure_client)
+
+            orchestrator = ChatbotOrchestrator(azure_client=openai_client)
             
             # 스트리밍 메시지 처리
             async for chunk in orchestrator.process_message_stream(

@@ -5,13 +5,20 @@ HybridSearchTool - 하이브리드 검색 도구
 - FAISS (벡터 검색) + Whoosh (키워드 검색)
 - 제목/본문 분리 검색
 - 주제별 독립 검색
+- LLM 기반 청크 필터링
+- 조 단위 반환
 """
 
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from backend.chatbot_agent.tools.base import BaseTool
-from backend.chatbot_agent.models import ToolResult
+from backend.chatbot_agent.models import (
+    HybridSearchToolResult,
+    HybridSearchData,
+    ArticleContent
+)
 from backend.consistency_agent.hybrid_searcher import HybridSearcher
 from backend.shared.services import get_knowledge_base_loader
 from backend.shared.database import SessionLocal, ContractDocument
@@ -115,19 +122,19 @@ class HybridSearchTool(BaseTool):
         self,
         contract_id: str,
         topics: List[Dict[str, Any]]
-    ) -> ToolResult:
+    ) -> HybridSearchToolResult:
         """
-        주제별 하이브리드 검색 실행
+        주제별 하이브리드 검색 실행 (LLM 필터링 + 조 단위 반환)
         
         Args:
             contract_id: 계약서 ID
             topics: 검색할 주제 목록
             
         Returns:
-            ToolResult: 검색 결과
+            HybridSearchToolResult: 조 단위 검색 결과
         """
         try:
-            logger.info(f"하이브리드 검색 시작: {contract_id}, {len(topics)}개 주제")
+            logger.info(f"[HybridSearchTool] 검색 시작: {contract_id}, {len(topics)}개 주제")
             
             # 사용자 계약서 인덱스 로드 (캐시 사용)
             if contract_id in self._searcher_cache:
@@ -136,10 +143,9 @@ class HybridSearchTool(BaseTool):
             else:
                 searcher = self._load_user_contract_indexes(contract_id)
                 if not searcher:
-                    return ToolResult(
+                    return HybridSearchToolResult(
                         success=False,
                         tool_name=self.name,
-                        data=None,
                         error="사용자 계약서 인덱스를 로드할 수 없습니다"
                     )
                 self._searcher_cache[contract_id] = searcher
@@ -156,15 +162,15 @@ class HybridSearchTool(BaseTool):
                     logger.warning(f"주제 '{topic_name}'에 쿼리가 없습니다")
                     continue
                 
-                logger.info(f"주제 '{topic_name}' 검색: {len(queries)}개 쿼리")
+                logger.info(f"[HybridSearchTool] 주제 '{topic_name}' 검색: {len(queries)}개 쿼리")
                 
                 # 쿼리별 검색 결과 수집
-                topic_results = []
+                all_chunks = []
                 
                 for query_idx, query in enumerate(queries, 1):
                     logger.info(f"  쿼리 {query_idx}/{len(queries)}: '{query[:50]}...'")
                     
-                    # 하이브리드 검색 (제목/본문 분리)
+                    # 하이브리드 검색 (top-5 청크)
                     search_results = searcher.search(
                         text_query=query,
                         title_query=query,
@@ -174,83 +180,65 @@ class HybridSearchTool(BaseTool):
                         contract_id=contract_id
                     )
                     
-                    # 쿼리별 결과 로깅
                     if search_results:
                         logger.info(f"    → {len(search_results)}개 청크 매칭")
-                        for rank, result in enumerate(search_results[:3], 1):  # 상위 3개만
-                            chunk = result.get("chunk", {})
-                            chunk_id = chunk.get("id", "unknown")
-                            score = result.get("score", 0.0)
-                            
-                            # RRF 모드인 경우 순위 정보 표시
-                            if "dense_rank" in result and "sparse_rank" in result:
-                                d_rank = result.get("dense_rank", 0)
-                                s_rank = result.get("sparse_rank", 0)
-                                logger.info(f"      {rank}. {chunk_id}: RRF={score:.4f} (Dense:{d_rank}위, Sparse:{s_rank}위)")
-                            else:
-                                dense_score = result.get("dense_score", 0.0)
-                                sparse_score = result.get("sparse_score", 0.0)
-                                logger.info(f"      {rank}. {chunk_id}: {score:.4f} (D:{dense_score:.3f}, S:{sparse_score:.3f})")
+                        all_chunks.extend(search_results)
                     else:
                         logger.warning(f"    → 매칭 결과 없음")
-                    
-                    # 결과 변환 (청크 정보 + 부모 조항 정보)
-                    for result in search_results:
-                        chunk = result.get("chunk", {})
-                        
-                        # DB에서 부모 조항 정보 조회
-                        parent_info = self._get_parent_article_info(
-                            contract_id,
-                            chunk.get("parent_id")
-                        )
-                        
-                        topic_results.append({
-                            "chunk_id": chunk.get("id"),
-                            "chunk_text": chunk.get("text_norm", ""),
-                            "parent_id": chunk.get("parent_id"),
-                            "parent_title": parent_info.get("title", ""),
-                            "score": result.get("score", 0.0),
-                            "dense_score": result.get("dense_score", 0.0),
-                            "sparse_score": result.get("sparse_score", 0.0),
-                            "dense_rank": result.get("dense_rank", 0),
-                            "sparse_rank": result.get("sparse_rank", 0)
-                        })
                 
-                # 중복 제거 및 점수 순 정렬
-                unique_results = self._deduplicate_results(topic_results)
-                final_results = unique_results[:self.top_k]
-                results_by_topic[topic_name] = final_results
+                if not all_chunks:
+                    logger.warning(f"주제 '{topic_name}'에 대한 검색 결과 없음")
+                    results_by_topic[topic_name] = []
+                    continue
                 
-                # 최종 결과 로깅
-                logger.info(f"  주제 '{topic_name}' 최종 결과: {len(topic_results)}개 → 중복제거 {len(unique_results)}개 → Top-{self.top_k} {len(final_results)}개")
-                if final_results:
-                    logger.info(f"  최종 Top-{len(final_results)} 청크:")
-                    for rank, result in enumerate(final_results, 1):
-                        chunk_id = result.get("chunk_id", "unknown")
-                        parent_id = result.get("parent_id", "unknown")
-                        score = result.get("score", 0.0)
-                        logger.info(f"    {rank}. {chunk_id} ({parent_id}): {score:.4f}")
+                # LLM 필터링 (관련성 판별)
+                filtered_chunks = self._filter_relevant_chunks(
+                    topic_name,
+                    queries,
+                    all_chunks,
+                    contract_id
+                )
+                
+                # 조 단위로 변환
+                articles = self._convert_to_articles(
+                    filtered_chunks,
+                    contract_id
+                )
+                
+                results_by_topic[topic_name] = articles
+                
+                logger.info(
+                    f"[HybridSearchTool] 주제 '{topic_name}' 완료: "
+                    f"{len(all_chunks)}개 청크 → LLM 필터링 {len(filtered_chunks)}개 → "
+                    f"조 단위 변환 {len(articles)}개"
+                )
             
-            logger.info(f"하이브리드 검색 완료: {len(results_by_topic)}개 주제, 총 {sum(len(r) for r in results_by_topic.values())}개 청크 반환")
+            # HybridSearchData 생성
+            search_data = HybridSearchData(
+                results=results_by_topic,
+                total_topics=len(topics),
+                total_articles=sum(len(articles) for articles in results_by_topic.values())
+            )
             
-            return ToolResult(
+            logger.info(
+                f"[HybridSearchTool] 검색 완료: {search_data.total_topics}개 주제, "
+                f"{search_data.total_articles}개 조"
+            )
+            
+            return HybridSearchToolResult(
                 success=True,
                 tool_name=self.name,
-                data=results_by_topic,
-                metadata={
-                    "total_topics": len(topics),
-                    "total_results": sum(len(r) for r in results_by_topic.values())
-                }
+                data=search_data
             )
         
         except Exception as e:
-            logger.error(f"하이브리드 검색 실패: {e}")
+            logger.error(f"[HybridSearchTool] 검색 실패: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return ToolResult(
+            
+            return HybridSearchToolResult(
                 success=False,
                 tool_name=self.name,
-                data=None,
                 error=str(e)
             )
     
@@ -455,43 +443,206 @@ class HybridSearchTool(BaseTool):
         finally:
             db.close()
     
-    def _deduplicate_results(
+    def _filter_relevant_chunks(
         self,
-        results: List[Dict[str, Any]]
+        topic_name: str,
+        queries: List[str],
+        chunks: List[Dict[str, Any]],
+        contract_id: str
     ) -> List[Dict[str, Any]]:
         """
-        중복 제거 및 점수 순 정렬
+        LLM으로 관련 청크 필터링
         
         Args:
-            results: 검색 결과 리스트
+            topic_name: 주제 이름
+            queries: 검색 쿼리 리스트
+            chunks: 검색된 청크 리스트
+            contract_id: 계약서 ID
             
         Returns:
-            중복 제거된 결과 (점수 순 정렬)
+            필터링된 청크 리스트
         """
-        original_count = len(results)
+        if not chunks:
+            return []
         
-        # chunk_id 기준으로 중복 제거 (최고 점수 유지)
-        unique_map = {}
-        duplicates_removed = 0
+        # 중복 제거 (chunk_id 기준)
+        unique_chunks = {}
+        for chunk in chunks:
+            chunk_obj = chunk.get("chunk", {})
+            chunk_id = chunk_obj.get("id")
+            if chunk_id not in unique_chunks:
+                unique_chunks[chunk_id] = chunk
+            elif chunk.get("score", 0) > unique_chunks[chunk_id].get("score", 0):
+                unique_chunks[chunk_id] = chunk
         
-        for result in results:
-            chunk_id = result.get("chunk_id")
-            if chunk_id not in unique_map:
-                unique_map[chunk_id] = result
-            else:
-                duplicates_removed += 1
-                # 기존 점수와 비교하여 높은 점수 유지
-                if result.get("score", 0) > unique_map[chunk_id].get("score", 0):
-                    unique_map[chunk_id] = result
+        chunks = list(unique_chunks.values())
         
-        # 점수 순 정렬
-        sorted_results = sorted(
-            unique_map.values(),
-            key=lambda x: x.get("score", 0),
-            reverse=True
-        )
+        # Top-5만 LLM 필터링
+        top_chunks = sorted(chunks, key=lambda x: x.get("score", 0), reverse=True)[:5]
         
-        if duplicates_removed > 0:
-            logger.debug(f"    중복 제거: {original_count}개 → {len(sorted_results)}개 ({duplicates_removed}개 제거)")
+        # 청크 정보 포맷팅
+        chunks_info = []
+        for idx, chunk_data in enumerate(top_chunks):
+            chunk = chunk_data.get("chunk", {})
+            parent_id = chunk.get("parent_id", "")
+            
+            # 부모 조항 정보 조회
+            parent_info = self._get_parent_article_info(contract_id, parent_id)
+            
+            chunks_info.append({
+                "index": idx,
+                "chunk_id": chunk.get("id", ""),
+                "chunk_text": chunk.get("text_norm", ""),
+                "parent_id": parent_id,
+                "parent_title": parent_info.get("title", ""),
+                "score": chunk_data.get("score", 0.0)
+            })
         
-        return sorted_results
+        # LLM 프롬프트
+        chunks_text = "\n\n".join([
+            f"[{c['index']}] {c['parent_id']} ({c['parent_title']})\n{c['chunk_text']}"
+            for c in chunks_info
+        ])
+        
+        queries_text = "\n".join([f"- {q}" for q in queries])
+        
+        prompt = f"""다음은 "{topic_name}" 주제로 검색된 계약서 청크들입니다.
+
+검색 쿼리:
+{queries_text}
+
+검색 결과:
+{chunks_text}
+
+각 청크가 주제와 실제로 관련있는지 판단하세요.
+관련있는 청크의 인덱스만 선택합니다.
+
+응답 형식 (JSON):
+{{
+    "relevant_indices": [0, 2, 3, ...]
+}}
+
+JSON만 응답하세요."""
+        
+        try:
+            response = self.azure_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "당신은 계약서 내용 분석 전문가입니다. JSON 형식으로만 응답하세요."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.2,
+                max_tokens=300,
+                response_format={"type": "json_object"}
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            data = json.loads(response_text)
+            
+            relevant_indices = data.get("relevant_indices", [])
+            
+            # 필터링된 청크 반환
+            filtered = [top_chunks[i] for i in relevant_indices if 0 <= i < len(top_chunks)]
+            
+            logger.info(
+                f"  LLM 필터링: {len(top_chunks)}개 → {len(filtered)}개 "
+                f"(선택: {relevant_indices})"
+            )
+            
+            return filtered
+            
+        except Exception as e:
+            logger.error(f"  LLM 필터링 실패: {e}, 전체 반환")
+            return top_chunks
+    
+    def _convert_to_articles(
+        self,
+        chunks: List[Dict[str, Any]],
+        contract_id: str
+    ) -> List[ArticleContent]:
+        """
+        청크를 조 단위로 변환
+        
+        Args:
+            chunks: 청크 리스트
+            contract_id: 계약서 ID
+            
+        Returns:
+            ArticleContent 리스트
+        """
+        if not chunks:
+            return []
+        
+        # parent_id 추출 및 중복 제거
+        parent_ids = list(set([
+            chunk.get("chunk", {}).get("parent_id")
+            for chunk in chunks
+        ]))
+        
+        # DB에서 조 전체 content 조회
+        articles = self._load_full_articles(contract_id, parent_ids)
+        
+        return articles
+    
+    def _load_full_articles(
+        self,
+        contract_id: str,
+        parent_ids: List[str]
+    ) -> List[ArticleContent]:
+        """
+        조 전체 content 배열 조회
+        
+        Args:
+            contract_id: 계약서 ID
+            parent_ids: 조 ID 리스트 (예: ["제3조", "제5조"])
+            
+        Returns:
+            ArticleContent 리스트
+        """
+        try:
+            db = SessionLocal()
+            contract = db.query(ContractDocument).filter(
+                ContractDocument.contract_id == contract_id
+            ).first()
+            
+            if not contract or not contract.parsed_data:
+                return []
+            
+            articles = contract.parsed_data.get("articles", [])
+            
+            # parent_id에서 조 번호 추출하여 매칭
+            result = []
+            
+            for parent_id in parent_ids:
+                # "제5조" → 5
+                try:
+                    article_no = int(parent_id.replace("제", "").replace("조", ""))
+                except:
+                    continue
+                
+                for article in articles:
+                    if article.get("number") == article_no:
+                        result.append(
+                            ArticleContent(
+                                article_no=article_no,
+                                title=article.get("title", ""),
+                                text=article.get("text", ""),
+                                content=article.get("content", [])
+                            )
+                        )
+                        break
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"조 전체 조회 실패: {e}")
+            return []
+        
+        finally:
+            db.close()

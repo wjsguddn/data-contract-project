@@ -1,0 +1,1096 @@
+[
+  {
+    "id": "제1조 조본문",
+    "global_id": "urn:std:create:art:001:att",
+    "unit_type": "articleText",
+    "parent_id": "제1조",
+    "title": "목적",
+    "order_index": 1,
+    "text_raw": "  본 계약은 당사자들이 참여하는 ____________사업(연구, 프로젝트 등을 포함한다. 이하 “사업등”이라 한다)을 통하여 공동으로 데이터를 생성하는 경우 그 데이터를 이용함에 있어서 당사자들 간의 권리･의무 및 그 밖에 필요한 사항을 정함을 목적으로 한다.",
+    "text_norm": "본 계약은 당사자들이 참여하는 내용작성란 사업, 연구, 프로젝트 등을 포함한다. 이하 “사업등”이라 한다을 통하여 공동으로 데이터를 생성하는 경우 그 데이터를 이용함에 있어서 당사자들 간의 권리・의무 및 그 밖에 필요한 사항을 정함을 목적으로 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "commentary_summary": "본 계약은 당사자들이 참여하는 각종 사업 연구 프로젝트 등을 통해 공동으로 데이터를 생성하는 경우를 전제로 하고 있다 이러한 점에서 당사자 일방이 데이터를 제공하고 상대방이 그 대가를 지급하는 데이터 제공형 계약과 구별된다 공동으로 데이터를 생성하는 경우 그 데이터에 대한 이용권리를 누구에게 귀속시킬지 그 데이터의 이용 및 수익 등을 어떻게 분배할 것인지를 정하는 것을 목적으로 한다"
+  },
+  {
+    "id": "제2조 조본문",
+    "global_id": "urn:std:create:art:002:att",
+    "unit_type": "articleText",
+    "parent_id": "제2조",
+    "title": "정의",
+    "order_index": 2,
+    "text_raw": "  본 계약에서 사용하는 용어의 정의는 다음과 같다.",
+    "text_norm": "본 계약에서 사용하는 용어의 정의는 다음과 같다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제2조 제1호",
+    "global_id": "urn:std:create:art:002:sub:001",
+    "unit_type": "subClause",
+    "parent_id": "제2조",
+    "title": "정의",
+    "order_index": 3,
+    "text_raw": "  1. “데이터”란 다양한 부가가치 창출을 위하여 관찰, 실험, 조사, 수집 등으로 취득하거나 정보시스템 및 「소프트웨어 진흥법」 제2조 제1호에 따른 소프트웨어 등을 통하여 생성된 것으로서 광(光) 또는 전자적 방식으로 처리될 수 있는 자료 또는 정보를 말한다.",
+    "text_norm": "“데이터”란 다양한 부가가치 창출을 위하여 관찰, 실험, 조사, 수집 등으로 취득하거나 정보시스템 및 법령:소프트웨어 진흥법 제2조 제1호에 따른 소프트웨어 등을 통하여 생성된 것으로서 광 또는 전자적 방식으로 처리될 수 있는 자료 또는 정보를 말한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제2조 제2호",
+    "global_id": "urn:std:create:art:002:sub:002",
+    "unit_type": "subClause",
+    "parent_id": "제2조",
+    "title": "정의",
+    "order_index": 4,
+    "text_raw": "  2. “대상데이터”는 사업등에 따라 창출, 취득, 수집, 결합을 통해 생성된 데이터로서, [별지1]에 기재된 것을 말한다.",
+    "text_norm": "“대상데이터”는 사업등에 따라 창출, 취득, 수집, 결합을 통해 생성된 데이터로서, 별지1에 기재된 것을 말한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:001:idx:002",
+      "urn:std:create:ex:001:idx:001"
+    ]
+  },
+  {
+    "id": "제2조 제3호",
+    "global_id": "urn:std:create:art:002:sub:003",
+    "unit_type": "subClause",
+    "parent_id": "제2조",
+    "title": "정의",
+    "order_index": 5,
+    "text_raw": "  3. “개인정보”란 「개인정보 보호법」 제2조 제1호, “가명정보”란 「개인정보 보호법」 제2조 제1호 다목, “민감정보”란 「개인정보 보호법」 제23조 제1항 본문에서 각각 규정한 것을 말한다.",
+    "text_norm": "“개인정보”란 법령:개인정보 보호법 제2조 제1호, “가명정보”란 법령:개인정보 보호법 제2조 제1호 다목, “민감정보”란 법령:개인정보 보호법 제23조 제1항 본문에서 각각 규정한 것을 말한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제2조 제4호",
+    "global_id": "urn:std:create:art:002:sub:004",
+    "unit_type": "subClause",
+    "parent_id": "제2조",
+    "title": "정의",
+    "order_index": 6,
+    "text_raw": "  4. “제공”이란 데이터의 이용을 위하여 데이터에 접근할 수 있게 하거나 데이터를 전달하는 것을 말한다.",
+    "text_norm": "“제공”이란 데이터의 이용을 위하여 데이터에 접근할 수 있게 하거나 데이터를 전달하는 것을 말한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제3조 제1항",
+    "global_id": "urn:std:create:art:003:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제3조",
+    "title": "계약의 이행 및 준수",
+    "order_index": 7,
+    "text_raw": "  ① 각 당사자는 본 계약의 내용을 신의성실의 원칙에 따라 이행하여야 한다.",
+    "text_norm": "각 당사자는 본 계약의 내용을 신의성실의 원칙에 따라 이행하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제3조 제2항",
+    "global_id": "urn:std:create:art:003:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제3조",
+    "title": "계약의 이행 및 준수",
+    "order_index": 8,
+    "text_raw": "  ② 각 당사자는 계약의 내용 및 이행에 있어서 「데이터 산업진흥 및 이용촉진에 관한 기본법」, 「저작권법」, 「개인정보 보호법」, 「부정경쟁방지 및 영업비밀보호에 관한 법률」 등 제반 법령을 준수하여야 한다.",
+    "text_norm": "각 당사자는 계약의 내용 및 이행에 있어서 법령:데이터 산업진흥 및 이용촉진에 관한 기본법, 법령:저작권법, 법령:개인정보 보호법, 법령:부정경쟁방지 및 영업비밀보호에 관한 법률 등 제반 법령을 준수하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제4조 조본문",
+    "global_id": "urn:std:create:art:004:att",
+    "unit_type": "articleText",
+    "parent_id": "제4조",
+    "title": "계약기간",
+    "order_index": 9,
+    "text_raw": "  본 계약의 계약기간은 계약체결일로부터 _________까지([  ]개월)로 한다.",
+    "text_norm": "본 계약의 계약기간은 계약체결일로부터 내용작성란 까지, 기간 개월로 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "commentary_summary": "데이터 창출형 계약의 경우 개별 사업 연구 프로젝트 단위로 계약이 체결되기 때문에 표준조항에는 계약 갱신에 관한 조항이 포함되지 않았다 그러나 만일 계약을 자동 연장하는 갱신조항이 필요한 경우 아래와 같은 문구를 사용할 수 있다 각 당사자는 전항의 기간만료 개월 전까지 상대방에게 계약의 종료 의사를 서면으로 통지해야 하며 별도의 통지가 없는 한 본 계약은 동일한 내용으로 년씩 자동연장되는 것으로 본다 갱신조항을 두더라도 자동 연장을 원하지 않는 경우에는 일정한 협의를 거쳐 재계약을 하는 방식으로 규정할 수 있다 갱신조항을 두더라도 자동 연장을 원하지 않는 경우에는 일정한 협의를 거쳐 재계약을 하는 방식으로 규정할 수 있다 본 계약은 계약기간 만료 개월 전까지 당사자 쌍방이 계약갱신에 합의하지 않는 경우 계약기간의 만료로 보아 계약을 종료한다"
+  },
+  {
+    "id": "제5조 조본문",
+    "global_id": "urn:std:create:art:005:att",
+    "unit_type": "articleText",
+    "parent_id": "제5조",
+    "title": "대상데이터의 취득･수집방법 등",
+    "order_index": 10,
+    "text_raw": "  대상데이터를 생성하기 위하여 당사자들은 공동으로 데이터를 취득･수집 등을 하는 것으로 하고, 그 세부적인 사항은 [별지1]과 같다.",
+    "text_norm": "대상데이터를 생성하기 위하여 당사자들은 공동으로 데이터를 취득・수집 등을 하는 것으로 하고, 그 세부적인 사항은 별지1과 같다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:001:idx:002",
+      "urn:std:create:ex:001:idx:001"
+    ],
+    "commentary_summary": "당사자들이 대상데이터를 생성하기 위해 공동으로 데이터를 취득수집 등을 하는 경우 구체적인 역할 분담을 협의하여 별지에서 상세히 정할 수 있다 누가 어떠한 방법으로 어떠한 목적을 가지고 어느 기간 중에 어떠한 데이터를 취득수집하는가 어떠한 파일형식으로 어디에 보관하는가 목적달성 후 어떠한 방법으로 파기하는가 등을 구체적으로 기재 당사자들이 공동으로 대상데이터를 생성하기 위해 역할을 분담하여 데이터를 취득수집하는 경우에는 각각 데이터의 이름 데이터 항목 취득수집 기간 취득수집 주체 취득수집할 위치 또는 대상 취득수집 방법 파일형식 가공 등이 필요한지 등에 대하여 구체적으로 명시할 필요가 있다"
+  },
+  {
+    "id": "제6조 제1항",
+    "global_id": "urn:std:create:art:006:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제6조",
+    "title": "대상데이터의 이용권리 등",
+    "order_index": 11,
+    "text_raw": "  ① 대상데이터를 이용할 권리의 귀속과 그 이용범위에 관한 사항은 [별지1]과 같다. 다만, 대상데이터의 이용권리 및 범위 등에 관하여 [별지1]에 정함이 없는 것은 당사자들이 서로 협의하여 정한다.",
+    "text_norm": "대상데이터를 이용할 권리의 귀속과 그 이용범위에 관한 사항은 별지1과 같다. 다만, 대상데이터의 이용권리 및 범위 등에 관하여 별지1에 정함이 없는 것은 당사자들이 서로 협의하여 정한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:001:idx:002",
+      "urn:std:create:ex:001:idx:001"
+    ],
+    "commentary_summary": "대상데이터의 이용권리와 범위를 명확히 규정하고, 공동 생성 데이터의 귀속 및 이용조건을 상세히 협의함으로써 분쟁을 예방해야 한다. 또한, 이용권 초과나 무단 제공 시 계약 위반 및 법적 책임이 발생할 수 있으므로 이를 준수해야 한다."
+  },
+  {
+    "id": "제6조 제2항",
+    "global_id": "urn:std:create:art:006:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제6조",
+    "title": "대상데이터의 이용권리 등",
+    "order_index": 12,
+    "text_raw": "  ② 각 당사자는 제1항에 따라 인정된 이용범위를 넘어서 대상데이터를 이용하여서는 아니 된다.",
+    "text_norm": "각 당사자는 제1항에 따라 인정된 이용범위를 넘어서 대상데이터를 이용하여서는 아니 된다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제7조 제1항",
+    "global_id": "urn:std:create:art:007:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제7조",
+    "title": "파생데이터의 이용권리 등",
+    "order_index": 13,
+    "text_raw": "  ① 당사자들이 대상데이터의 활용(연계, 가공, 분석 그 밖에 이와 유사한 행위를 말한다)을 통하여 생성한 데이터(이하 “파생데이터”라 한다)를 이용할 권리의 귀속과 그 이용범위에 관한 사항은 [별지2]와 같다. 다만, 파생데이터의 이용권리 및 범위 등에 관하여 [별지2]에 정함이 없는 것은 당사자들이 협의하여 정한다.",
+    "text_norm": "당사자들이 대상데이터의 활용, 연계, 가공, 분석 그 밖에 이와 유사한 행위를 말한다을 통하여 생성한 데이터, 이하 “파생데이터”라 한다를 이용할 권리의 귀속과 그 이용범위에 관한 사항은 별지2와 같다. 다만, 파생데이터의 이용권리 및 범위 등에 관하여 별지2에 정함이 없는 것은 당사자들이 협의하여 정한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:002"
+    ],
+    "commentary_summary": "파생데이터의 이용권리는 데이터의 형태와 이용 조건에 따라 당사자 간 합의로 정하며, 귀속 및 이용허락 조건, 수익 분배 등은 명확히 기재해야 한다. 제7조 제2항 위반 시 계약 위반으로 손해배상 책임이 발생할 수 있으며, 부정경쟁방지법에 따른 법적 책임이 적용될 수 있다."
+  },
+  {
+    "id": "제7조 제2항",
+    "global_id": "urn:std:create:art:007:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제7조",
+    "title": "파생데이터의 이용권리 등",
+    "order_index": 14,
+    "text_raw": "  ② 각 당사자는 제1항에 따라 인정된 이용범위를 넘어서 파생데이터를 이용하여서는 아니 된다.",
+    "text_norm": "각 당사자는 제1항에 따라 인정된 이용범위를 넘어서 파생데이터를 이용하여서는 아니 된다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제8조 제1항",
+    "global_id": "urn:std:create:art:008:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제8조",
+    "title": "대상데이터등에 관한 지식재산권",
+    "order_index": 15,
+    "text_raw": "  ① 당사자들이 공동으로 생성한 대상데이터와 그에 따른 파생데이터(이에 기하여 새롭게 창작하는 것을 포함한다)의 저작권법상 권리는 당사자들에게 공동으로 귀속한다. 다만, 각 당사자가 종전부터 가진 데이터 또는 본 계약의 범위 밖에서 생성한 데이터의 경우에는 그러하지 아니하다.",
+    "text_norm": "당사자들이 공동으로 생성한 대상데이터와 그에 따른 파생데이터, 이에 기하여 새롭게 창작하는 것을 포함한다의 저작권법상 권리는 당사자들에게 공동으로 귀속한다. 다만, 각 당사자가 종전부터 가진 데이터 또는 본 계약의 범위 밖에서 생성한 데이터의 경우에는 그러하지 아니하다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "commentary_summary": "대상데이터 및 파생데이터의 저작권은 공동 생성 시 당사자들에게 공동 귀속되며, 기존 데이터나 계약 범위 외 데이터는 각자 단독 귀속된다. 새롭게 발생하는 발명 등의 지식재산권은 기여도에 따라 공유되며, 전용실시권 설정 시 상대방의 동의를 필요로 한다."
+  },
+  {
+    "id": "제8조 제2항",
+    "global_id": "urn:std:create:art:008:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제8조",
+    "title": "대상데이터등에 관한 지식재산권",
+    "order_index": 16,
+    "text_raw": "  ② 대상데이터 또는 파생데이터(이하 “대상데이터등”이라 한다)에 기하여 새롭게 발생하는 발명 등에 대한 지식재산권(다만, 제1항의 저작권은 제외한다. 이하 본 조에서 같다)은 해당 발명 등을 한 자가 속하는 당사자에게 귀속한다.",
+    "text_norm": "대상데이터 또는 파생데이터, 이하 “대상데이터등”이라 한다에 기하여 새롭게 발생하는 발명 등에 대한 지식재산권, 다만, 제1항의 저작권은 제외한다. 이하 본 조에서 같다은 해당 발명 등을 한 자가 속하는 당사자에게 귀속한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제8조 제3항",
+    "global_id": "urn:std:create:art:008:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제8조",
+    "title": "대상데이터등에 관한 지식재산권",
+    "order_index": 17,
+    "text_raw": "  ③ 당사자들이 공동으로 대상데이터등에 기하여 새롭게 발생하는 발명 등에 대한 지식재산권은 당사자들의 공유로 한다(그 지분은 기여도에 따라 정한다). 이 경우 각 당사자는 계약으로 특별히 약정한 경우를 제외하고는 상대방의 동의를 받지 아니하고 단독으로 실시(實施)할 수 있다. 다만, 당사자 일방이 제3자에게 지식재산권에 대하여 전용실시권을 설정하거나 통상실시권을 허락하고자 하는 경우에는 상대방의 동의를 받아야 한다.",
+    "text_norm": "당사자들이 공동으로 대상데이터등에 기하여 새롭게 발생하는 발명 등에 대한 지식재산권은 당사자들의 공유로 한다, 그 지분은 기여도에 따라 정한다. 이 경우 각 당사자는 계약으로 특별히 약정한 경우를 제외하고는 상대방의 동의를 받지 아니하고 단독으로 실시할 수 있다. 다만, 당사자 일방이 제3자에게 지식재산권에 대하여 전용실시권을 설정하거나 통상실시권을 허락하고자 하는 경우에는 상대방의 동의를 받아야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제9조 제1항",
+    "global_id": "urn:std:create:art:009:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제9조",
+    "title": "제3자 제공 등",
+    "order_index": 18,
+    "text_raw": "  ① 각 당사자는 제6조 또는 제7조에 따라 대상데이터등을 이용할 권리에 기하여 대상데이터등을 제3자에게 제공하여 이용하게 하는 경우(이하 “제3자 제공”이라 한다) 미리 상대방의 서면동의를 받아야 한다.",
+    "text_norm": "각 당사자는 제6조 또는 제7조에 따라 대상데이터등을 이용할 권리에 기하여 대상데이터등을 제3자에게 제공하여 이용하게 하는 경우, 이하 “제3자 제공”이라 한다 미리 상대방의 서면동의를 받아야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:007:cla:001",
+      "urn:std:create:art:006:cla:002",
+      "urn:std:create:art:006:cla:001",
+      "urn:std:create:art:007:cla:002"
+    ],
+    "commentary_summary": "제9조는 당사자들이 공동으로 생성한 데이터의 제3자 제공 시 상대방의 서면 동의를 원칙으로 하며, 이용 조건은 당사자 간 합의된 범위를 초과할 수 없도록 규정하고 있습니다. 또한, 데이터 이용 및 제공에 대한 대가는 원칙적으로 청구하지 않으나, 당사자 간 협의에 따라 달리 정할 수 있습니다."
+  },
+  {
+    "id": "제9조 제2항",
+    "global_id": "urn:std:create:art:009:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제9조",
+    "title": "제3자 제공 등",
+    "order_index": 19,
+    "text_raw": "  ② 각 당사자는 제1항에 따라 제3자 제공을 하는 경우 제6조 또는 제7조에 정한 이용범위 내에서 제3자와 체결하여야 하며, 본 계약에서 본인이 부담하는 비밀유지의무, 데이터의 관리･보관의무 기타 데이터의 취급에 관한 의무와 동등한 의무를 부담하게 하는 계약을 제3자와 체결하여야 한다.",
+    "text_norm": "각 당사자는 제1항에 따라 제3자 제공을 하는 경우 제6조 또는 제7조에 정한 이용범위 내에서 제3자와 체결하여야 하며, 본 계약에서 본인이 부담하는 비밀유지의무, 데이터의 관리・보관의무 기타 데이터의 취급에 관한 의무와 동등한 의무를 부담하게 하는 계약을 제3자와 체결하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:007:cla:001",
+      "urn:std:create:art:006:cla:002",
+      "urn:std:create:art:006:cla:001",
+      "urn:std:create:art:007:cla:002"
+    ]
+  },
+  {
+    "id": "제9조 제3항",
+    "global_id": "urn:std:create:art:009:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제9조",
+    "title": "제3자 제공 등",
+    "order_index": 20,
+    "text_raw": "  ③ 제1항의 서면동의에 따라 제3자에게 대상데이터등을 제공하는 경우 그 대상데이터등의 이용에 필요한 제8조의 지식재산권에 대한 이용도 허락한 것으로 본다.",
+    "text_norm": "제1항의 서면동의에 따라 제3자에게 대상데이터등을 제공하는 경우 그 대상데이터등의 이용에 필요한 제8조의 지식재산권에 대한 이용도 허락한 것으로 본다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:008:cla:001",
+      "urn:std:create:art:008:cla:002",
+      "urn:std:create:art:008:cla:003"
+    ]
+  },
+  {
+    "id": "제9조 제4항",
+    "global_id": "urn:std:create:art:009:cla:004",
+    "unit_type": "clause",
+    "parent_id": "제9조",
+    "title": "제3자 제공 등",
+    "order_index": 21,
+    "text_raw": "  ④ 제6조 또는 제7조에 따라 대상데이터등을 이용할 권리가 단독으로 귀속되는 당사자에 대하여는 제1항 내지 제3항을 적용하지 아니한다.",
+    "text_norm": "제6조 또는 제7조에 따라 대상데이터등을 이용할 권리가 단독으로 귀속되는 당사자에 대하여는 제1항 내지 제3항을 적용하지 아니한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:007:cla:001",
+      "urn:std:create:art:006:cla:002",
+      "urn:std:create:art:006:cla:001",
+      "urn:std:create:art:007:cla:002"
+    ]
+  },
+  {
+    "id": "제10조 제1항",
+    "global_id": "urn:std:create:art:010:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제10조",
+    "title": "대가 및 이익분배",
+    "order_index": 22,
+    "text_raw": "  ① 각 당사자는 제6조 및 제7조에 따라 상대방에게 대상데이터등을 이용할 권리를 주는 경우 상대방에게 그 제공비용 또는 이용허락의 대가를 청구하지 아니한다. 다만, 본문에도 불구하고 당사자들은 그 제공비용 또는 이용허락의 대가를 협의하여 달리 정할 수 있다.",
+    "text_norm": "각 당사자는 제6조 및 제7조에 따라 상대방에게 대상데이터등을 이용할 권리를 주는 경우 상대방에게 그 제공비용 또는 이용허락의 대가를 청구하지 아니한다. 다만, 본문에도 불구하고 당사자들은 그 제공비용 또는 이용허락의 대가를 협의하여 달리 정할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:007:cla:001",
+      "urn:std:create:art:006:cla:002",
+      "urn:std:create:art:006:cla:001",
+      "urn:std:create:art:007:cla:002"
+    ]
+  },
+  {
+    "id": "제10조 제2항",
+    "global_id": "urn:std:create:art:010:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제10조",
+    "title": "대가 및 이익분배",
+    "order_index": 23,
+    "text_raw": "  ② 각 당사자는 제9조 제1항 본문에 따라 대상데이터등을 제3자 제공하는 경우 상대방에게 제3자로부터 받은 대가의 [  ]%에 해당하는 금액을 매[  ]월/매[  ]년의 말일까지 지급하여야 한다. 다만, 본문에도 불구하고 당사자들은 분배이익의 배분방법이나 지급시기 등을 협의하여 달리 정할 수 있다.",
+    "text_norm": "각 당사자는 제9조 제1항 본문에 따라 대상데이터등을 제3자 제공하는 경우 상대방에게 제3자로부터 받은 대가의 비율, %에 해당하는 금액을 매기간 월/매기간 년의 말일까지 지급하여야 한다. 다만, 본문에도 불구하고 당사자들은 분배이익의 배분방법이나 지급시기 등을 협의하여 달리 정할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:009:cla:003",
+      "urn:std:create:art:009:cla:002",
+      "urn:std:create:art:009:cla:001",
+      "urn:std:create:art:009:cla:004"
+    ]
+  },
+  {
+    "id": "제10조 제3항",
+    "global_id": "urn:std:create:art:010:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제10조",
+    "title": "대가 및 이익분배",
+    "order_index": 24,
+    "text_raw": "  ③ 각 당사자는 제2항을 이행하기 위하여 제3자로부터 받은 대가를 증빙하기 위한 문서(영수증, 거래계약서 등을 포함한다)의 원본을 보관하고, 거래 계약상 중요한 사항은 상대방에게 상당한 기간 내에 보고하여야 한다. 상대방이 관련 문서의 사본을 요구하거나 원본 대조를 요구하는 경우 그 요구를 받은 날로부터 [  ]일 내에 사본을 제공하거나 원본 대조를 할 수 있도록 하여야 한다.",
+    "text_norm": "각 당사자는 제2항을 이행하기 위하여 제3자로부터 받은 대가를 증빙하기 위한 문서, 영수증, 거래계약서 등을 포함한다의 원본을 보관하고, 거래 계약상 중요한 사항은 상대방에게 상당한 기간 내에 보고하여야 한다. 상대방이 관련 문서의 사본을 요구하거나 원본 대조를 요구하는 경우 그 요구를 받은 날로부터 기간 일 내에 사본을 제공하거나 원본 대조를 할 수 있도록 하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제11조 제1항",
+    "global_id": "urn:std:create:art:011:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제11조",
+    "title": "대상데이터등의 관리의무 등",
+    "order_index": 25,
+    "text_raw": "  ① 각 당사자는 대상데이터등을 자신이 보관하고 있는 다른 데이터와 명확히 구별하고 선량한 관리자의 주의를 가지고 관리･보관하여야 하며, 상대방의 요구에 따라 대상데이터등을 보호하기 위한 기술적 보호조치 등을 취하여야 한다.",
+    "text_norm": "각 당사자는 대상데이터등을 자신이 보관하고 있는 다른 데이터와 명확히 구별하고 선량한 관리자의 주의를 가지고 관리・보관하여야 하며, 상대방의 요구에 따라 대상데이터등을 보호하기 위한 기술적 보호조치 등을 취하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "commentary_summary": "제5항은 대상데이터등을 이용할 권리가 단독으로 귀속되는 당사자에게는 적용되지 않는다는 점을 명확히 하는 규정이다"
+  },
+  {
+    "id": "제11조 제2항",
+    "global_id": "urn:std:create:art:011:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제11조",
+    "title": "대상데이터등의 관리의무 등",
+    "order_index": 26,
+    "text_raw": "  ② 각 당사자는 상대방의 서면에 의한 사전 승낙을 받지 아니하고 대상데이터등을 제3자에게 공개하거나 제공하여서는 아니 된다.",
+    "text_norm": "각 당사자는 상대방의 서면에 의한 사전 승낙을 받지 아니하고 대상데이터등을 제3자에게 공개하거나 제공하여서는 아니 된다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제11조 제3항",
+    "global_id": "urn:std:create:art:011:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제11조",
+    "title": "대상데이터등의 관리의무 등",
+    "order_index": 27,
+    "text_raw": "  ③ 각 당사자는 대상데이터등의 관리상황에 대하여 상대방에게 서면에 의한 통지를 요구하거나 대상데이터등의 관리･보관 방법의 개선을 요구할 수 있다. 이 경우 상대방은 정당한 사유가 없는 한 그 요구에 응하여야 한다.",
+    "text_norm": "각 당사자는 대상데이터등의 관리상황에 대하여 상대방에게 서면에 의한 통지를 요구하거나 대상데이터등의 관리・보관 방법의 개선을 요구할 수 있다. 이 경우 상대방은 정당한 사유가 없는 한 그 요구에 응하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제11조 제4항",
+    "global_id": "urn:std:create:art:011:cla:004",
+    "unit_type": "clause",
+    "parent_id": "제11조",
+    "title": "대상데이터등의 관리의무 등",
+    "order_index": 28,
+    "text_raw": "  ④ 대상데이터등에 개인정보가 포함되어 있는 경우, 각 당사자는 개인정보 보호에 관한 관계 법령에 따라 개인정보의 물리적, 관리적, 기술적 조치의무를 준수하여야 한다.",
+    "text_norm": "대상데이터등에 개인정보가 포함되어 있는 경우, 각 당사자는 개인정보 보호에 관한 관계 법령에 따라 개인정보의 물리적, 관리적, 기술적 조치의무를 준수하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제11조 제5항",
+    "global_id": "urn:std:create:art:011:cla:005",
+    "unit_type": "clause",
+    "parent_id": "제11조",
+    "title": "대상데이터등의 관리의무 등",
+    "order_index": 29,
+    "text_raw": "  ⑤ 제1항 내지 제3항은 대상데이터등을 이용할 권리가 단독으로 귀속되는 당사자에게는 적용되지 아니한다.",
+    "text_norm": "제1항 내지 제3항은 대상데이터등을 이용할 권리가 단독으로 귀속되는 당사자에게는 적용되지 아니한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제12조 제1항",
+    "global_id": "urn:std:create:art:012:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제12조",
+    "title": "대상데이터등의 유출 시 조치",
+    "order_index": 30,
+    "text_raw": "  ① 각 당사자는 대상데이터등의 유출･분실･도난 또는 훼손 등(이하 “대상데이터등의 유출등”이라 한다)이 발생한 경우, 즉시 상대방에게 그 사실을 통지하고, 그 피해를 최소화하기 위한 조치를 신속하게 취하여야 한다.",
+    "text_norm": "각 당사자는 대상데이터등의 유출・분실・도난 또는 훼손 등, 이하 “대상데이터등의 유출등”이라 한다이 발생한 경우, 즉시 상대방에게 그 사실을 통지하고, 그 피해를 최소화하기 위한 조치를 신속하게 취하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제12조 제2항",
+    "global_id": "urn:std:create:art:012:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제12조",
+    "title": "대상데이터등의 유출 시 조치",
+    "order_index": 31,
+    "text_raw": "  ② 각 당사자의 고의 또는 과실에 의해 대상데이터등의 유출등이 발생한 경우, 제1항 외에도 지체 없이 자신의 비용과 책임으로 그 유출의 범위를 확인하고 원인 및 재발방지방안을 수립하여 이를 상대방에게 통지하여야 한다.",
+    "text_norm": "각 당사자의 고의 또는 과실에 의해 대상데이터등의 유출등이 발생한 경우, 제1항 외에도 지체 없이 자신의 비용과 책임으로 그 유출의 범위를 확인하고 원인 및 재발방지방안을 수립하여 이를 상대방에게 통지하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제12조 제3항",
+    "global_id": "urn:std:create:art:012:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제12조",
+    "title": "대상데이터등의 유출 시 조치",
+    "order_index": 32,
+    "text_raw": "  ③ 각 당사자는 대상데이터등의 유출등으로 인하여 개인정보가 유출된 경우 개인정보 보호에 관한 관계 법령에 따라 그 사실을 관계기관에 신고하여야 한다.",
+    "text_norm": "각 당사자는 대상데이터등의 유출등으로 인하여 개인정보가 유출된 경우 개인정보 보호에 관한 관계 법령에 따라 그 사실을 관계기관에 신고하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제13조 제1항",
+    "global_id": "urn:std:create:art:013:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제13조",
+    "title": "계약의 해제 또는 해지",
+    "order_index": 33,
+    "text_raw": "  ① 각 당사자는 상대방이 본 계약을 위반한 경우 [  ]일간의 기간을 정해 서면으로 그 시정을 요구할 수 있고, 그 기간 내에 시정하지 않은 때에는 서면에 의한 통지로써 본 계약을 해제 또는 해지할 수 있다.",
+    "text_norm": "각 당사자는 상대방이 본 계약을 위반한 경우 기간 일간의 기간을 정해 서면으로 그 시정을 요구할 수 있고, 그 기간 내에 시정하지 않은 때에는 서면에 의한 통지로써 본 계약을 해제 또는 해지할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제13조 제2항",
+    "global_id": "urn:std:create:art:013:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제13조",
+    "title": "계약의 해제 또는 해지",
+    "order_index": 34,
+    "text_raw": "  ② 각 당사자는 다음 각 호의 어느 하나에 해당하는 경우 상대방에게 최고 없이 즉시 서면에 의한 통지로 본 계약의 전부 또는 일부를 해제 또는 해지할 수 있다.\n    1. 금융기관으로부터 거래정지 처분을 받고 계약을 수행할 능력이 없다고 인정되는 경우\n    2. 감독기관 등으로부터 영업취소, 정지 등의 처분을 받은 경우\n    3. 어음 또는 수표의 부도, 제3자에 의한 강제집행(가압류 및 가처분은 제외) 등 경영상 중대한 사유가 발생하여 계약을 수행할 능력이 없다고 인정되는 경우\n    4. 파산, 화의, 정리, 회생절차 개시신청을 받거나 스스로 그러한 신청을 한 경우\n    5. 상대방의 서면동의 없이 본 계약상의 권리 또는 의무를 제3자에게 양도, 이전, 담보제공 등 처분하는 경우\n    6. 각 당사자가 타사와 합병, 인수되는 경우\n    7. 불가항력에 의하여 본 계약의 내용을 이행하기 곤란하다고 쌍방이 인정한 경우",
+    "text_norm": "각 당사자는 다음 각 호의 어느 하나에 해당하는 경우 상대방에게 최고 없이 즉시 서면에 의한 통지로 본 계약의 전부 또는 일부를 해제 또는 해지할 수 있다.//금융기관으로부터 거래정지 처분을 받고 계약을 수행할 능력이 없다고 인정되는 경우//감독기관 등으로부터 영업취소, 정지 등의 처분을 받은 경우//어음 또는 수표의 부도, 제3자에 의한 강제집행, 가압류 및 가처분은 제외 등 경영상 중대한 사유가 발생하여 계약을 수행할 능력이 없다고 인정되는 경우//파산, 화의, 정리, 회생절차 개시신청을 받거나 스스로 그러한 신청을 한 경우//상대방의 서면동의 없이 본 계약상의 권리 또는 의무를 제3자에게 양도, 이전, 담보제공 등 처분하는 경우//각 당사자가 타사와 합병, 인수되는 경우//불가항력에 의하여 본 계약의 내용을 이행하기 곤란하다고 쌍방이 인정한 경우",
+    "anchors": [
+      {
+        "unit_type": "subClause",
+        "offset_raw": 92,
+        "offset_norm": 89,
+        "breadcrumb": "제13조 제2항 제1호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 144,
+        "offset_norm": 135,
+        "breadcrumb": "제13조 제2항 제2호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 184,
+        "offset_norm": 169,
+        "breadcrumb": "제13조 제2항 제3호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 276,
+        "offset_norm": 255,
+        "breadcrumb": "제13조 제2항 제4호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 327,
+        "offset_norm": 300,
+        "breadcrumb": "제13조 제2항 제5호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 393,
+        "offset_norm": 360,
+        "breadcrumb": "제13조 제2항 제6호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 423,
+        "offset_norm": 384,
+        "breadcrumb": "제13조 제2항 제7호"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제13조 제3항",
+    "global_id": "urn:std:create:art:013:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제13조",
+    "title": "계약의 해제 또는 해지",
+    "order_index": 35,
+    "text_raw": "  ③ 본 조에 따른 계약의 해제 또는 해지는 이미 발생한 권리관계 및 각 당사자의 책임 있는 사유로 인한 손해배상의 청구에 영향을 미치지 아니한다.",
+    "text_norm": "본 조에 따른 계약의 해제 또는 해지는 이미 발생한 권리관계 및 각 당사자의 책임 있는 사유로 인한 손해배상의 청구에 영향을 미치지 아니한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제13조 제4항",
+    "global_id": "urn:std:create:art:013:cla:004",
+    "unit_type": "clause",
+    "parent_id": "제13조",
+    "title": "계약의 해제 또는 해지",
+    "order_index": 36,
+    "text_raw": "  ④ 제1항 및 제2항에 따라 계약이 해제 또는 해지되었을 때는 상대방이 해제권자 또는 해지권자에게 부담하는 일체의 채무는 기한의 이익을 상실한다.",
+    "text_norm": "제1항 및 제2항에 따라 계약이 해제 또는 해지되었을 때는 상대방이 해제권자 또는 해지권자에게 부담하는 일체의 채무는 기한의 이익을 상실한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제13조 제5항",
+    "global_id": "urn:std:create:art:013:cla:005",
+    "unit_type": "clause",
+    "parent_id": "제13조",
+    "title": "계약의 해제 또는 해지",
+    "order_index": 37,
+    "text_raw": "  ⑤ 당사자들은 본 계약에서 별도로 정한 경우 이외에 서면으로 합의함으로써 본 계약을 해제 또는 해지할 수 있다.",
+    "text_norm": "당사자들은 본 계약에서 별도로 정한 경우 이외에 서면으로 합의함으로써 본 계약을 해제 또는 해지할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제14조 조본문",
+    "global_id": "urn:std:create:art:014:att",
+    "unit_type": "articleText",
+    "parent_id": "제14조",
+    "title": "손해배상",
+    "order_index": 38,
+    "text_raw": "  각 당사자는 고의 또는 과실로 본 계약상의 의무를 이행하지 아니함으로 인하여 상대방에게 손해가 발생한 경우에는 그 손해를 배상하여야 한다.",
+    "text_norm": "각 당사자는 고의 또는 과실로 본 계약상의 의무를 이행하지 아니함으로 인하여 상대방에게 손해가 발생한 경우에는 그 손해를 배상하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제15조 제1항",
+    "global_id": "urn:std:create:art:015:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제15조",
+    "title": "책임의 제한 등",
+    "order_index": 39,
+    "text_raw": "  ① 당사자가 대상데이터등을 이용하는 과정에서 자신의 고의 또는 과실로 타인의 지식재산권, 영업비밀, 기타의 권리를 침해함으로 인하여 제3자와 분쟁이 발생한 경우에는 즉시 상대방에게 서면으로 통지하고 자신의 책임과 비용으로 해당 분쟁을 해결하여야 한다.",
+    "text_norm": "당사자가 대상데이터등을 이용하는 과정에서 자신의 고의 또는 과실로 타인의 지식재산권, 영업비밀, 기타의 권리를 침해함으로 인하여 제3자와 분쟁이 발생한 경우에는 즉시 상대방에게 서면으로 통지하고 자신의 책임과 비용으로 해당 분쟁을 해결하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제15조 제2항",
+    "global_id": "urn:std:create:art:015:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제15조",
+    "title": "책임의 제한 등",
+    "order_index": 40,
+    "text_raw": "  ② 제1항의 상대방은 제1항의 분쟁으로 인하여 발생된 그 당사자에 대한 모든 청구, 손실, 손해 또는 비용에 대하여 책임을 지지 않는다. 다만, 상대방은 해당 분쟁에 대하여 합리적인 범위에서 최대한 협조한다.",
+    "text_norm": "제1항의 상대방은 제1항의 분쟁으로 인하여 발생된 그 당사자에 대한 모든 청구, 손실, 손해 또는 비용에 대하여 책임을 지지 않는다. 다만, 상대방은 해당 분쟁에 대하여 합리적인 범위에서 최대한 협조한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제15조 제3항",
+    "global_id": "urn:std:create:art:015:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제15조",
+    "title": "책임의 제한 등",
+    "order_index": 41,
+    "text_raw": "  ③ 제1항의 분쟁으로 인하여 상대방이 일체의 청구를 당하거나 손해를 입은 경우 그 당사자는 이를 자신의 비용과 책임으로 상대방이 입은 일체의 손해, 손실, 비용 및 지출(합리적인 변호사 비용을 포함한다)을 배상하여야 한다.",
+    "text_norm": "제1항의 분쟁으로 인하여 상대방이 일체의 청구를 당하거나 손해를 입은 경우 그 당사자는 이를 자신의 비용과 책임으로 상대방이 입은 일체의 손해, 손실, 비용 및 지출, 합리적인 변호사 비용을 포함한다을 배상하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제16조 제1항",
+    "global_id": "urn:std:create:art:016:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제16조",
+    "title": "불가항력",
+    "order_index": 42,
+    "text_raw": "  ① 각 당사자는 지진, 태풍, 홍수, 수해, 대규모 화재 등 천재지변 및 자연재해, 전쟁, 기타 예측이 불가능하고 합리적인 통제를 벗어나는 원인(이하 “불가항력”이라 한다)으로 인해 채무불이행으로 인한 손해가 발생한 경우 이에 대해 책임을 지지 않는다.",
+    "text_norm": "각 당사자는 지진, 태풍, 홍수, 수해, 대규모 화재 등 천재지변 및 자연재해, 전쟁, 기타 예측이 불가능하고 합리적인 통제를 벗어나는 원인, 이하 “불가항력”이라 한다으로 인해 채무불이행으로 인한 손해가 발생한 경우 이에 대해 책임을 지지 않는다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제16조 제2항",
+    "global_id": "urn:std:create:art:016:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제16조",
+    "title": "불가항력",
+    "order_index": 43,
+    "text_raw": "  ② 각 당사자는 불가항력의 사유로 인해 계약상 의무를 이행하지 못한 경우 즉시 그 사실을 상대방에게 통지하여야 한다.",
+    "text_norm": "각 당사자는 불가항력의 사유로 인해 계약상 의무를 이행하지 못한 경우 즉시 그 사실을 상대방에게 통지하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제17조 제1항",
+    "global_id": "urn:std:create:art:017:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제17조",
+    "title": "계약 종료 후 조치",
+    "order_index": 44,
+    "text_raw": "  ① 각 당사자는 본 계약 종료 후 대상데이터 및 파생데이터 중 상대방이 단독으로 이용할 권리를 갖는 데이터(이하“반환데이터”라 한다)의 이용을 즉시 중단하고 본 계약종료일로부터 [  ]일 이내에 [별지3]에 따라 반환하거나 폐기하여야 한다. 다만, 대상데이터 및 파생데이터 중 당사자들이 공동으로 이용할 권리를 갖는 데이터에 대한 이용중단, 반환, 폐기, 계속 이용 등은 당사자 간 별도의 합의에 의한다.",
+    "text_norm": "각 당사자는 본 계약 종료 후 대상데이터 및 파생데이터 중 상대방이 단독으로 이용할 권리를 갖는 데이터, 이하“반환데이터”라 한다의 이용을 즉시 중단하고 본 계약종료일로부터 기간 일 이내에 별지3에 따라 반환하거나 폐기하여야 한다. 다만, 대상데이터 및 파생데이터 중 당사자들이 공동으로 이용할 권리를 갖는 데이터에 대한 이용중단, 반환, 폐기, 계속 이용 등은 당사자 간 별도의 합의에 의한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:003"
+    ]
+  },
+  {
+    "id": "제17조 제2항",
+    "global_id": "urn:std:create:art:017:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제17조",
+    "title": "계약 종료 후 조치",
+    "order_index": 45,
+    "text_raw": "  ② 각 당사자는 제1항에 따라 반환데이터를 폐기한 경우 그 폐기한 사실을 증명하는 서면(예: 폐기 확인서 등)을 상대방에게 제공하여야 한다.",
+    "text_norm": "각 당사자는 제1항에 따라 반환데이터를 폐기한 경우 그 폐기한 사실을 증명하는 서면, 예: 폐기 확인서 등을 상대방에게 제공하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제17조 제3항",
+    "global_id": "urn:std:create:art:017:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제17조",
+    "title": "계약 종료 후 조치",
+    "order_index": 46,
+    "text_raw": "  ③ 각 당사자는 본인이 보유한 모든 데이터 내에 반환데이터에 접속이 가능한 링크 또는 접속정보 등을 제거하여야 한다.",
+    "text_norm": "각 당사자는 본인이 보유한 모든 데이터 내에 반환데이터에 접속이 가능한 링크 또는 접속정보 등을 제거하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제17조 제4항",
+    "global_id": "urn:std:create:art:017:cla:004",
+    "unit_type": "clause",
+    "parent_id": "제17조",
+    "title": "계약 종료 후 조치",
+    "order_index": 47,
+    "text_raw": "  ④ 각 당사자는 제9조 제1항에 따라 상대방의 동의를 얻어 반환데이터를 제3자에게 공개하거나 제공한 경우 본인의 책임으로 제3자에 대하여 제1항 내지 제3항에 준하여 반환데이터의 이용중단, 반환, 폐기(이를 증명하는 서면을 제공받아 상대방에게 제공하는 것을 포함), 접속링크나 접속정보 제거 등을 하여야 한다.",
+    "text_norm": "각 당사자는 제9조 제1항에 따라 상대방의 동의를 얻어 반환데이터를 제3자에게 공개하거나 제공한 경우 본인의 책임으로 제3자에 대하여 제1항 내지 제3항에 준하여 반환데이터의 이용중단, 반환, 폐기, 이를 증명하는 서면을 제공받아 상대방에게 제공하는 것을 포함, 접속링크나 접속정보 제거 등을 하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:009:cla:003",
+      "urn:std:create:art:009:cla:002",
+      "urn:std:create:art:009:cla:001",
+      "urn:std:create:art:009:cla:004"
+    ]
+  },
+  {
+    "id": "제18조 제1항",
+    "global_id": "urn:std:create:art:018:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제18조",
+    "title": "비밀유지의무",
+    "order_index": 48,
+    "text_raw": "  ① 각 당사자는 상대방에게 서면･구두 또는 기타 방법을 가리지 않고 비밀정보임을 표명 또는 표시한 후 서류, 자료 등 일체의 정보를 공개한 경우 상대방은 비밀로 유지하여야 한다.",
+    "text_norm": "각 당사자는 상대방에게 서면・구두 또는 기타 방법을 가리지 않고 비밀정보임을 표명 또는 표시한 후 서류, 자료 등 일체의 정보를 공개한 경우 상대방은 비밀로 유지하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제18조 제2항",
+    "global_id": "urn:std:create:art:018:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제18조",
+    "title": "비밀유지의무",
+    "order_index": 49,
+    "text_raw": "  ② 제1항에 따라 비밀유지의무가 있는 각 당사자는 상대방의 사전 서면동의 없이 제3자에게 공개, 제공, 누설하거나 비밀정보를 본 계약에 따른 권리의 행사 또는 의무의 이행 이외의 목적으로 이용해서는 아니 된다. 다만, 법원의 판결, 수사기관의 강제수사, 행정청의 처분, 명령 또는 관련 법령의 공개의무에 따라 공개하는 행위는 비밀유지의무를 위반하지 않는 것으로 본다.",
+    "text_norm": "제1항에 따라 비밀유지의무가 있는 각 당사자는 상대방의 사전 서면동의 없이 제3자에게 공개, 제공, 누설하거나 비밀정보를 본 계약에 따른 권리의 행사 또는 의무의 이행 이외의 목적으로 이용해서는 아니 된다. 다만, 법원의 판결, 수사기관의 강제수사, 행정청의 처분, 명령 또는 관련 법령의 공개의무에 따라 공개하는 행위는 비밀유지의무를 위반하지 않는 것으로 본다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제18조 제3항",
+    "global_id": "urn:std:create:art:018:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제18조",
+    "title": "비밀유지의무",
+    "order_index": 50,
+    "text_raw": "  ③ 제1항에도 불구하고 다음 각 호의 어느 하나에 해당하는 정보는 비밀정보에 해당하지 않는 것으로 한다.\n    1. 비밀정보 공개 시점에 이미 상대방이 보유하고 있던 정보 \n    2. 비밀정보에 의하지 않고 상대방이 독자적으로 개발한 정보 \n    3. 공개 시점에 알려진 정보 \n    4. 비밀정보 공개 후에 상대방의 귀책사유에 의하지 아니하고 공지된 정보 \n    5. 정당한 권리를 가진 제3자로부터 비밀유지의무 없이 공개된 정보",
+    "text_norm": "제1항에도 불구하고 다음 각 호의 어느 하나에 해당하는 정보는 비밀정보에 해당하지 않는 것으로 한다.//비밀정보 공개 시점에 이미 상대방이 보유하고 있던 정보//비밀정보에 의하지 않고 상대방이 독자적으로 개발한 정보//공개 시점에 알려진 정보//비밀정보 공개 후에 상대방의 귀책사유에 의하지 아니하고 공지된 정보//정당한 권리를 가진 제3자로부터 비밀유지의무 없이 공개된 정보",
+    "anchors": [
+      {
+        "unit_type": "subClause",
+        "offset_raw": 61,
+        "offset_norm": 58,
+        "breadcrumb": "제18조 제3항 제1호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 100,
+        "offset_norm": 90,
+        "breadcrumb": "제18조 제3항 제2호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 139,
+        "offset_norm": 122,
+        "breadcrumb": "제18조 제3항 제3호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 161,
+        "offset_norm": 137,
+        "breadcrumb": "제18조 제3항 제4호"
+      },
+      {
+        "unit_type": "subClause",
+        "offset_raw": 207,
+        "offset_norm": 176,
+        "breadcrumb": "제18조 제3항 제5호"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제18조 제4항",
+    "global_id": "urn:std:create:art:018:cla:004",
+    "unit_type": "clause",
+    "parent_id": "제18조",
+    "title": "비밀유지의무",
+    "order_index": 51,
+    "text_raw": "  ④ 공개자는 본 계약의 이행을 위해 필요한 범위 내에서만 제1항 및 제2항에 근거하여 비밀유지의무를 준수하는 것을 전제로, 자신의 임직원 또는 법률상 비밀유지의무가 있는 자신의 변호사, 회계사, 세무사 등에 비밀정보를 공개할 수 있다.",
+    "text_norm": "공개자는 본 계약의 이행을 위해 필요한 범위 내에서만 제1항 및 제2항에 근거하여 비밀유지의무를 준수하는 것을 전제로, 자신의 임직원 또는 법률상 비밀유지의무가 있는 자신의 변호사, 회계사, 세무사 등에 비밀정보를 공개할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제19조 조본문",
+    "global_id": "urn:std:create:art:019:att",
+    "unit_type": "articleText",
+    "parent_id": "제19조",
+    "title": "효력유지조항",
+    "order_index": 52,
+    "text_raw": "  본 계약이 계약기간의 만료 또는 해제 또는 해지에 따라 종료한 경우이더라도 제11조, 제12조, 제14조, 제15조의 규정은 유효하게 존속한다. 다만, 제18조의 규정은 본 계약이 종료된 이후에도 [  ]년간 유효하게 존속한다.",
+    "text_norm": "본 계약이 계약기간의 만료 또는 해제 또는 해지에 따라 종료한 경우이더라도 제11조, 제12조, 제14조, 제15조의 규정은 유효하게 존속한다. 다만, 제18조의 규정은 본 계약이 종료된 이후에도 기간 년간 유효하게 존속한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:art:011:cla:005",
+      "urn:std:create:art:018:cla:003",
+      "urn:std:create:art:015:cla:003",
+      "urn:std:create:art:018:cla:001",
+      "urn:std:create:art:011:cla:001",
+      "urn:std:create:art:012:cla:003",
+      "urn:std:create:art:018:cla:002",
+      "urn:std:create:art:018:cla:004",
+      "urn:std:create:art:011:cla:002",
+      "urn:std:create:art:012:cla:002",
+      "urn:std:create:art:015:cla:002",
+      "urn:std:create:art:011:cla:003",
+      "urn:std:create:art:014:att",
+      "urn:std:create:art:015:cla:001",
+      "urn:std:create:art:012:cla:001",
+      "urn:std:create:art:011:cla:004"
+    ],
+    "commentary_summary": "본 계약에서 효력유지 조항은 아래와 같다 제11조대상데이터등의 관리의무 등 제12조대상데이터등의 유출 시 조치 제14조손해배상 제15조책임의 제한 등 제18조비밀유지의무"
+  },
+  {
+    "id": "제20조 제1항",
+    "global_id": "urn:std:create:art:020:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제20조",
+    "title": "완전합의",
+    "order_index": 53,
+    "text_raw": "  ① 본 계약서는 본 계약이 체결되기 전에 이루어진 당사자 간의 모든 합의 및 의사표시를 대체하며, 기존의 모든 합의 및 의사표시는 본 계약의 체결로 효력을 상실한다.",
+    "text_norm": "본 계약서는 본 계약이 체결되기 전에 이루어진 당사자 간의 모든 합의 및 의사표시를 대체하며, 기존의 모든 합의 및 의사표시는 본 계약의 체결로 효력을 상실한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제20조 제2항",
+    "global_id": "urn:std:create:art:020:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제20조",
+    "title": "완전합의",
+    "order_index": 54,
+    "text_raw": "  ② 본 계약의 변경은 양 당사자의 서면 합의만으로 변경할 수 있으며, 그 변경은 각 당사자가 기명날인 또는 서명함과 동시에 그 효력이 발생한다.",
+    "text_norm": "본 계약의 변경은 양 당사자의 서면 합의만으로 변경할 수 있으며, 그 변경은 각 당사자가 기명날인 또는 서명함과 동시에 그 효력이 발생한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제21조 조본문",
+    "global_id": "urn:std:create:art:021:att",
+    "unit_type": "articleText",
+    "parent_id": "제21조",
+    "title": "일부 무효",
+    "order_index": 55,
+    "text_raw": "  본 계약의 일부 조항이 무효 또는 이행불능으로 인정되더라도 특별한 사정이 없는 한 이러한 사실은 본 계약의 다른 조항의 유효성에 영향을 미치지 아니한다. 다만, 유효한 부분만으로는 계약의 목적 달성이 불가능하거나 그 유효한 부분이 한쪽 당사자에게 부당하게 불리한 경우에는 그 계약을 무효로 한다.",
+    "text_norm": "본 계약의 일부 조항이 무효 또는 이행불능으로 인정되더라도 특별한 사정이 없는 한 이러한 사실은 본 계약의 다른 조항의 유효성에 영향을 미치지 아니한다. 다만, 유효한 부분만으로는 계약의 목적 달성이 불가능하거나 그 유효한 부분이 한쪽 당사자에게 부당하게 불리한 경우에는 그 계약을 무효로 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제22조 조본문",
+    "global_id": "urn:std:create:art:022:att",
+    "unit_type": "articleText",
+    "parent_id": "제22조",
+    "title": "양도금지",
+    "order_index": 56,
+    "text_raw": "  양 당사자는 본 계약상의 지위 또는 본 계약상의 권리 또는 의무를 제3자에게 양도, 이전, 담보제공 등 처분을 하여서는 아니 된다. 다만, 상대방의 사전 서면동의가 있는 경우에는 그러하지 아니하다.",
+    "text_norm": "양 당사자는 본 계약상의 지위 또는 본 계약상의 권리 또는 의무를 제3자에게 양도, 이전, 담보제공 등 처분을 하여서는 아니 된다. 다만, 상대방의 사전 서면동의가 있는 경우에는 그러하지 아니하다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제23조 조본문",
+    "global_id": "urn:std:create:art:023:att",
+    "unit_type": "articleText",
+    "parent_id": "제23조",
+    "title": "통지",
+    "order_index": 57,
+    "text_raw": "  본 계약상 당사자의 상대방에 대한 일체의 통지 등은 계약서에 기재된 당사자의 주소로 우편, 전자문서 등 서면으로 하여야 한다. 당사자들은 주소가 변경되는 경우 즉시 상대방에게 통지하여야 한다.",
+    "text_norm": "본 계약상 당사자의 상대방에 대한 일체의 통지 등은 계약서에 기재된 당사자의 주소로 우편, 전자문서 등 서면으로 하여야 한다. 당사자들은 주소가 변경되는 경우 즉시 상대방에게 통지하여야 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제24조 제1항",
+    "global_id": "urn:std:create:art:024:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제24조",
+    "title": "분쟁의 해결",
+    "order_index": 58,
+    "text_raw": "  ① 본 계약에서 정하지 아니한 사항이나 해석상 내용이 불분명한 사항에 대해서는 상호 협의하여 결정한다. 단, 협의가 이루어지지 않는 경우에는 관계법령 및 상관습에 따른다.",
+    "text_norm": "본 계약에서 정하지 아니한 사항이나 해석상 내용이 불분명한 사항에 대해서는 상호 협의하여 결정한다. 단, 협의가 이루어지지 않는 경우에는 관계법령 및 상관습에 따른다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제24조 제2항",
+    "global_id": "urn:std:create:art:024:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제24조",
+    "title": "분쟁의 해결",
+    "order_index": 59,
+    "text_raw": "  ② 제1항에도 불구하고 당사자 간 분쟁이 발생하는 경우에는 분쟁의 원인에 따라 「데이터 산업진흥 및 이용촉진에 관한 기본법」 제34조의 데이터분쟁조정위원회, 「저작권법」, 「발명진흥법」에 따라 설치된 분쟁조정기구에 의하여 해결할 수 있다.",
+    "text_norm": "제1항에도 불구하고 당사자 간 분쟁이 발생하는 경우에는 분쟁의 원인에 따라 법령:데이터 산업진흥 및 이용촉진에 관한 기본법 제34조의 데이터분쟁조정위원회, 법령:저작권법, 법령:발명진흥법에 따라 설치된 분쟁조정기구에 의하여 해결할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제24조 제3항",
+    "global_id": "urn:std:create:art:024:cla:003",
+    "unit_type": "clause",
+    "parent_id": "제24조",
+    "title": "분쟁의 해결",
+    "order_index": 60,
+    "text_raw": "  ③ 각 당사자는 제2항의 분쟁조정을 거치지 아니하고 소송을 제기할 수 있으며, 소송이 제기되는 경우 「민사소송법」상 피고의 본점 소재지 법원을 관할법원으로 한다. ",
+    "text_norm": "각 당사자는 제2항의 분쟁조정을 거치지 아니하고 소송을 제기할 수 있으며, 소송이 제기되는 경우 법령:민사소송법상 피고의 본점 소재지 법원을 관할법원으로 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제25조 조본문",
+    "global_id": "urn:std:create:art:025:att",
+    "unit_type": "articleText",
+    "parent_id": "제25조",
+    "title": "준거법",
+    "order_index": 61,
+    "text_raw": "  본 계약의 준거법은 대한민국법으로 한다.",
+    "text_norm": "본 계약의 준거법은 대한민국법으로 한다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제26조 제1항",
+    "global_id": "urn:std:create:art:026:cla:001",
+    "unit_type": "clause",
+    "parent_id": "제26조",
+    "title": "특약사항",
+    "order_index": 62,
+    "text_raw": "  ① 본 계약에서 정하지 아니한 사항에 대하여는 당사자들이 합의하여 특약으로 정할 수 있다. ",
+    "text_norm": "본 계약에서 정하지 아니한 사항에 대하여는 당사자들이 합의하여 특약으로 정할 수 있다.",
+    "anchors": [],
+    "source_file": "create_std_contract_structured.json"
+  },
+  {
+    "id": "제26조 제2항",
+    "global_id": "urn:std:create:art:026:cla:002",
+    "unit_type": "clause",
+    "parent_id": "제26조",
+    "title": "특약사항",
+    "order_index": 63,
+    "text_raw": "  ② 제1항에 따른 특약의 내용은 다음과 같다.\n__________________________________________________________________________________________________________________________________________________________________________\n  당사자들은 상기 모든 조항을 확인한 후 이를 증명하기 위하여 본 계약서 2부를 작성하고 당사자 1과 당사자 2가 서명날인 후 각각 1부씩 보관한다.\n20   년    월    일\n                                             당사자 1:\n                                               상호:                                   \n                                               주소:                                   \n                                               대표자:                              (인)\n                                             당사자 2:\n                                               상호:                                   \n                                               주소:                                   \n                                               대표자:                              (인)\n첨부: 별지",
+    "text_norm": "제1항에 따른 특약의 내용은 다음과 같다. 내용작성란 //당사자들은 상기 모든 조항을 확인한 후 이를 증명하기 위하여 본 계약서 2부를 작성하고 당사자 1과 당사자 2가 서명날인 후 각각 1부씩 보관한다.//20 년 월 일//당사자 1://상호://주소://대표자: (인)//당사자 2://상호://주소://대표자: (인)//첨부: 별지",
+    "anchors": [
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 199,
+        "offset_norm": 196,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 284,
+        "offset_norm": 280,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 301,
+        "offset_norm": 298,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 353,
+        "offset_norm": 306,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 439,
+        "offset_norm": 311,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 525,
+        "offset_norm": 316,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 610,
+        "offset_norm": 355,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 662,
+        "offset_norm": 363,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 748,
+        "offset_norm": 368,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 834,
+        "offset_norm": 373,
+        "breadcrumb": "제26조 제2항 항본문"
+      },
+      {
+        "unit_type": "clauseText",
+        "offset_raw": 919,
+        "offset_norm": 412,
+        "breadcrumb": "제26조 제2항 항본문"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json",
+    "references": [
+      "urn:std:create:ex:002"
+    ]
+  },
+  {
+    "id": "별지1-1",
+    "global_id": "urn:std:create:ex:001:idx:001",
+    "unit_type": "exhibitIndexed",
+    "parent_id": "별지1",
+    "title": "대상데이터",
+    "order_index": 64,
+    "text_raw": "1. 대상데이터 및 그 이용범위\n항목1:\n- 구분: 1\n- 데이터 이름: ○○○\n- 데이터 항목 등: 【데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등 데이터를 특정할 수 있는 정보】\n- 생성기간: 【○년○월 ○일~○년 ○월○일】의 기간에 생성된 것\n- 데이터  이용권리 귀속: 당사자 1 (   ) 당사자 2 (   ) 당사자 1  및  당사자 2 (   )\n- 당사자 1의 이용범위: 【이용목적】 【이용대가】 【제3자 제공(양도 또는 이용허락)의 가부】 【가공 등의 가부】 【지식재산권】\n- 당사자 2의 이용범위: 【이용목적】 【이용대가】 【제3자 제공(양도 또는 이용허락)의 가부】 【가공 등의 가부】 【지식재산권】\n항목2:\n- 구분: 2\n- 데이터 이름: ○○○\n- 데이터 항목 등: ...\n- 생성기간: ...\n- 데이터  이용권리 귀속: ...\n- 당사자 1의 이용범위: ...\n- 당사자 2의 이용범위: ...\n* 우선 대상데이터를 이용할 권리가 누구[당사자 1 또는 당사자 2 또는 당사자 1 및 당사자 2 모두]에게 귀속되는지 표시, 다음으로 [당사자 1 또는 당사자 2]에게 귀속되고 상대방인 [당사자 2 또는 당사자 1]에게 대상데이터를 이용허락하는 경우 그 조건을 기재, 대상데이터가 [당사자 1 및 당사자 2 모두]에게 귀속되는 경우 [당사자 1 및 당사자 2]가 대상데이터를 이용할 권리의 내용을 기재함",
+    "text_norm": "대상데이터 및 그 이용범위//구분: 1//데이터 이름: ○○○//데이터 항목 등: {설명:데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등 데이터를 특정할 수 있는 정보}//생성기간: {설명:기간 년기간 월 기간 일~기간 년 기간 월기간 일}의 기간에 생성된 것//데이터 이용권리 귀속: 당사자 1 당사자 2 당사자 1 및 당사자 2 //당사자 1의 이용범위: {설명:이용목적} {설명:이용대가} {설명:제3자 제공, 양도 또는 이용허락의 가부} {설명:가공 등의 가부} {설명:지식재산권}//당사자 2의 이용범위: {설명:이용목적} {설명:이용대가} {설명:제3자 제공, 양도 또는 이용허락의 가부} {설명:가공 등의 가부} {설명:지식재산권}//구분: 2//데이터 이름: ○○○//데이터 항목 등: ...//생성기간: ...//데이터 이용권리 귀속: ...//당사자 1의 이용범위: ...//당사자 2의 이용범위: ...//* 우선 대상데이터를 이용할 권리가 누구[당사자 1 또는 당사자 2 또는 당사자 1 및 당사자 2 모두]에게 귀속되는지 표시, 다음으로 [당사자 1 또는 당사자 2]에게 귀속되고 상대방인 [당사자 2 또는 당사자 1]에게 대상데이터를 이용허락하는 경우 그 조건을 기재, 대상데이터가 [당사자 1 및 당사자 2 모두]에게 귀속되는 경우 [당사자 1 및 당사자 2]가 대상데이터를 이용할 권리의 내용을 기재함",
+    "anchors": [
+      {
+        "unit_type": "exhibitText",
+        "offset_raw": 0,
+        "offset_norm": 0,
+        "breadcrumb": "별지1-1 별지본문"
+      },
+      {
+        "unit_type": "table",
+        "offset_raw": 18,
+        "offset_norm": 16,
+        "breadcrumb": "별지1-1 표"
+      },
+      {
+        "unit_type": "exhibitText",
+        "offset_raw": 469,
+        "offset_norm": 443,
+        "breadcrumb": "별지1-1 별지본문"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json",
+    "text_llm": "이 별지는 대상데이터에 관한 정보를 정리한 서식으로, 각 항목별로 ○○○//데이터 항목 등(데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등), //생성기간(기간 년기간 월 기간 일~기간 년 기간 월기간 일), 당사자 1 당사자 2 당사자 1 및 당사자 2 //당사자 1의 이용범위(이용목적), 지식재산권}//당사자 2의 이용범위(이용목적) 등을 기재하도록 구성되어 있다."
+  },
+  {
+    "id": "별지1-2",
+    "global_id": "urn:std:create:ex:001:idx:002",
+    "unit_type": "exhibitIndexed",
+    "parent_id": "별지1",
+    "title": "대상데이터",
+    "order_index": 65,
+    "text_raw": "2. 대상데이터의 취득･수집방법\n  [①누가, ②어떠한 방법으로, ③어떠한 목적을 가지고, ④어느 기간 중에, ⑤어떠한 데이터를 취득･수집하는가, ⑥어떠한 파일형식으로 어디에 보관하는가, ⑦목적달성 후 어떠한 방법으로 파기하는가 등을 구체적으로 기재함]",
+    "text_norm": "대상데이터의 취득・수집방법//[1누가, 2어떠한 방법으로, 3어떠한 목적을 가지고, 4어느 기간 중에, 5어떠한 데이터를 취득・수집하는가, 6어떠한 파일형식으로 어디에 보관하는가, 7목적달성 후 어떠한 방법으로 파기하는가 등을 구체적으로 기재함]",
+    "anchors": [
+      {
+        "unit_type": "exhibitText",
+        "offset_raw": 0,
+        "offset_norm": 0,
+        "breadcrumb": "별지1-2 별지본문"
+      },
+      {
+        "unit_type": "exhibitText",
+        "offset_raw": 18,
+        "offset_norm": 16,
+        "breadcrumb": "별지1-2 별지본문"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json",
+    "text_llm": "이 항목은 대상데이터를 어떻게 취득하고 수집하는지를 구체적으로 작성하도록 요구한다.  기재 내용에는 수집 주체, 방법, 목적, 기간, 수집 데이터의 종류, 보관 방식, 그리고 목적 달성 후 파기 방법이 포함된다."
+  },
+  {
+    "id": "별지2",
+    "global_id": "urn:std:create:ex:002",
+    "unit_type": "exhibit",
+    "parent_id": "별지2",
+    "title": "파생데이터 및 그 이용범위",
+    "order_index": 66,
+    "text_raw": "[별지2] 파생데이터 및 그 이용범위\n항목1:\n- 구분: 1\n- 파생 데이터  이름: ○○○\n- 파생데이터 항목 등: 【데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등 데이터를 특정할 수 있는 정보】\n- 생성기간: 【○년○월○일~○년○월○일】의 기간에 생성된 것\n- 파생데이터 이용권리  귀속: 당사자 1 (   ) 당사자 2 (   ) 당사자 1  및  당사자 2 (   )\n- 당사자 1의 이용범위: 【이용목적】 【제3자 제공(양도 또는 이용허락)의 가부】 【가공 등의 가부】 【지식재산권】\n- 당사자 2의 이용범위: 【이용목적】 【제3자 제공(양도 또는 이용허락)의 가부】 【가공 등의 가부】 【지식재산권】\n항목2:\n- 구분: 2\n- 파생 데이터  이름: ○○○\n- 파생데이터 항목 등: ...\n- 생성기간: ...\n- 파생데이터 이용권리  귀속: ...\n- 당사자 1의 이용범위: ...\n- 당사자 2의 이용범위: ...\n* 우선 파생데이터를 이용할 권리가 누구[당사자 1 또는 당사자 2 또는 당사자 1 및 당사자 2 모두]에게 귀속되는지 표시, 다음으로 [당사자 1 또는 당사자 2]에게 귀속되고 상대방인 [당사자 2 또는 당사자 1]에게 파생데이터를 이용허락하는 경우 그 조건을 기재, 파생데이터가 [당사자 1 및 당사자 2 모두]에게 귀속되는 경우 [당사자 1 및 당사자 2]가 파생데이터를 이용할 권리의 내용을 기재함",
+    "text_norm": "구분: 1//파생 데이터 이름: ○○○//파생데이터 항목 등: {설명:데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등 데이터를 특정할 수 있는 정보}//생성기간: {설명:기간 년기간 월기간 일~기간 년기간 월기간 일}의 기간에 생성된 것//파생데이터 이용권리 귀속: 당사자 1 당사자 2 당사자 1 및 당사자 2 //당사자 1의 이용범위: {설명:이용목적} {설명:제3자 제공, 양도 또는 이용허락의 가부} {설명:가공 등의 가부} {설명:지식재산권}//당사자 2의 이용범위: {설명:이용목적} {설명:제3자 제공, 양도 또는 이용허락의 가부} {설명:가공 등의 가부} {설명:지식재산권}//구분: 2//파생 데이터 이름: ○○○//파생데이터 항목 등: ...//생성기간: ...//파생데이터 이용권리 귀속: ...//당사자 1의 이용범위: ...//당사자 2의 이용범위: ...//* 우선 파생데이터를 이용할 권리가 누구[당사자 1 또는 당사자 2 또는 당사자 1 및 당사자 2 모두]에게 귀속되는지 표시, 다음으로 [당사자 1 또는 당사자 2]에게 귀속되고 상대방인 [당사자 2 또는 당사자 1]에게 파생데이터를 이용허락하는 경우 그 조건을 기재, 파생데이터가 [당사자 1 및 당사자 2 모두]에게 귀속되는 경우 [당사자 1 및 당사자 2]가 파생데이터를 이용할 권리의 내용을 기재함",
+    "anchors": [
+      {
+        "unit_type": "table",
+        "offset_raw": 21,
+        "offset_norm": 0,
+        "breadcrumb": "별지2 표"
+      },
+      {
+        "unit_type": "exhibitText",
+        "offset_raw": 472,
+        "offset_norm": 427,
+        "breadcrumb": "별지2 별지본문"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json",
+    "text_llm": "이 별지는 파생데이터 및 그 이용범위에 관한 정보를 정리한 서식으로, 각 항목별로 ○○○//파생데이터 항목 등(데이터 건수, 용량, 파일형식 (확장자), 데이터 상세설명 등), //생성기간(기간 년기간 월기간 일~기간 년기간 월기간 일), 당사자 1 당사자 2 당사자 1 및 당사자 2 //당사자 1의 이용범위(이용목적), 지식재산권}//당사자 2의 이용범위(이용목적) 등을 기재하도록 구성되어 있다."
+  },
+  {
+    "id": "별지3",
+    "global_id": "urn:std:create:ex:003",
+    "unit_type": "exhibit",
+    "parent_id": "별지3",
+    "title": "계약종료 시에 반환, 폐기 또는 삭제되는 데이터",
+    "order_index": 67,
+    "text_raw": "[별지3] 계약종료 시에 반환, 폐기 또는 삭제되는 데이터\n항목1:\n- 구분: 1\n- 대상데이터/파생데이터 이름: ○○○\n- 데이터 항목 등: ○○  【별지 1 또는 2을 인용하여 특정】\n- 생성기간: 【○년○월○일~○년○월 ○일】의 기간에 생성된 것\n항목2:\n- 구분: 2\n- 대상데이터/파생데이터 이름: ○○○\n- 데이터 항목 등: ...\n- 생성기간: ...",
+    "text_norm": "구분: 1//대상데이터/파생데이터 이름: ○○○//데이터 항목 등: ○○ {설명:별지 1 또는 2을 인용하여 특정}//생성기간: {설명:기간 년기간 월기간 일~기간 년기간 월 기간 일}의 기간에 생성된 것//구분: 2//대상데이터/파생데이터 이름: ○○○//데이터 항목 등: ...//생성기간: ...",
+    "anchors": [
+      {
+        "unit_type": "table",
+        "offset_raw": 33,
+        "offset_norm": 0,
+        "breadcrumb": "별지3 표"
+      }
+    ],
+    "source_file": "create_std_contract_structured.json",
+    "text_llm": "이 별지는 계약종료 시에 반환, 폐기 또는 삭제되는 데이터에 관한 정보를 정리한 서식으로, 각 항목별로 별지 1 또는 2을 인용하여 특정}//생성기간(기간 년기간 월기간 일~기간 년기간 월 기간 일) 등을 기재하도록 구성되어 있다.",
+    "references": [
+      "urn:std:create:ex:001:idx:002",
+      "urn:std:create:ex:001:idx:001"
+    ]
+  }
+]
