@@ -373,6 +373,7 @@ class Step5FinalIntegrator:
 
 ## 사용자 조항 원문
 {user_article_content}
+사용자 조항 원문은 필요한 경우 의미 파악을 위한 참고 용도로만 사용하며, 원문 전체를 직접 반복하거나 그대로 인용하지 않습니다. 필요한 경우 핵심 내용만 간단히 요약하여 언급합니다.
 
 ## 매칭된 표준 조항
 {json.dumps(matched_standards, ensure_ascii=False, indent=2)}
