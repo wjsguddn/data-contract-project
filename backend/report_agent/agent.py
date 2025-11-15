@@ -112,7 +112,8 @@ class ReportAgent:
             final_report = self.step5.integrate(
                 step4_result=step4_result,
                 a2_result=input_data['a2_result'],
-                a2_recovered_result=input_data.get('a2_recovered_result')
+                a2_recovered_result=input_data.get('a2_recovered_result'),
+                user_contract_data=input_data['user_contract_data']
             )
             logger.info(f"[Step 5] 최종 통합 완료")
             

@@ -264,9 +264,11 @@ class Step1Normalizer:
                                 })
             
             # insufficient/missing 파싱 (JSON 구조)
-            # A3 matched_articles에서 sub_items를 먼저 수집 (summary 활용)
-            # 모든 fidelity 값 포함 (sufficient, insufficient, missing)
+            # A3 suggestions에서 insufficient_items와 missing_items를 수집 (reason 활용)
+            # A3는 sub_items가 아닌 suggestions 구조를 사용함
             sub_items_by_global_id = {}
+            
+            # 기존 sub_items 방식도 유지 (하위 호환성)
             for matched in article.get("matched_articles", []):
                 for sub_item in matched.get("sub_items", []):
                     # 각 sub_item의 global_id 찾기
@@ -277,6 +279,36 @@ class Step1Normalizer:
                         if chunk_global_id:
                             sub_items_by_global_id[chunk_global_id] = sub_item
                             logger.debug(f"    sub_item 매핑: {chunk_global_id} -> {sub_item.get('fidelity')} ({sub_item.get('summary', '')[:50]})")
+            
+            # A3 suggestions에서 데이터 추출 (우선순위: suggestions > sub_items)
+            for suggestion in article.get("suggestions", []):
+                # missing_items 처리
+                for item in suggestion.get("missing_items", []):
+                    std_article = item.get("std_article", "")
+                    std_clause = item.get("std_clause", "")
+                    reason = item.get("reason", "")
+                    
+                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                    if global_id and reason:
+                        sub_items_by_global_id[global_id] = {
+                            "fidelity": "missing",
+                            "summary": reason
+                        }
+                        logger.info(f"    A3 missing: {global_id} -> reason 사용 (suggestions)")
+                
+                # insufficient_items 처리
+                for item in suggestion.get("insufficient_items", []):
+                    std_article = item.get("std_article", "")
+                    std_clause = item.get("std_clause", "")
+                    reason = item.get("reason", "")
+                    
+                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                    if global_id and reason:
+                        sub_items_by_global_id[global_id] = {
+                            "fidelity": "insufficient",
+                            "summary": reason
+                        }
+                        logger.info(f"    A3 insufficient: {global_id} -> reason 사용 (suggestions)")
             
             suggestions = article.get("suggestions", [])
             for suggestion in suggestions:
@@ -388,6 +420,8 @@ class Step1Normalizer:
             
             # sub_items 수집 (summary 활용)
             sub_items_by_global_id = {}
+            
+            # 기존 sub_items 방식 (하위 호환성)
             for matched in article.get("matched_articles", []):
                 for sub_item in matched.get("sub_items", []):
                     idx = sub_item.get("index")
@@ -396,6 +430,38 @@ class Step1Normalizer:
                         chunk_global_id = matched_chunks[idx].get("global_id")
                         if chunk_global_id:
                             sub_items_by_global_id[chunk_global_id] = sub_item
+            
+            # A3 suggestions에서 데이터 추출 (우선순위: suggestions > sub_items)
+            for suggestion in article.get("suggestions", []):
+                # missing_items 처리
+                for item in suggestion.get("missing_items", []):
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id and reason:
+                            sub_items_by_global_id[global_id] = {
+                                "fidelity": "missing",
+                                "summary": reason
+                            }
+                            logger.info(f"    A3 Recovered missing: {global_id} -> reason 사용 (suggestions)")
+                
+                # insufficient_items 처리
+                for item in suggestion.get("insufficient_items", []):
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id and reason:
+                            sub_items_by_global_id[global_id] = {
+                                "fidelity": "insufficient",
+                                "summary": reason
+                            }
+                            logger.info(f"    A3 Recovered insufficient: {global_id} -> reason 사용 (suggestions)")
             
             suggestions = article.get("suggestions", [])
             recovered_insufficient_count = 0

@@ -40,7 +40,8 @@ class Step5FinalIntegrator:
     
     def integrate(self, step4_result: Dict[str, Any], 
                  a2_result: Dict[str, Any],
-                 a2_recovered_result: Dict[str, Any] = None) -> Dict[str, Any]:
+                 a2_recovered_result: Dict[str, Any] = None,
+                 user_contract_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         체크리스트 결과를 통합하여 최종 보고서 생성 (Primary + Recovered 병합)
         
@@ -48,11 +49,15 @@ class Step5FinalIntegrator:
             step4_result: Step 4 결과 (포맷팅된 보고서)
             a2_result: A2 Primary 체크리스트 검증 결과 (None 가능)
             a2_recovered_result: A2 Recovered 체크리스트 검증 결과 (None 가능)
+            user_contract_data: 사용자 계약서 원본 데이터 (조 내용 추출용)
             
         Returns:
             최종 통합 보고서 JSON
         """
         logger.info("Step 5 최종 통합 시작")
+        
+        # 사용자 계약서 데이터 저장 (종합분석 생성 시 사용)
+        self.user_contract_data = user_contract_data
         
         # Step4 결과 복사
         final_report = step4_result.copy()
@@ -350,17 +355,24 @@ class Step5FinalIntegrator:
             return self._generate_fallback_narrative(article_data)
         
         # 입력 데이터 준비 (Step5에서 정리된 필드명 사용)
+        user_article_no = article_data.get('user_article_no')
         user_article_title = article_data.get('user_article_title', 'N/A')
         matched_standards = article_data.get('matched_standard_articles', [])
         insufficient_items = article_data.get('insufficient_items', [])
         missing_items = article_data.get('missing_items', [])
         checklist_results = article_data.get('checklist_results', [])
         
+        # 사용자 조 내용 추출
+        user_article_content = self._get_user_article_content(user_article_no)
+        
         # 프롬프트 구성
         prompt = f"""당신은 데이터 계약서 검증 전문가입니다. 아래 구조화된 검증 데이터를 바탕으로 사용자가 이해하기 쉬운 서술형 보고서를 작성해주세요.
 
 ## 검증 대상 조항
 {user_article_title}
+
+## 사용자 조항 원문
+{user_article_content}
 
 ## 매칭된 표준 조항
 {json.dumps(matched_standards, ensure_ascii=False, indent=2)}
@@ -543,3 +555,33 @@ AI나 모델이 판단했다는 문구 금지
             report += "상세 내용은 구조화된 데이터를 참조하시기 바랍니다."
         
         return report
+
+    def _get_user_article_content(self, user_article_no: int) -> str:
+        """
+        사용자 조항 원문 내용 추출
+        
+        Args:
+            user_article_no: 사용자 조항 번호
+            
+        Returns:
+            사용자 조항 원문 텍스트
+        """
+        if not self.user_contract_data:
+            return "N/A (사용자 계약서 데이터 없음)"
+        
+        articles = self.user_contract_data.get('articles', [])
+        
+        for article in articles:
+            if article.get('number') == user_article_no:
+                title = article.get('title', '')
+                content = article.get('content', '')
+                
+                # 조 전체 내용 구성
+                full_content = f"제{user_article_no}조"
+                if title:
+                    full_content += f"({title})"
+                full_content += f"\n{content}"
+                
+                return full_content
+        
+        return f"N/A (제{user_article_no}조 내용을 찾을 수 없음)"
