@@ -34,7 +34,7 @@ st.markdown(
     
     h2 {
         font-size: 24px !important;
-        margin-top: 2rem !important;
+        margin-top: 1rem !important;
         font-weight: 600 !important;
     }
     
@@ -307,15 +307,39 @@ def display_final_report_tab(contract_id: str):
                     if matched or checklist_results:
                         with st.expander(f"✅ {article_header}", expanded=False):
                             if matched:
-                                st.markdown("**✅ 매칭된 표준 조항:**")
+                                # A1 조 단위 매칭과 A3 항 단위 매칭 분리
+                                a1_matches = []
+                                a3_matches = []
+                                
                                 for m in matched:
-                                    std_clause_title = m.get('std_clause_title', '')
                                     std_clause_id = m.get('std_clause_id', '')
-                                    analysis = m.get('analysis', '')
                                     
-                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
-                                    if analysis and analysis != "표준 조항과 매칭됨":
-                                        st.markdown(f"> {analysis}")
+                                    # 항/호 단위 ID 판별 (":cla:" 또는 ":sub:" 포함)
+                                    if ':cla:' in std_clause_id or ':sub:' in std_clause_id:
+                                        a3_matches.append(m)
+                                    else:
+                                        a1_matches.append(m)
+                                
+                                # A1 조 단위 매칭 표시
+                                if a1_matches:
+                                    st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
+                                    for m in a1_matches:
+                                        std_clause_title = m.get('std_clause_title', '')
+                                        std_clause_id = m.get('std_clause_id', '')
+                                        analysis = m.get('analysis', '')
+                                        
+                                        st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                        if analysis and analysis != "표준 조항과 매칭됨":
+                                            st.markdown(f"> {analysis}")
+                                
+                                # A3 항 단위 매칭 표시
+                                if a3_matches:
+                                    st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
+                                    for m in a3_matches:
+                                        std_clause_title = m.get('std_clause_title', '')
+                                        std_clause_id = m.get('std_clause_id', '')
+                                        
+                                        st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
                             
                             # 체크리스트 결과 표시
                             if checklist_results:
@@ -324,18 +348,47 @@ def display_final_report_tab(contract_id: str):
                 elif insufficient or missing:
                     # 일반 조항: 문제가 있는 경우
                     with st.expander(f"⚠️ {article_header}", expanded=False):
-                        # 매칭된 조항
+                        # 매칭된 조항 (A1 조 단위 vs A3 항 단위 구분)
                         if matched:
-                            st.markdown("**✅ 매칭된 표준 조항:**")
+                            # A1 조 단위 매칭과 A3 항 단위 매칭 분리
+                            a1_matches = []
+                            a3_matches = []
+                            
                             for m in matched:
-                                std_clause_title = m.get('std_clause_title', '')
                                 std_clause_id = m.get('std_clause_id', '')
                                 analysis = m.get('analysis', '')
                                 
-                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
-                                if analysis and analysis != "표준 조항과 매칭됨":
-                                    # 들여쓰기를 위해 > 사용
-                                    st.markdown(f"> {analysis}")
+                                # 항/호 단위 ID 판별 (":cla:" 또는 ":sub:" 포함)
+                                if ':cla:' in std_clause_id or ':sub:' in std_clause_id:
+                                    # A3에서 추가된 항 단위 매칭
+                                    if 'A3 상세 분석에서 매칭됨' in analysis or analysis == "표준 조항과 매칭됨":
+                                        a3_matches.append(m)
+                                    else:
+                                        a3_matches.append(m)
+                                else:
+                                    # A1 조 단위 매칭
+                                    a1_matches.append(m)
+                            
+                            # A1 조 단위 매칭 표시
+                            if a1_matches:
+                                st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
+                                for m in a1_matches:
+                                    std_clause_title = m.get('std_clause_title', '')
+                                    std_clause_id = m.get('std_clause_id', '')
+                                    analysis = m.get('analysis', '')
+                                    
+                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                    if analysis and analysis != "표준 조항과 매칭됨":
+                                        st.markdown(f"> {analysis}")
+                            
+                            # A3 항 단위 매칭 표시
+                            if a3_matches:
+                                st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
+                                for m in a3_matches:
+                                    std_clause_title = m.get('std_clause_title', '')
+                                    std_clause_id = m.get('std_clause_id', '')
+                                    
+                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
                         
                         # 불충분한 조항
                         if insufficient:
@@ -371,15 +424,42 @@ def display_final_report_tab(contract_id: str):
                 elif matched:
                     # 문제 없는 조항 (매칭만 있음)
                     with st.expander(f"✅ {article_header}", expanded=False):
-                        st.markdown("**✅ 매칭된 표준 조항:**")
+                        # A1 조 단위 매칭과 A3 항 단위 매칭 분리
+                        a1_matches = []
+                        a3_matches = []
+                        
                         for m in matched:
-                            std_clause_title = m.get('std_clause_title', '')
                             std_clause_id = m.get('std_clause_id', '')
                             analysis = m.get('analysis', '')
                             
-                            st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
-                            if analysis and analysis != "표준 조항과 매칭됨":
-                                st.markdown(f"> {analysis}")
+                            # 항/호 단위 ID 판별 (":cla:" 또는 ":sub:" 포함)
+                            if ':cla:' in std_clause_id or ':sub:' in std_clause_id:
+                                # A3에서 추가된 항 단위 매칭
+                                a3_matches.append(m)
+                            else:
+                                # A1 조 단위 매칭
+                                a1_matches.append(m)
+                        
+                        # A1 조 단위 매칭 표시
+                        if a1_matches:
+                            st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
+                            for m in a1_matches:
+                                std_clause_title = m.get('std_clause_title', '')
+                                std_clause_id = m.get('std_clause_id', '')
+                                analysis = m.get('analysis', '')
+                                
+                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                if analysis and analysis != "표준 조항과 매칭됨":
+                                    st.markdown(f"> {analysis}")
+                        
+                        # A3 항 단위 매칭 표시
+                        if a3_matches:
+                            st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
+                            for m in a3_matches:
+                                std_clause_title = m.get('std_clause_title', '')
+                                std_clause_id = m.get('std_clause_id', '')
+                                
+                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
                         
                         # 🔥 체크리스트 결과 (디버그용)
                         if checklist_results:
@@ -602,15 +682,13 @@ def main() -> None:
     # 상단 헤더
     st.markdown(
         """
-        <div style="text-align:center; margin-top: 0.5rem;">
+        <div style="text-align:center; margin-top: 0.5rem; margin-bottom: 1rem;">
             <div style="text-align:center; font-size:3rem; font-weight:800; margin-bottom:0.5rem;">데이터 표준계약 검증</div>
-            <p style="color:#6b7280;">계약서를 업로드하고 표준계약 기반 AI분석 보고서를 확인하세요.</p>
+            <p style="color:#6b7280; margin-bottom: 0;">계약서를 업로드하고 표준계약 기반 AI분석 보고서를 확인하세요.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    
-    st.markdown('<div style="height: 3rem;"></div>', unsafe_allow_html=True)
 
     # selectbox 텍스트 커서 제거 및 기본 포인터 유지 CSS
     st.markdown("""
@@ -635,6 +713,9 @@ def main() -> None:
     file = None
     if not st.session_state.get('validation_completed', False):
         file = st.file_uploader("DOCX 파일을 업로드하세요", type=["docx"], accept_multiple_files=False)
+    else:
+        # 검증 완료 시 파일 업로더 숨김
+        file = None
 
     # session_state 초기화
     if 'uploaded_contract_data' not in st.session_state:
@@ -644,9 +725,9 @@ def main() -> None:
     if file is not None:
         st.session_state.uploaded_file = file
 
-    # 버튼 레이아웃: 파일 선택 또는 업로드 완료 시 표시
+    # 버튼 레이아웃: 파일 선택 또는 업로드 완료 시 표시 (검증 완료 상태가 아닐 때만)
     # 파일이 있거나 이미 업로드된 계약서가 있으면 버튼 표시
-    if file is not None or st.session_state.uploaded_contract_data is not None:
+    if (file is not None or st.session_state.uploaded_contract_data is not None) and not st.session_state.get('validation_completed', False):
         is_classification_done = st.session_state.get('classification_done', False)
         col_btn1, _, col_btn3 = st.columns([2, 6, 2])
 
@@ -733,12 +814,18 @@ def main() -> None:
 
         st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
 
-        # 분류 결과 - 상태 표시
-        status_placeholder = st.empty()
-        classification_spinner_placeholder = st.empty()
+        # 검증 완료 상태가 아닐 때만 상태 표시
+        if not st.session_state.get('validation_completed', False):
+            # 분류 결과 - 상태 표시
+            status_placeholder = st.empty()
+            classification_spinner_placeholder = st.empty()
+        else:
+            # 검증 완료 시 상태 표시 건너뛰기
+            status_placeholder = None
+            classification_spinner_placeholder = None
 
-        # 분류가 아직 안된 경우에만 폴링
-        if 'classification_done' not in st.session_state or not st.session_state.classification_done:
+        # 분류가 아직 안된 경우에만 폴링 (검증 완료 상태가 아닐 때만)
+        if not st.session_state.get('validation_completed', False) and ('classification_done' not in st.session_state or not st.session_state.classification_done):
             # 자동으로 분류 결과 조회
             with classification_spinner_placeholder:
                 with st.spinner("분류 작업을 진행중입니다..."):
@@ -771,21 +858,17 @@ def main() -> None:
                 status_placeholder.error(f"분류 실패: {result.get('error', '알 수 없는 오류')}")
                 st.session_state.classification_done = False
         else:
-            # 이미 분류가 완료된 경우 저장된 정보 표시
-            type_names = {
-                "provide": "데이터 제공형 계약",
-                "create": "데이터 창출형 계약",
-                "process": "데이터 가공서비스형 계약",
-                "brokerage_provider": "데이터 중개거래형 계약 (제공자-운영자)",
-                "brokerage_user": "데이터 중개거래형 계약 (이용자-운영자)"
-            }
-            predicted_type = st.session_state.predicted_type
+            # 이미 분류가 완료된 경우 저장된 정보 표시 (검증 완료 상태가 아닐 때만)
+            if not st.session_state.get('validation_completed', False) and status_placeholder is not None:
+                type_names = {
+                    "provide": "데이터 제공형 계약",
+                    "create": "데이터 창출형 계약",
+                    "process": "데이터 가공서비스형 계약",
+                    "brokerage_provider": "데이터 중개거래형 계약 (제공자-운영자)",
+                    "brokerage_user": "데이터 중개거래형 계약 (이용자-운영자)"
+                }
+                predicted_type = st.session_state.predicted_type
 
-            # 검증 상태에 따라 다른 메시지 표시
-            if st.session_state.get('validation_completed', False):
-                # 검증 완료
-                status_placeholder.success("검증 완료")
-            else:
                 # 분류 완료 (검증 전 또는 검증 진행 중)
                 if st.session_state.get('user_modified', False):
                     status_placeholder.success(f"분류 완료: **{type_names.get(predicted_type, predicted_type)}** (선택)")
@@ -1042,13 +1125,25 @@ def main() -> None:
                 
                 st.markdown("---")
                 
-                # 조항 선택 UI (가로 스크롤)
-                display_article_selector(contract_id, uploaded_data)
+                # 탭으로 구분된 UI
+                tab1, tab2, tab3 = st.tabs(["📋 조항별 분석", "📄 전체 계약서", "📊 요약 통계"])
                 
-                st.markdown("---")
+                with tab1:
+                    # 조항 선택 UI (가로 스크롤)
+                    display_article_selector(contract_id, uploaded_data)
+                    
+                    st.markdown("---")
+                    
+                    # 선택된 조항의 내용 + 분석 표시
+                    display_selected_article_content(contract_id, uploaded_data)
                 
-                # 선택된 조항의 내용 + 분석 표시
-                display_selected_article_content(contract_id, uploaded_data)
+                with tab2:
+                    # 전체 계약서 보기
+                    display_full_contract_view(contract_id, uploaded_data)
+                
+                with tab3:
+                    # 요약 통계 표시
+                    display_summary_statistics(contract_id)
                 
             elif report_generating:
                 st.info("📝 최종 보고서 생성 중입니다...")
@@ -1236,6 +1331,191 @@ def display_selected_article_content(contract_id: str, uploaded_data: dict):
     
     except Exception as e:
         st.error(f"조항 내용 표시 중 오류: {str(e)}")
+
+
+def display_full_contract_view(contract_id: str, uploaded_data: dict):
+    """
+    전체 계약서 보기 (2단 레이아웃)
+    - 왼쪽: 사용자 계약서 전체 내용
+    - 오른쪽: 전체 종합 분석
+    
+    Args:
+        contract_id: 계약서 ID
+        uploaded_data: 업로드된 계약서 데이터
+    """
+    try:
+        # 보고서 데이터 로드
+        report_url = f"http://localhost:8000/api/report/{contract_id}"
+        response = requests.get(report_url, timeout=60)
+        
+        if response.status_code != 200:
+            st.error("보고서를 불러올 수 없습니다.")
+            return
+        
+        report = response.json()
+        user_articles = report.get('user_articles', [])
+        
+        # 2단 레이아웃
+        left_col, right_col = st.columns([1, 1])
+        
+        # 왼쪽: 전체 계약서 내용
+        with left_col:
+            st.markdown("### 📄 사용자 계약서 전체")
+            
+            structured_data = uploaded_data.get('structured_data', {})
+            
+            # 전체 내용을 하나의 텍스트로 구성
+            full_content = []
+            
+            # 서문
+            preamble = structured_data.get('preamble', [])
+            if preamble:
+                full_content.append("=" * 50)
+                full_content.append("서문")
+                full_content.append("=" * 50)
+                full_content.extend(preamble)
+                full_content.append("")
+            
+            # 모든 조항
+            articles = structured_data.get('articles', [])
+            for idx, article in enumerate(articles, 1):
+                full_content.append("=" * 50)
+                full_content.append(article.get('text', f'제{idx}조'))
+                full_content.append("=" * 50)
+                
+                # 하위 항목들
+                sub_items = article.get('sub_items', [])
+                for sub_item in sub_items:
+                    item_text = sub_item.get('text', '')
+                    if item_text:
+                        full_content.append(item_text)
+                
+                full_content.append("")
+            
+            # 스크롤 가능한 텍스트 영역으로 표시
+            full_text = '\n'.join(full_content)
+            st.text_area("", value=full_text, height=700, disabled=True, key="full_contract", label_visibility="collapsed")
+        
+        # 오른쪽: 전체 종합 분석
+        with right_col:
+            st.markdown("### 📊 전체 종합 분석")
+            
+            # 스크롤 가능한 컨테이너
+            analysis_content = []
+            
+            # 요약 통계
+            summary = report.get('summary', {})
+            analysis_content.append("## 📈 요약 통계\n")
+            analysis_content.append(f"- **전체 조항**: {summary.get('total', 0)}개")
+            analysis_content.append(f"- **충족**: {summary.get('sufficient', 0)}개")
+            analysis_content.append(f"- **불충분**: {summary.get('insufficient', 0)}개")
+            analysis_content.append(f"- **누락**: {summary.get('missing', 0)}개")
+            analysis_content.append("\n---\n")
+            
+            # 각 조항별 분석 요약
+            analysis_content.append("## 📋 조항별 분석 요약\n")
+            for article in user_articles:
+                user_article_no = article.get('user_article_no', 0)
+                user_article_title = article.get('user_article_title', '')
+                narrative_report = article.get('narrative_report', '')
+                
+                if user_article_no == 0:
+                    analysis_content.append("### 📄 서문\n")
+                else:
+                    analysis_content.append(f"### {user_article_title}\n")
+                
+                if narrative_report:
+                    analysis_content.append(narrative_report)
+                else:
+                    analysis_content.append("*분석 결과가 아직 생성되지 않았습니다.*")
+                
+                analysis_content.append("\n---\n")
+            
+            # 전체 누락 조항
+            overall_missing = report.get('overall_missing_clauses', [])
+            if overall_missing:
+                analysis_content.append(f"## ❌ 전체 누락 조항 ({len(overall_missing)}개)\n")
+                for item in overall_missing:
+                    std_clause_title = item.get('std_clause_title', '')
+                    std_clause_id = item.get('std_clause_id', '')
+                    analysis = item.get('analysis', '')
+                    
+                    analysis_content.append(f"### 🔴 {std_clause_title}\n")
+                    analysis_content.append(f"**ID**: `{std_clause_id}`\n")
+                    if analysis:
+                        analysis_content.append(analysis)
+                    analysis_content.append("\n")
+            
+            # 마크다운으로 표시 (스크롤 가능)
+            full_analysis = '\n'.join(analysis_content)
+            st.markdown(
+                f'<div style="height: 700px; overflow-y: auto; padding: 1rem; background-color: #1e1e1e; border-radius: 0.5rem;">{full_analysis}</div>',
+                unsafe_allow_html=True
+            )
+    
+    except Exception as e:
+        st.error(f"전체 계약서 보기 표시 중 오류: {str(e)}")
+
+
+def display_summary_statistics(contract_id: str):
+    """
+    요약 통계 탭 표시
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    try:
+        report_url = f"http://localhost:8000/api/report/{contract_id}"
+        response = requests.get(report_url, timeout=60)
+        
+        if response.status_code != 200:
+            st.error("보고서를 불러올 수 없습니다.")
+            return
+        
+        report = response.json()
+        summary = report.get('summary', {})
+        
+        st.markdown("### 📈 전체 요약")
+        
+        # 메트릭 카드
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("전체 조항", f"{summary.get('total', 0)}개")
+        
+        with col2:
+            sufficient = summary.get('sufficient', 0)
+            st.metric("충족", f"{sufficient}개", delta=None, delta_color="normal")
+        
+        with col3:
+            insufficient = summary.get('insufficient', 0)
+            st.metric("불충분", f"{insufficient}개", delta=f"-{insufficient}" if insufficient > 0 else None, delta_color="inverse")
+        
+        with col4:
+            missing = summary.get('missing', 0)
+            st.metric("누락", f"{missing}개", delta=f"-{missing}" if missing > 0 else None, delta_color="inverse")
+        
+        st.markdown("---")
+        
+        # 전체 누락 조항
+        overall_missing = report.get('overall_missing_clauses', [])
+        if overall_missing:
+            st.markdown(f"### ❌ 전체 계약서에서 누락된 조항 ({len(overall_missing)}개)")
+            
+            for item in overall_missing:
+                std_clause_id = item.get('std_clause_id', '')
+                std_clause_title = item.get('std_clause_title', '')
+                analysis = item.get('analysis', '')
+                
+                with st.expander(f"🔴 {std_clause_title}"):
+                    st.markdown(f"**ID**: `{std_clause_id}`")
+                    if analysis:
+                        st.markdown(analysis)
+        else:
+            st.success("✅ 누락된 조항이 없습니다!")
+    
+    except Exception as e:
+        st.error(f"요약 통계 표시 중 오류: {str(e)}")
 
 
 def display_contract_analysis_layout(contract_id: str, uploaded_data: dict):

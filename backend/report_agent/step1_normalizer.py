@@ -79,52 +79,13 @@ class Step1Normalizer:
             overall_missing = self._remove_duplicates(overall_missing, user_articles)
             logger.info(f"중복 제거 후: 전역 누락 {len(overall_missing)}개")
             
-            # 서문(제0조) 처리: 누락과 불충분 모두 overall_missing으로 이동
-            preamble_key = "user_article_0"
-            preamble_analysis_map = {}  # 서문 항목의 analysis 저장
-            
-            if preamble_key in user_articles:
-                preamble_insufficient = user_articles[preamble_key].get("insufficient", [])
-                preamble_missing = user_articles[preamble_key].get("missing", [])
-                
-                logger.info(f"[Step1] 서문 처리 전: insufficient={len(preamble_insufficient)}, missing={len(preamble_missing)}")
-                
-                # 누락 항목을 overall_missing으로 이동
-                for item in preamble_missing:
-                    std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
-                    analysis = item.get("analysis", "") if isinstance(item, dict) else ""
-                    
-                    if std_clause_id and std_clause_id not in overall_missing:
-                        overall_missing.append(std_clause_id)
-                        # analysis 매핑 저장
-                        if analysis:
-                            preamble_analysis_map[std_clause_id] = analysis
-                        logger.debug(f"  → overall_missing에 추가 (누락): {std_clause_id}")
-                
-                # 불충분 항목도 overall_missing으로 이동
-                for item in preamble_insufficient:
-                    std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
-                    analysis = item.get("analysis", "") if isinstance(item, dict) else ""
-                    
-                    if std_clause_id and std_clause_id not in overall_missing:
-                        overall_missing.append(std_clause_id)
-                        # analysis 매핑 저장
-                        if analysis:
-                            preamble_analysis_map[std_clause_id] = analysis
-                        logger.debug(f"  → overall_missing에 추가 (불충분): {std_clause_id}")
-                
-                # 서문에서 누락과 불충분 모두 제거
-                user_articles[preamble_key]["missing"] = []
-                user_articles[preamble_key]["insufficient"] = []
-                
-                total_moved = len(preamble_missing) + len(preamble_insufficient)
-                if total_moved > 0:
-                    logger.info(f"[Step1] 서문의 누락/불충분 항목 {total_moved}개를 overall_missing으로 이동 완료")
+            # 서문(제0조) 처리는 Step3 충돌 해소 후로 연기
+            # 이유: 서문의 항목이 다른 조항에서 충족될 수 있음
+            logger.info("[Step1] 서문 처리는 Step3 충돌 해소 후로 연기")
             
             result = {
                 "overall_missing_clauses": overall_missing,
-                "user_articles": user_articles,
-                "preamble_analysis_map": preamble_analysis_map  # 서문 analysis 전달
+                "user_articles": user_articles
             }
             
             logger.info("Step 1 정규화 완료")
@@ -160,54 +121,42 @@ class Step1Normalizer:
         """
         A1 matching_details에서 매칭된 표준 조항 추출
         
+        ⚠️ 변경: A1 조 단위 매칭은 제거하고, A3 항 단위 매칭만 사용
+        이유:
+        - A1 조 단위는 A3 항 단위와 중복
+        - A3가 더 정확하고 상세함
+        - LLM 프롬프트 토큰 절약
+        
         Args:
             a1_result: A1 노드 결과
             
         Returns:
-            user_articles 딕셔너리
+            빈 user_articles 딕셔너리 (A3에서 채워짐)
         """
         user_articles = {}
         
+        # A1 매칭 결과는 사용하지 않음
+        # A3에서 항 단위 매칭만 사용
+        logger.info("A1 조 단위 매칭 스킵 (A3 항 단위 매칭만 사용)")
+        
+        # 매칭된 사용자 조항 목록만 초기화
         for detail in a1_result.get("matching_details", []):
             if detail.get("matched"):
                 user_article_no = f"user_article_{detail['user_article_no']}"
-                matched_ids = detail.get("matched_articles_global_ids", [])
-                
-                # verification_details에서 reasoning 추출
-                matched_with_reasoning = []
-                verification_details = detail.get("verification_details", [])
-                
-                for std_id in matched_ids:
-                    # 해당 std_id의 reasoning 찾기
-                    reasoning = ""
-                    for verification in verification_details:
-                        candidate_id = verification.get("candidate_id", "")
-                        if candidate_id in std_id or std_id.endswith(candidate_id):
-                            if verification.get("is_match"):
-                                reasoning = verification.get("reasoning", "")
-                                logger.debug(f"  {std_id}: reasoning 발견 - {reasoning[:50]}...")
-                                break
-                    
-                    if not reasoning:
-                        logger.warning(f"  {std_id}: reasoning 없음 (verification_details: {len(verification_details)}개)")
-                    
-                    matched_with_reasoning.append({
-                        "std_clause_id": std_id,
-                        "analysis": reasoning if reasoning else "표준 조항과 매칭됨"
-                    })
-                
                 user_articles[user_article_no] = {
-                    "matched": matched_with_reasoning,
+                    "matched": [],
                     "insufficient": [],
                     "missing": []
                 }
-                logger.debug(f"{user_article_no}: 매칭된 조항 {len(matched_ids)}개")
         
         return user_articles
     
     def _parse_a3_results(self, a3_result: Dict[str, Any], user_articles: Dict[str, Dict], contract_type: str):
         """
-        A3 결과를 user_articles에 추가 (matched, insufficient, missing)
+        A3 결과를 user_articles에 추가 (insufficient, missing 먼저, 그 다음 matched)
+        
+        순서가 중요: A3 insufficient/missing을 먼저 파싱하고, 
+        그 다음에 A1 matched를 추가하면서 중복 체크
         
         Args:
             a3_result: A3 노드 결과
@@ -223,6 +172,119 @@ class Step1Normalizer:
                     "insufficient": [],
                     "missing": []
                 }
+            
+            # ========================================
+            # STEP 1: A3 insufficient/missing 먼저 파싱
+            # ========================================
+            logger.info(f"{user_article_no}: A3 insufficient/missing 파싱 시작")
+            
+            # sub_items 매핑 생성
+            sub_items_by_global_id = {}
+            
+            # 기존 sub_items 방식 (하위 호환성)
+            for matched in article.get("matched_articles", []):
+                for sub_item in matched.get("sub_items", []):
+                    idx = sub_item.get("index")
+                    matched_chunks = matched.get("matched_chunks", [])
+                    if idx is not None and idx < len(matched_chunks):
+                        chunk_global_id = matched_chunks[idx].get("global_id")
+                        if chunk_global_id:
+                            sub_items_by_global_id[chunk_global_id] = sub_item
+            
+            # A3 suggestions에서 데이터 추출 (우선순위: suggestions > sub_items)
+            for suggestion in article.get("suggestions", []):
+                # missing_items 처리
+                for item in suggestion.get("missing_items", []):
+                    std_article = item.get("std_article", "")
+                    std_clause = item.get("std_clause", "")
+                    reason = item.get("reason", "")
+                    
+                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                    if global_id and reason:
+                        sub_items_by_global_id[global_id] = {
+                            "fidelity": "missing",
+                            "summary": reason
+                        }
+                        logger.info(f"    A3 missing: {global_id}")
+                
+                # insufficient_items 처리
+                for item in suggestion.get("insufficient_items", []):
+                    std_article = item.get("std_article", "")
+                    std_clause = item.get("std_clause", "")
+                    reason = item.get("reason", "")
+                    
+                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                    if global_id and reason:
+                        sub_items_by_global_id[global_id] = {
+                            "fidelity": "insufficient",
+                            "summary": reason
+                        }
+                        logger.info(f"    A3 insufficient: {global_id}")
+            
+            # missing/insufficient을 user_articles에 추가
+            suggestions = article.get("suggestions", [])
+            for suggestion in suggestions:
+                # missing_items
+                missing_items = suggestion.get("missing_items", [])
+                for item in missing_items:
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            sub_item = sub_items_by_global_id.get(global_id)
+                            if sub_item and sub_item.get("fidelity") == "missing":
+                                summary = sub_item.get("summary", "")
+                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                            else:
+                                analysis = f"{std_article} {std_clause}: {reason}"
+                            
+                            user_articles[user_article_no]["missing"].append({
+                                "std_clause_id": global_id,
+                                "analysis": analysis
+                            })
+                    elif isinstance(item, str):
+                        user_articles[user_article_no]["missing"].append({
+                            "std_clause_id": item,
+                            "analysis": item
+                        })
+                
+                # insufficient_items
+                insufficient_items = suggestion.get("insufficient_items", [])
+                for item in insufficient_items:
+                    if isinstance(item, dict):
+                        std_article = item.get("std_article", "")
+                        std_clause = item.get("std_clause", "")
+                        reason = item.get("reason", "")
+                        
+                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
+                        if global_id:
+                            sub_item = sub_items_by_global_id.get(global_id)
+                            if sub_item and sub_item.get("fidelity") == "insufficient":
+                                summary = sub_item.get("summary", "")
+                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
+                            else:
+                                analysis = f"{std_article} {std_clause}: {reason}"
+                            
+                            user_articles[user_article_no]["insufficient"].append({
+                                "std_clause_id": global_id,
+                                "analysis": analysis
+                            })
+                    elif isinstance(item, str):
+                        user_articles[user_article_no]["insufficient"].append({
+                            "std_clause_id": item,
+                            "analysis": item
+                        })
+            
+            logger.info(f"{user_article_no}: A3 insufficient {len(user_articles[user_article_no]['insufficient'])}개, "
+                       f"missing {len(user_articles[user_article_no]['missing'])}개 추가 완료")
+            
+            # ========================================
+            # STEP 2: A1 matched 추가 (중복 체크)
+            # ========================================
+            logger.info(f"{user_article_no}: A1 matched 파싱 시작 (A3 insufficient/missing 제외)")
             
             # A3 matched_articles 추가 (항 단위로 분해)
             if article.get("matched_articles"):
@@ -306,130 +368,7 @@ class Step1Normalizer:
                                     "analysis": "A3 상세 분석에서 매칭됨"
                                 })
             
-            # insufficient/missing 파싱 (JSON 구조)
-            # A3 suggestions에서 insufficient_items와 missing_items를 수집 (reason 활용)
-            # A3는 sub_items가 아닌 suggestions 구조를 사용함
-            sub_items_by_global_id = {}
-            
-            # 기존 sub_items 방식도 유지 (하위 호환성)
-            for matched in article.get("matched_articles", []):
-                for sub_item in matched.get("sub_items", []):
-                    # 각 sub_item의 global_id 찾기
-                    idx = sub_item.get("index")
-                    matched_chunks = matched.get("matched_chunks", [])
-                    if idx is not None and idx < len(matched_chunks):
-                        chunk_global_id = matched_chunks[idx].get("global_id")
-                        if chunk_global_id:
-                            sub_items_by_global_id[chunk_global_id] = sub_item
-                            logger.debug(f"    sub_item 매핑: {chunk_global_id} -> {sub_item.get('fidelity')} ({sub_item.get('summary', '')[:50]})")
-            
-            # A3 suggestions에서 데이터 추출 (우선순위: suggestions > sub_items)
-            for suggestion in article.get("suggestions", []):
-                # missing_items 처리
-                for item in suggestion.get("missing_items", []):
-                    std_article = item.get("std_article", "")
-                    std_clause = item.get("std_clause", "")
-                    reason = item.get("reason", "")
-                    
-                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
-                    if global_id and reason:
-                        sub_items_by_global_id[global_id] = {
-                            "fidelity": "missing",
-                            "summary": reason
-                        }
-                        logger.info(f"    A3 missing: {global_id} -> reason 사용 (suggestions)")
-                
-                # insufficient_items 처리
-                for item in suggestion.get("insufficient_items", []):
-                    std_article = item.get("std_article", "")
-                    std_clause = item.get("std_clause", "")
-                    reason = item.get("reason", "")
-                    
-                    global_id = self._map_to_global_id(std_article, std_clause, contract_type)
-                    if global_id and reason:
-                        sub_items_by_global_id[global_id] = {
-                            "fidelity": "insufficient",
-                            "summary": reason
-                        }
-                        logger.info(f"    A3 insufficient: {global_id} -> reason 사용 (suggestions)")
-            
-            suggestions = article.get("suggestions", [])
-            for suggestion in suggestions:
-                # missing_items는 이제 JSON 객체 리스트
-                missing_items = suggestion.get("missing_items", [])
-                for item in missing_items:
-                    if isinstance(item, dict):
-                        # JSON 구조: {"std_article": "제X조", "std_clause": "제Y항", "reason": "..."}
-                        std_article = item.get("std_article", "")
-                        std_clause = item.get("std_clause", "")
-                        reason = item.get("reason", "")
-                        
-                        # global_id 매핑
-                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
-                        if global_id:
-                            # A3 sub_items에서 summary 찾기
-                            sub_item = sub_items_by_global_id.get(global_id)
-                            if sub_item and sub_item.get("fidelity") == "missing":
-                                summary = sub_item.get("summary", "")
-                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
-                                logger.info(f"    missing: {global_id} -> A3 summary 사용")
-                            else:
-                                analysis = f"{std_article} {std_clause}: {reason}"
-                                logger.info(f"    missing: {global_id} -> reason 사용 (sub_item 없음)")
-                            
-                            user_articles[user_article_no]["missing"].append({
-                                "std_clause_id": global_id,
-                                "analysis": analysis
-                            })
-                        else:
-                            logger.warning(f"{user_article_no}: global_id 매핑 실패: {std_article} {std_clause}")
-                    elif isinstance(item, str):
-                        # Fallback: 텍스트 형식 (하위 호환성)
-                        logger.warning(f"{user_article_no}: 텍스트 형식 감지 (JSON 권장): {item[:50]}...")
-                        user_articles[user_article_no]["missing"].append({
-                            "std_clause_id": item,
-                            "analysis": item
-                        })
-                
-                logger.debug(f"{user_article_no}: missing {len(missing_items)}개 추가")
-                
-                # insufficient_items도 동일하게 처리
-                insufficient_items = suggestion.get("insufficient_items", [])
-                for item in insufficient_items:
-                    if isinstance(item, dict):
-                        # JSON 구조
-                        std_article = item.get("std_article", "")
-                        std_clause = item.get("std_clause", "")
-                        reason = item.get("reason", "")
-                        
-                        # global_id 매핑
-                        global_id = self._map_to_global_id(std_article, std_clause, contract_type)
-                        if global_id:
-                            # A3 sub_items에서 summary 찾기
-                            sub_item = sub_items_by_global_id.get(global_id)
-                            if sub_item and sub_item.get("fidelity") == "insufficient":
-                                summary = sub_item.get("summary", "")
-                                analysis = summary if summary else f"{std_article} {std_clause}: {reason}"
-                                logger.info(f"    insufficient: {global_id} -> A3 summary 사용")
-                            else:
-                                analysis = f"{std_article} {std_clause}: {reason}"
-                                logger.info(f"    insufficient: {global_id} -> reason 사용 (sub_item 없음)")
-                            
-                            user_articles[user_article_no]["insufficient"].append({
-                                "std_clause_id": global_id,
-                                "analysis": analysis
-                            })
-                        else:
-                            logger.warning(f"{user_article_no}: global_id 매핑 실패: {std_article} {std_clause}")
-                    elif isinstance(item, str):
-                        # Fallback: 텍스트 형식
-                        logger.warning(f"{user_article_no}: 텍스트 형식 감지 (JSON 권장): {item[:50]}...")
-                        user_articles[user_article_no]["insufficient"].append({
-                            "std_clause_id": item,
-                            "analysis": item
-                        })
-                
-                logger.debug(f"{user_article_no}: insufficient {len(insufficient_items)}개 추가")
+            logger.info(f"{user_article_no}: A1 matched {len(user_articles[user_article_no]['matched'])}개 추가 완료")
     
     def _merge_a3_recovered_results(self, a3_recovered_result: Dict[str, Any], 
                                     user_articles: Dict[str, Dict], contract_type: str):

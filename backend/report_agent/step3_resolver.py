@@ -13,86 +13,10 @@ from backend.report_agent.exceptions import LLMVerificationError
 logger = logging.getLogger(__name__)
 
 
-# LLM 충돌 해소 프롬프트
-CONFLICT_RESOLUTION_PROMPT = """
-당신은 데이터 표준계약서 검증 전문가입니다.
-
-동일한 표준 조항 "{std_clause_id}"에 대해 여러 평가가 있습니다.
-이 평가들의 관계를 분석하고 최종 판단을 내려주세요.
-
-**평가 내역:**
-{evaluations}
-
-**판단 기준:**
-
-1. **서로 다른 사용자 조항**: 각각 독립적인 사실
-   - 예: user_article_3 (sufficient) vs user_article_9 (missing)
-   - 의미: "제3조에는 있지만 제9조에는 없다"
-   - 해결: **keep_all** (둘 다 사실이므로 모두 유지)
-
-2. **부분 매칭 (Partial Match)**: 같은 사용자 조항, 일부만 충족
-   - 예: user_article_5 (sufficient) vs user_article_5 (missing)
-   - 분석 내용이 서로 다른 측면을 다룸:
-     * sufficient: "일부 내용(A, B)은 포함됨"
-     * missing: "다른 내용(C, D)은 누락됨"
-   - 의미: 표준 조항의 일부는 있고 일부는 없음
-   - 해결: **keep_all** (부분 매칭이므로 둘 다 유지)
-
-3. **품질 문제**: 같은 사용자 조항, 내용은 있으나 불충분
-   - 예: user_article_5 (sufficient) vs user_article_5 (insufficient)
-   - 의미: "내용은 있지만 품질이 부족함"
-   - 해결: **keep_insufficient** (더 정확한 평가)
-
-4. **진짜 충돌**: 같은 사용자 조항, 같은 내용에 대한 상반된 판단
-   - 예: user_article_5 (sufficient: "제5조에 X가 있음") vs user_article_5 (missing: "제5조에 X가 없음")
-   - 의미: 완전히 모순되는 판단
-   - 해결: 더 정확한 평가 하나만 선택
-
-**부분 매칭 판단 핵심**:
-분석 내용을 자세히 읽고 다음을 확인하세요:
-
-1. **sufficient 평가 (A1 매칭 결과)**:
-   - "사용자 조항이 표준 조항과 매칭됨" (전체적 판단)
-   - 어떤 내용이 포함되었는지 확인
-
-2. **missing/insufficient 평가 (A3 상세 분석)**:
-   - "특정 내용이 누락/불충분함" (세부적 판단)
-   - 어떤 내용이 문제인지 확인
-
-3. **판단 기준**:
-   - missing 분석에 **"일부", "특정", "~에 대한"** 등의 표현이 있으면:
-     → **keep_all** (부분 매칭: 일부는 있고 일부는 없음)
-   
-   - missing 분석이 **"전체", "완전히", "모든"** 등을 언급하면:
-     → **keep_missing** (A1 오류: 실제로는 매칭 안 됨)
-   
-   - insufficient 평가라면:
-     → **keep_insufficient** (내용은 있으나 품질 문제)
-
-**예시**:
-- "제10조 제2항 내용이 누락" → keep_all (일부 누락)
-- "제10조 전체 내용이 없음" → keep_missing (완전 누락)
-- "제10조 내용이 불충분함" → keep_insufficient (품질 문제)
-
-**응답 형식 (JSON만 출력):**
-```json
-{{
-  "is_contradiction": true | false,
-  "resolution": "keep_all" | "keep_sufficient" | "keep_insufficient" | "keep_missing",
-  "reasoning": "판단 근거 (한글로 상세히 설명)"
-}}
-```
-
-**resolution 설명:**
-- "keep_all": 서로 다른 사실 또는 부분 매칭 (모든 평가 유지)
-- "keep_sufficient": 진짜 충돌이며, sufficient 평가가 정확함
-- "keep_insufficient": 진짜 충돌이며, insufficient 평가가 정확함
-- "keep_missing": 진짜 충돌이며, missing 평가가 정확함
-
-**중요**: 
-- 대부분의 경우 "keep_all"입니다 (서로 다른 조항 또는 부분 매칭)
-- 진짜 충돌은 매우 드뭅니다
-"""
+# LLM 충돌 해소 프롬프트 제거 (더 이상 사용하지 않음)
+# 새로운 규칙:
+# 1. 같은 조항 충돌 → 무시 (A1 조 vs A3 항 계층 문제)
+# 2. 다른 조항 충돌 → 우선순위 자동 해소 (sufficient > insufficient > missing)
 
 
 class Step3Resolver:
@@ -154,6 +78,7 @@ class Step3Resolver:
         conflict_count = 0
         llm_resolved_count = 0
         auto_resolved_count = 0
+        ignored_count = 0  # 같은 조항 충돌 (무시)
         aggregated = step2_result.get("aggregated", step2_result)  # 하위 호환성
         
         for std_clause_id, data in aggregated.items():
@@ -162,72 +87,81 @@ class Step3Resolver:
                 
                 # 자동 해소 규칙
                 statuses = {e["status"] for e in data["evaluations"]}
+                user_articles = {e["user_article"] for e in data["evaluations"]}
                 
-                # 규칙 1: sufficient/insufficient + missing
-                if "missing" in statuses and len(statuses) > 1:
-                    # 같은 user_article인지 확인
-                    user_articles = {e["user_article"] for e in data["evaluations"]}
-                    
-                    if len(user_articles) == 1:
-                        # 같은 조항 → 모순 (A1: sufficient, A3: missing)
-                        # A3가 더 정확하므로 missing만 유지
-                        logger.info(f"자동 해소: {std_clause_id} (같은 조항의 sufficient + missing → missing 우선)")
-                        missing_evals = [e for e in data["evaluations"] if e["status"] == "missing"]
-                        for evaluation in missing_evals:
-                            user_article_no = evaluation["user_article"]
-                            if user_article_no in resolved["user_articles"]:
-                                resolved["user_articles"][user_article_no]["missing"].append({
-                                    "std_clause_id": std_clause_id,
-                                    "analysis": evaluation.get("analysis", "")
-                                })
-                        auto_resolved_count += 1
-                    else:
-                        # 다른 조항 → 불충분 (일부는 있고 일부는 없음)
-                        logger.info(f"자동 해소: {std_clause_id} (다른 조항의 {statuses} → insufficient)")
-                        # missing을 insufficient로 변환
-                        for evaluation in data["evaluations"]:
-                            if evaluation["status"] == "missing":
-                                evaluation["status"] = "insufficient"
-                                # 분석 텍스트에 [누락됨] 표시
-                                if not evaluation.get("analysis", "").startswith("[누락됨]"):
-                                    evaluation["analysis"] = f"[누락됨] {evaluation.get('analysis', '')}"
-                        # 이제 모두 insufficient → LLM 선택
-                        self._resolve_insufficient_duplicates(resolved, std_clause_id, data)
-                        auto_resolved_count += 1
+                # 규칙 1: 같은 조항 충돌 → 무시 (계층 문제: A1 조 vs A3 항)
+                if len(user_articles) == 1:
+                    logger.info(f"충돌 무시: {std_clause_id} (같은 조항 충돌 - A1 조 vs A3 항 계층 문제)")
+                    ignored_count += 1
+                    # 충돌 없는 것처럼 처리 (첫 번째 평가만 사용)
+                    final_status = data["evaluations"][0]["status"]
+                    self._apply_resolution(resolved, std_clause_id, data, final_status)
+                    continue
                 
-                # 규칙 2: insufficient만 있는 경우 → LLM 선택
-                elif statuses == {"insufficient"}:
-                    logger.info(f"자동 해소: {std_clause_id} (insufficient + insufficient → LLM 선택)")
+                # 규칙 2: 다른 조항 + sufficient 있음 → sufficient만 유지
+                if "sufficient" in statuses:
+                    logger.info(f"자동 해소: {std_clause_id} (다른 조항, sufficient 우선)")
+                    # sufficient 평가만 유지 (문제 없음이므로 아무것도 추가 안 함)
+                    auto_resolved_count += 1
+                    continue
+                
+                # 규칙 3: 다른 조항 + insufficient vs missing → insufficient 우선
+                if "insufficient" in statuses and "missing" in statuses:
+                    logger.info(f"자동 해소: {std_clause_id} (다른 조항, insufficient 우선)")
+                    # insufficient 평가만 유지
+                    insufficient_evals = [e for e in data["evaluations"] if e["status"] == "insufficient"]
+                    for evaluation in insufficient_evals:
+                        user_article_no = evaluation["user_article"]
+                        if user_article_no in resolved["user_articles"]:
+                            resolved["user_articles"][user_article_no]["insufficient"].append({
+                                "std_clause_id": std_clause_id,
+                                "analysis": evaluation.get("analysis", "")
+                            })
+                    auto_resolved_count += 1
+                    continue
+                
+                # 규칙 4: 다른 조항 + insufficient vs insufficient → LLM 선택
+                if statuses == {"insufficient"}:
+                    logger.info(f"자동 해소: {std_clause_id} (다른 조항, insufficient 중복 → LLM 선택)")
                     self._resolve_insufficient_duplicates(resolved, std_clause_id, data)
                     auto_resolved_count += 1
+                    continue
                 
-                else:
-                    # LLM 충돌 해소
-                    resolution = self._resolve_conflict_with_llm(std_clause_id, data)
-                    
-                    if resolution["resolution"] == "keep_all":
-                        # 모든 평가 유지 (서로 다른 사실)
-                        self._apply_resolution_keep_all(resolved, std_clause_id, data)
-                        llm_resolved_count += 1
-                    else:
-                        # 하나만 선택 (진짜 충돌)
-                        final_status = self._map_resolution_to_status(resolution["resolution"])
-                        self._apply_resolution(resolved, std_clause_id, data, final_status)
+                # 규칙 5: 다른 조항 + missing vs missing → 첫 번째만 유지
+                if statuses == {"missing"}:
+                    logger.info(f"자동 해소: {std_clause_id} (다른 조항, missing 중복 → 첫 번째만 유지)")
+                    evaluation = data["evaluations"][0]
+                    user_article_no = evaluation["user_article"]
+                    if user_article_no in resolved["user_articles"]:
+                        resolved["user_articles"][user_article_no]["missing"].append({
+                            "std_clause_id": std_clause_id,
+                            "analysis": evaluation.get("analysis", "")
+                        })
+                    auto_resolved_count += 1
+                    continue
+                
+                # 예외: 알 수 없는 충돌 패턴 (로그만)
+                logger.warning(f"알 수 없는 충돌 패턴: {std_clause_id} (statuses={statuses}, user_articles={len(user_articles)})")
+                # 첫 번째 평가 사용
+                final_status = data["evaluations"][0]["status"]
+                self._apply_resolution(resolved, std_clause_id, data, final_status)
             else:
                 # 충돌 없음 - 단일 상태 사용
                 final_status = data["evaluations"][0]["status"]
                 self._apply_resolution(resolved, std_clause_id, data, final_status)
         
         logger.info(f"충돌 해소 완료: {conflict_count}개 충돌 처리 "
-                   f"(자동 해소: {auto_resolved_count}개, LLM 해소: {llm_resolved_count}개)")
+                   f"(무시: {ignored_count}개, 자동 해소: {auto_resolved_count}개, LLM 해소: {llm_resolved_count}개)")
+        
+        # 서문(제0조) 처리: 충돌 해소 후 남은 항목만 overall_missing으로 이동
+        preamble_analysis_map = self._process_preamble(resolved)
+        logger.info("서문 처리 완료")
         
         # A3 원본 분석 텍스트 첨부
         self._attach_analysis_text(resolved, a3_result)
         logger.info("A3 원본 분석 텍스트 첨부 완료")
         
         # overall_missing_clauses에 분석 텍스트 추가
-        # Step1에서 전달된 preamble_analysis_map 사용
-        preamble_analysis_map = step1_result.get("preamble_analysis_map", {})
         self._generate_overall_missing_analysis(resolved, preamble_analysis_map)
         logger.info("전역 누락 조항 분석 생성 완료")
         
@@ -235,165 +169,66 @@ class Step3Resolver:
         return resolved
     
 
-    def _resolve_conflict_with_llm(self, std_clause_id: str, conflict_data: Dict) -> Dict:
+    def _process_preamble(self, resolved: Dict) -> Dict[str, str]:
         """
-        LLM을 사용한 충돌 해소
+        서문(제0조) 처리: 충돌 해소 후 남은 항목만 overall_missing으로 이동
         
         Args:
-            std_clause_id: 표준 조항 ID
-            conflict_data: 충돌 데이터
+            resolved: 충돌 해소 결과
             
         Returns:
-            {
-                "is_contradiction": bool,
-                "resolution": str,
-                "reasoning": str
-            }
+            preamble_analysis_map: 서문 항목의 analysis 매핑
         """
-        # 충돌 정보 로깅
-        logger.info(f"충돌 분석 시작: {std_clause_id}")
-        logger.info(f"  - 평가 개수: {len(conflict_data['evaluations'])}개")
-        for eval in conflict_data["evaluations"]:
-            logger.info(f"    * {eval['user_article']}: {eval['status']}")
+        preamble_key = "user_article_0"
+        preamble_analysis_map = {}
         
-        # 평가 내역 포맷팅
-        evaluations_text = ""
-        for i, eval in enumerate(conflict_data["evaluations"], 1):
-            user_article = eval["user_article"]
-            status = eval["status"]
-            analysis = eval.get("analysis", "")
-            
-            status_kr = {
-                "sufficient": "충족",
-                "insufficient": "불충분",
-                "missing": "누락"
-            }.get(status, status)
-            
-            # 사용자 조항 내용 가져오기
-            user_article_no = int(user_article.replace("user_article_", ""))
-            user_article_content = self._get_user_article_content(user_article_no)
-            
-            evaluations_text += f"\n평가 {i}:\n"
-            evaluations_text += f"  - 사용자 조항: {user_article}\n"
-            evaluations_text += f"  - 사용자 조항 내용:\n{user_article_content}\n"
-            evaluations_text += f"  - 상태: {status_kr}\n"
-            evaluations_text += f"  - 분석: {analysis[:300]}...\n"
+        if preamble_key not in resolved["user_articles"]:
+            return preamble_analysis_map
         
-        # 프롬프트 생성
-        prompt = CONFLICT_RESOLUTION_PROMPT.format(
-            std_clause_id=std_clause_id,
-            evaluations=evaluations_text
-        )
+        preamble_data = resolved["user_articles"][preamble_key]
+        preamble_insufficient = preamble_data.get("insufficient", [])
+        preamble_missing = preamble_data.get("missing", [])
         
-        # LLM 호출
-        try:
-            response = self.llm.chat.completions.create(
-                model=self.gpt_model,
-                messages=[
-                    {"role": "system", "content": "당신은 계약서 검증 전문가입니다."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=500
-            )
+        logger.info(f"[Step3] 서문 처리: insufficient={len(preamble_insufficient)}, missing={len(preamble_missing)}")
+        
+        # 누락 항목을 overall_missing으로 이동
+        for item in preamble_missing:
+            std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
+            analysis = item.get("analysis", "") if isinstance(item, dict) else ""
             
-            response_text = response.choices[0].message.content.strip()
+            if std_clause_id and std_clause_id not in resolved["overall_missing_clauses"]:
+                resolved["overall_missing_clauses"].append(std_clause_id)
+                if analysis:
+                    preamble_analysis_map[std_clause_id] = analysis
+                logger.debug(f"  → overall_missing에 추가 (누락): {std_clause_id}")
+        
+        # 불충분 항목도 overall_missing으로 이동
+        for item in preamble_insufficient:
+            std_clause_id = item.get("std_clause_id") if isinstance(item, dict) else item
+            analysis = item.get("analysis", "") if isinstance(item, dict) else ""
             
-            # JSON 파싱
-            import json
-            if '```json' in response_text:
-                json_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                json_text = response_text.split('```')[1].split('```')[0].strip()
-            else:
-                json_text = response_text
-            
-            result = json.loads(json_text)
-            
-            # 상세 로그
-            resolution = result['resolution']
-            reasoning = result.get('reasoning', '')
-            is_contradiction = result.get('is_contradiction', False)
-            
-            # 충돌 유형 표시
-            conflict_type = "진짜 충돌" if is_contradiction else "서로 다른 사실/부분 매칭"
-            
-            logger.info(f"LLM 충돌 해소: {std_clause_id}")
-            logger.info(f"  - 충돌 유형: {conflict_type}")
-            logger.info(f"  - 해소 방법: {resolution}")
-            logger.info(f"  - 판단 근거: {reasoning}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"LLM 충돌 해소 실패: {e}, fallback to priority rules")
-            # Fallback: 우선순위 규칙
-            return {
-                "is_contradiction": True,
-                "resolution": f"keep_{self._apply_priority_rules(conflict_data)}",
-                "reasoning": f"LLM 오류로 인한 fallback: {str(e)}"
-            }
+            if std_clause_id and std_clause_id not in resolved["overall_missing_clauses"]:
+                resolved["overall_missing_clauses"].append(std_clause_id)
+                if analysis:
+                    preamble_analysis_map[std_clause_id] = analysis
+                logger.debug(f"  → overall_missing에 추가 (불충분): {std_clause_id}")
+        
+        # 서문에서 누락과 불충분 모두 제거
+        resolved["user_articles"][preamble_key]["missing"] = []
+        resolved["user_articles"][preamble_key]["insufficient"] = []
+        
+        total_moved = len(preamble_missing) + len(preamble_insufficient)
+        if total_moved > 0:
+            logger.info(f"[Step3] 서문의 누락/불충분 항목 {total_moved}개를 overall_missing으로 이동 완료")
+        
+        return preamble_analysis_map
     
-    def _map_resolution_to_status(self, resolution: str) -> str:
-        """
-        resolution을 status로 매핑
-        
-        Args:
-            resolution: "keep_sufficient", "keep_insufficient", "keep_missing"
-            
-        Returns:
-            "sufficient", "insufficient", "missing"
-        """
-        mapping = {
-            "keep_sufficient": "sufficient",
-            "keep_insufficient": "insufficient",
-            "keep_missing": "missing"
-        }
-        return mapping.get(resolution, "sufficient")
-    
-    def _apply_resolution_insufficient_merge(self, resolved: Dict, std_clause_id: str, conflict_data: Dict):
-        """
-        sufficient/insufficient + missing → insufficient로 병합
-        
-        논리: 일부는 있고 일부는 없으면 = 불충분
-        
-        Args:
-            resolved: 보정 결과
-            std_clause_id: 표준 조항 ID
-            conflict_data: 충돌 데이터
-        """
-        # 모든 평가를 insufficient로 통합
-        merged_analysis_parts = []
-        user_articles_involved = set()
-        
-        for evaluation in conflict_data["evaluations"]:
-            user_article_no = evaluation["user_article"]
-            status = evaluation["status"]
-            analysis = evaluation.get("analysis", "")
-            
-            user_articles_involved.add(user_article_no)
-            
-            if status == "sufficient":
-                merged_analysis_parts.append(f"[매칭됨] {analysis if analysis else '표준 조항과 매칭됨'}")
-            elif status == "insufficient":
-                merged_analysis_parts.append(f"[불충분] {analysis}")
-            elif status == "missing":
-                merged_analysis_parts.append(f"[누락됨] {analysis}")
-        
-        # 통합된 분석 텍스트
-        merged_analysis = " | ".join(merged_analysis_parts)
-        
-        # 각 관련 user_article에 insufficient로 추가
-        for user_article_no in user_articles_involved:
-            if user_article_no in resolved["user_articles"]:
-                resolved["user_articles"][user_article_no]["insufficient"].append({
-                    "std_clause_id": std_clause_id,
-                    "analysis": merged_analysis
-                })
+    # LLM 충돌 해소 메서드 제거 (더 이상 사용하지 않음)
+    # 새로운 규칙: 같은 조항 충돌은 무시, 다른 조항 충돌은 우선순위로 자동 해소
     
     def _resolve_insufficient_duplicates(self, resolved: Dict, std_clause_id: str, conflict_data: Dict):
         """
-        insufficient + insufficient → LLM으로 가장 구체적인 것 선택
+        insufficient + insufficient → 중복 제거 후 LLM으로 가장 구체적인 것 선택
         
         Args:
             resolved: 보정 결과
@@ -402,12 +237,41 @@ class Step3Resolver:
         """
         evaluations = conflict_data["evaluations"]
         
-        # 같은 user_article인지 확인
-        user_articles = {e["user_article"] for e in evaluations}
+        # 1단계: 분석 텍스트 기반 중복 제거
+        unique_evaluations = []
+        seen_analyses = set()
         
-        if len(user_articles) == 1:
-            # 같은 조항 → 중복 제거 (첫 번째만 유지)
-            logger.info(f"  같은 조항의 중복 → 첫 번째만 유지")
+        for evaluation in evaluations:
+            analysis = evaluation.get("analysis", "").strip()
+            
+            # 분석 텍스트가 비어있거나 이미 본 것이면 스킵
+            if not analysis:
+                continue
+            
+            # 정규화: 공백, 구두점 제거 후 비교
+            normalized = analysis.replace(" ", "").replace("\n", "").replace(",", "").replace(".", "")
+            
+            if normalized not in seen_analyses:
+                seen_analyses.add(normalized)
+                unique_evaluations.append(evaluation)
+            else:
+                logger.info(f"  중복 제거: {evaluation['user_article']} (동일한 분석 텍스트)")
+        
+        # 중복 제거 후 1개만 남으면 바로 추가
+        if len(unique_evaluations) == 1:
+            logger.info(f"  중복 제거 후 1개만 남음 → LLM 호출 생략")
+            evaluation = unique_evaluations[0]
+            user_article_no = evaluation["user_article"]
+            if user_article_no in resolved["user_articles"]:
+                resolved["user_articles"][user_article_no]["insufficient"].append({
+                    "std_clause_id": std_clause_id,
+                    "analysis": evaluation.get("analysis", "")
+                })
+            return
+        
+        # 중복 제거 후 0개면 원본 첫 번째 사용
+        if len(unique_evaluations) == 0:
+            logger.warning(f"  중복 제거 후 0개 → 원본 첫 번째 사용")
             evaluation = evaluations[0]
             user_article_no = evaluation["user_article"]
             if user_article_no in resolved["user_articles"]:
@@ -415,71 +279,21 @@ class Step3Resolver:
                     "std_clause_id": std_clause_id,
                     "analysis": evaluation.get("analysis", "")
                 })
-        else:
-            # 다른 조항 → LLM 판단
-            logger.info(f"  다른 조항의 불충분 → LLM 선택")
-            selected_indices = self._llm_select_best_insufficient(std_clause_id, evaluations)
-            
-            for idx in selected_indices:
-                if idx < len(evaluations):
-                    evaluation = evaluations[idx]
-                    user_article_no = evaluation["user_article"]
-                    if user_article_no in resolved["user_articles"]:
-                        resolved["user_articles"][user_article_no]["insufficient"].append({
-                            "std_clause_id": std_clause_id,
-                            "analysis": evaluation.get("analysis", "")
-                        })
-    
-    def _apply_resolution_keep_all(self, resolved: Dict, std_clause_id: str, conflict_data: Dict):
-        """
-        모든 평가 유지 (서로 다른 사실)
+            return
         
-        Args:
-            resolved: 보정 결과
-            std_clause_id: 표준 조항 ID
-            conflict_data: 충돌 데이터
-        """
-        # 각 평가를 해당 user_article에 추가
-        for evaluation in conflict_data["evaluations"]:
-            user_article_no = evaluation["user_article"]
-            status = evaluation["status"]
-            analysis = evaluation.get("analysis", "")
-            
-            if user_article_no in resolved["user_articles"]:
-                # matched도 {id, analysis} 형식으로 통일
-                if status == "sufficient":
-                    # 중복 체크 (std_clause_id 기준)
-                    existing_ids = [m.get("std_clause_id") if isinstance(m, dict) else m 
-                                   for m in resolved["user_articles"][user_article_no]["matched"]]
-                    if std_clause_id not in existing_ids:
-                        resolved["user_articles"][user_article_no]["matched"].append({
-                            "std_clause_id": std_clause_id,
-                            "analysis": analysis if analysis else "표준 조항과 매칭됨"
-                        })
-                else:
-                    resolved["user_articles"][user_article_no][status].append({
+        # 2단계: 여전히 2개 이상 남으면 LLM 판단
+        logger.info(f"  중복 제거 후 {len(unique_evaluations)}개 남음 → LLM 선택")
+        selected_indices = self._llm_select_best_insufficient(std_clause_id, unique_evaluations)
+        
+        for idx in selected_indices:
+            if idx < len(unique_evaluations):
+                evaluation = unique_evaluations[idx]
+                user_article_no = evaluation["user_article"]
+                if user_article_no in resolved["user_articles"]:
+                    resolved["user_articles"][user_article_no]["insufficient"].append({
                         "std_clause_id": std_clause_id,
-                        "analysis": analysis
+                        "analysis": evaluation.get("analysis", "")
                     })
-    
-    def _apply_priority_rules(self, conflict_data: Dict) -> str:
-        """
-        우선순위 규칙 적용: sufficient > insufficient > missing
-        
-        Args:
-            conflict_data: 충돌 데이터
-            
-        Returns:
-            최종 상태
-        """
-        statuses = {e["status"] for e in conflict_data["evaluations"]}
-        
-        if "sufficient" in statuses:
-            return "sufficient"
-        elif "insufficient" in statuses:
-            return "insufficient"
-        else:
-            return "missing"
     
     def _apply_resolution(self, resolved: Dict, std_clause_id: str, conflict_data: Dict, final_status: str):
         """
