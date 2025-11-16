@@ -658,26 +658,39 @@ def main() -> None:
         </style>
     """, unsafe_allow_html=True)
     
-    # 사이드바 - 챗봇만 표시
+    # 사이드바 - 탭 구조 (챗봇 / 히스토리)
     with st.sidebar:
         # 챗봇 UI (분류 완료 후에만 표시)
         if st.session_state.get('classification_done', False) and st.session_state.get('uploaded_contract_data') is not None:
             contract_id = st.session_state.uploaded_contract_data['contract_id']
             
             # 챗봇 활성화 상태 확인
+            chatbot_active = False
             try:
                 chatbot_status_url = f"http://localhost:8000/api/chatbot/{contract_id}/status"
                 status_resp = requests.get(chatbot_status_url, timeout=10)
                 
                 if status_resp.status_code == 200:
                     status_data = status_resp.json()
-                    is_active = status_data.get('active', False)
-                    
-                    if is_active:
-                        # 챗봇 UI 표시
-                        display_chatbot_sidebar(contract_id)
+                    chatbot_active = status_data.get('active', False)
             except Exception:
                 pass
+            
+            if chatbot_active:
+                # 탭 생성
+                tab1, tab2 = st.tabs(["💬 챗봇", "📚 히스토리"])
+                
+                with tab1:
+                    # 챗봇 UI 표시
+                    display_chatbot_sidebar(contract_id)
+                
+                with tab2:
+                    # 히스토리 UI 표시
+                    display_contract_history_sidebar()
+        else:
+            # 분류 전에는 히스토리만 표시
+            st.markdown("### 📚 계약서 히스토리")
+            display_contract_history_sidebar()
     
     # 상단 헤더
     st.markdown(
@@ -2668,6 +2681,153 @@ def display_manual_checks(manual_checks: dict):
     
     if processing_time > 0:
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
+
+
+def display_contract_history_sidebar():
+    """
+    사이드바에 계약서 히스토리 표시
+    """
+    try:
+        # 히스토리 조회 (타임아웃 30초로 증가)
+        history_url = "http://localhost:8000/api/contracts/history"
+        response = requests.get(history_url, params={"limit": 20}, timeout=30)
+        
+        if response.status_code != 200:
+            st.error("히스토리를 불러올 수 없습니다.")
+            return
+        
+        data = response.json()
+        contracts = data.get('contracts', [])
+        
+        if not contracts:
+            st.info("아직 업로드한 계약서가 없습니다.")
+            return
+        
+        st.markdown(f"**총 {data.get('total', 0)}개의 계약서**")
+        st.markdown("---")
+        
+        # 계약서 목록 표시
+        for contract in contracts:
+            contract_id = contract.get('contract_id')
+            filename = contract.get('filename', 'N/A')
+            upload_date = contract.get('upload_date', '')
+            contract_type = contract.get('contract_type')
+            has_report = contract.get('has_report', False)
+            
+            # 날짜 포맷팅
+            formatted_date = upload_date
+            if upload_date:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(upload_date.replace('Z', '+00:00'))
+                    formatted_date = dt.strftime('%Y-%m-%d %H:%M')
+                except:
+                    pass
+            
+            # 계약 유형 한글 변환
+            type_names = {
+                'provide': '제공형',
+                'create': '창출형',
+                'process': '가공형',
+                'brokerage_provider': '중개거래형(제공자)',
+                'brokerage_user': '중개거래형(이용자)'
+            }
+            type_label = type_names.get(contract_type, '미분류') if contract_type else '미분류'
+            
+            # 상태 아이콘
+            status_icon = "✅" if has_report else "⏳"
+            
+            # 카드 형태로 표시
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    st.markdown(f"**{status_icon} {filename}**")
+                    st.markdown(f"<small style='color: #6b7280;'>{type_label} • {formatted_date}</small>", unsafe_allow_html=True)
+                
+                with col2:
+                    if st.button("열기", key=f"load_{contract_id}", use_container_width=True):
+                        # 해당 계약서 로드
+                        load_contract_from_history(contract_id)
+                        st.rerun()
+                
+                st.markdown("---")
+        
+    except requests.exceptions.Timeout:
+        st.warning("⏳ 서버 응답이 느립니다. 잠시 후 다시 시도해주세요.")
+    except requests.exceptions.ConnectionError:
+        st.error("❌ 서버에 연결할 수 없습니다. FastAPI 서버가 실행 중인지 확인해주세요.")
+    except Exception as e:
+        st.error(f"히스토리 로딩 중 오류: {str(e)}")
+
+
+def load_contract_from_history(contract_id: str):
+    """
+    히스토리에서 계약서 로드 (최적화: 한 번의 API 호출)
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    # 로딩 스피너 표시
+    with st.spinner(f"계약서 불러오는 중..."):
+        try:
+            # 계약서 정보 + 분류 + 검증 결과를 한 번에 조회
+            contract_url = f"http://localhost:8000/api/contracts/{contract_id}"
+            response = requests.get(
+                contract_url,
+                params={
+                    "include_classification": True,
+                    "include_validation": True
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # 세션 상태 업데이트
+                st.session_state.uploaded_contract_data = {
+                    'contract_id': contract_id,
+                    'filename': data.get('filename'),
+                    'file_size': 0,
+                    'parsed_metadata': data.get('parsed_metadata', {}),
+                    'structured_data': data.get('parsed_data', {})
+                }
+                
+                # 분류 결과 처리
+                classification = data.get('classification')
+                if classification:
+                    st.session_state.classification_done = True
+                    st.session_state.predicted_type = classification.get('predicted_type')
+                    st.session_state.confidence = classification.get('confidence', 0)
+                    st.session_state.user_modified = classification.get('user_override') is not None
+                else:
+                    st.session_state.classification_done = False
+                
+                # 검증 결과 처리
+                validation = data.get('validation')
+                if validation and validation.get('has_report'):
+                    st.session_state.validation_completed = True
+                    # 상세 검증 결과는 필요 시 별도 조회
+                else:
+                    st.session_state.validation_completed = False
+                    st.session_state.validation_started = False
+                
+                # 챗봇 대화 초기화
+                st.session_state.chatbot_messages = []
+                import uuid
+                st.session_state.chatbot_session_id = str(uuid.uuid4())
+                
+                st.success(f"✅ {data.get('filename')} 불러오기 완료!")
+            else:
+                st.error("계약서를 불러올 수 없습니다.")
+        
+        except requests.exceptions.Timeout:
+            st.error("⏳ 서버 응답 시간 초과. 잠시 후 다시 시도해주세요.")
+        except requests.exceptions.ConnectionError:
+            st.error("❌ 서버 연결 실패. FastAPI 서버가 실행 중인지 확인해주세요.")
+        except Exception as e:
+            st.error(f"계약서 로딩 중 오류: {str(e)}")
 
 
 def display_chatbot_sidebar(contract_id: str):

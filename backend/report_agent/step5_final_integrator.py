@@ -54,7 +54,10 @@ class Step5FinalIntegrator:
         Returns:
             최종 통합 보고서 JSON
         """
-        logger.info("Step 5 최종 통합 시작")
+        import time
+        
+        logger.info("📊 Step 5 최종 통합 시작")
+        step5_start_time = time.time()
         
         # 사용자 계약서 데이터 저장 (종합분석 생성 시 사용)
         self.user_contract_data = user_contract_data
@@ -63,6 +66,7 @@ class Step5FinalIntegrator:
         final_report = step4_result.copy()
         
         # A2 Primary 결과 확인
+        substep_start = time.time()
         if not a2_result:
             logger.warning("A2 Primary 체크리스트 결과가 없습니다. 체크리스트 통합 스킵")
             final_report["checklist_summary"] = {
@@ -88,22 +92,25 @@ class Step5FinalIntegrator:
             
             primary_count = len(a2_result.get('matched_articles', [])) or len(a2_result.get('std_article_results', []))
             recovered_count = len(a2_recovered_result.get('std_article_results', [])) if a2_recovered_result else 0
-            logger.info(f"체크리스트 통합 완료: Primary {primary_count}개 + Recovered {recovered_count}개 조항")
+            logger.info(f"  ✅ 체크리스트 통합 완료: Primary {primary_count}개 + Recovered {recovered_count}개 조항")
+        logger.info(f"  ⏱️ 체크리스트 통합 완료 ({time.time() - substep_start:.1f}초)")
         
         # 조항별 서술형 보고서 생성
+        substep_start = time.time()
         if self.client:
-            logger.info("조항별 서술형 보고서 생성 시작")
             final_report["user_articles"] = self._generate_narrative_reports(
                 final_report.get("user_articles", []),
                 final_report.get("contract_type", "unknown")
             )
         else:
             logger.warning("Azure OpenAI 클라이언트 없음. 서술형 보고서 생성 스킵")
+        logger.info(f"  ⏱️ 서술형 보고서 생성 완료 ({time.time() - substep_start:.1f}초)")
         
         # 최종 생성 시간 업데이트
         final_report["final_generated_at"] = datetime.now().isoformat()
         
-        logger.info(f"Step 5 최종 통합 완료")
+        step5_elapsed = time.time() - step5_start_time
+        logger.info(f"✅ Step 5 최종 통합 완료 ({step5_elapsed:.1f}초)")
         
         return final_report
     

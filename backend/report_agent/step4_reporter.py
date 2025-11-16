@@ -64,21 +64,28 @@ class Step4Reporter:
         Returns:
             최종 보고서 JSON
         """
-        logger.info(f"Step 4 최종 보고서 생성 시작 (contract_id: {contract_id})")
+        import time
+        
+        logger.info(f"📝 Step 4 최종 보고서 생성 시작 (contract_id: {contract_id})")
+        step4_start_time = time.time()
         
         # contract_type을 인스턴스 변수로 저장 (다른 메서드에서 사용)
         self.contract_type = contract_type
         
         # 모든 조항 내용 수집 (사용자 + 표준계약서)
+        substep_start = time.time()
         all_contents = self._collect_all_clause_contents(step3_result, user_contract_data, contract_type)
+        logger.info(f"  ⏱️ 조항 내용 수집 완료 ({time.time() - substep_start:.1f}초)")
         
         # 누락된 조항 상세 정보 생성 (A1 재검증 결과 활용)
+        substep_start = time.time()
         enriched_missing = self._enrich_missing_clauses(
             step3_result.get("overall_missing_clauses", []),
             a1_result,
             user_contract_data,
             contract_type
         )
+        logger.info(f"  ⏱️ 누락 조항 상세 정보 생성 완료 ({time.time() - substep_start:.1f}초)")
         
         report = {
             "contract_id": contract_id,
@@ -91,7 +98,8 @@ class Step4Reporter:
             "all_clause_contents": all_contents
         }
         
-        logger.info(f"Step 4 최종 보고서 생성 완료: "
+        step4_elapsed = time.time() - step4_start_time
+        logger.info(f"✅ Step 4 최종 보고서 생성 완료 ({step4_elapsed:.1f}초): "
                    f"전역 누락 {len(report['overall_missing_clauses'])}개, "
                    f"상세 누락 {len(enriched_missing)}개 조, "
                    f"사용자 조항 {len(report['user_articles'])}개")

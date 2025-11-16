@@ -66,7 +66,10 @@ class ReportAgent:
         Raises:
             ReportAgentError: 보고서 생성 실패
         """
-        logger.info(f"보고서 생성 시작: {contract_id}")
+        import time
+        
+        logger.info(f"📋 보고서 생성 시작: {contract_id}")
+        total_start_time = time.time()
         
         db = None
         try:
@@ -74,9 +77,12 @@ class ReportAgent:
             db = SessionLocal()
             
             # Step 0: 입력 데이터 로드
+            step_start = time.time()
             input_data = self._load_input_data(db, contract_id)
+            logger.info(f"⏱️ [Step 0] 입력 데이터 로드 완료 ({time.time() - step_start:.1f}초)")
             
             # Step 1: 정규화 (Primary + Recovered 병합)
+            step_start = time.time()
             step1_result = self.step1.normalize(
                 a1_result=input_data['a1_result'],
                 a3_result=input_data['a3_result'],
@@ -84,12 +90,16 @@ class ReportAgent:
                 contract_type=input_data['contract_type']
             )
             self._save_step_result(db, contract_id, "report_step1_normalized", step1_result)
+            logger.info(f"⏱️ [Step 1] 정규화 완료 ({time.time() - step_start:.1f}초)")
             
             # Step 2: 재집계
+            step_start = time.time()
             step2_result = self.step2.aggregate(step1_result)
             self._save_step_result(db, contract_id, "report_step2_aggregated", step2_result)
+            logger.info(f"⏱️ [Step 2] 재집계 완료 ({time.time() - step_start:.1f}초)")
             
             # Step 3: 충돌 해소
+            step_start = time.time()
             step3_result = self.step3.resolve(
                 step2_result=step2_result,
                 a3_result=input_data['a3_result'],
@@ -97,8 +107,10 @@ class ReportAgent:
                 user_contract_data=input_data['user_contract_data']
             )
             self._save_step_result(db, contract_id, "report_step3_resolved", step3_result)
+            logger.info(f"⏱️ [Step 3] 충돌 해소 완료 ({time.time() - step_start:.1f}초)")
             
             # Step 4: 포맷팅
+            step_start = time.time()
             step4_result = self.step4.generate_final_report(
                 step3_result=step3_result,
                 contract_id=contract_id,
@@ -106,22 +118,26 @@ class ReportAgent:
                 user_contract_data=input_data['user_contract_data'],
                 a1_result=input_data.get('a1_result')  # A1 재검증 정보 전달
             )
-            logger.info(f"[Step 4] 포맷팅 완료")
             self._save_step_result(db, contract_id, "report_step4_formatted", step4_result)
+            logger.info(f"⏱️ [Step 4] 포맷팅 완료 ({time.time() - step_start:.1f}초)")
             
             # Step 5: 체크리스트 통합 + 최종 보고서
+            step_start = time.time()
             final_report = self.step5.integrate(
                 step4_result=step4_result,
                 a2_result=input_data['a2_result'],
                 a2_recovered_result=input_data.get('a2_recovered_result'),
                 user_contract_data=input_data['user_contract_data']
             )
-            logger.info(f"[Step 5] 최종 통합 완료")
+            logger.info(f"⏱️ [Step 5] 최종 통합 완료 ({time.time() - step_start:.1f}초)")
             
             # 최종 보고서 저장
+            step_start = time.time()
             self._save_final_report(db, contract_id, final_report)
+            logger.info(f"⏱️ [저장] 최종 보고서 저장 완료 ({time.time() - step_start:.1f}초)")
             
-            logger.info(f"보고서 생성 완료: {contract_id}")
+            total_elapsed = time.time() - total_start_time
+            logger.info(f"✅ 보고서 생성 완료: {contract_id} | 총 소요 시간: {total_elapsed:.1f}초 ({total_elapsed/60:.1f}분)")
             return final_report
             
         except Exception as e:

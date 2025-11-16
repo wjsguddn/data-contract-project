@@ -1082,6 +1082,164 @@ async def generate_report_only(contract_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/contracts/history")
+async def get_contract_history(
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    계약서 히스토리 목록 조회
+    
+    Args:
+        limit: 조회할 최대 개수 (기본 50개)
+        offset: 시작 위치 (기본 0)
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "total": int,
+            "contracts": [
+                {
+                    "contract_id": str,
+                    "filename": str,
+                    "upload_date": str,
+                    "status": str,
+                    "contract_type": str (optional),
+                    "has_classification": bool,
+                    "has_validation": bool,
+                    "has_report": bool
+                }
+            ]
+        }
+    """
+    try:
+        # 전체 개수 조회
+        total = db.query(ContractDocument).count()
+        
+        # 계약서 목록 조회 (최신순)
+        contracts = db.query(ContractDocument).order_by(
+            ContractDocument.upload_date.desc()
+        ).limit(limit).offset(offset).all()
+        
+        # 각 계약서의 상세 정보 조회
+        result = []
+        for contract in contracts:
+            # 분류 결과 확인
+            classification = db.query(ClassificationResult).filter(
+                ClassificationResult.contract_id == contract.contract_id
+            ).first()
+            
+            # 검증 결과 확인
+            validation = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract.contract_id
+            ).first()
+            
+            result.append({
+                "contract_id": contract.contract_id,
+                "filename": contract.filename,
+                "upload_date": contract.upload_date.isoformat() if contract.upload_date else None,
+                "status": contract.status,
+                "contract_type": classification.confirmed_type if classification else None,
+                "has_classification": classification is not None,
+                "has_validation": validation is not None and validation.completeness_check is not None,
+                "has_report": validation is not None and validation.final_report is not None
+            })
+        
+        return {
+            "total": total,
+            "contracts": result
+        }
+        
+    except Exception as e:
+        logger.exception(f"계약서 히스토리 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/contracts/{contract_id}")
+async def get_contract_detail(
+    contract_id: str,
+    include_classification: bool = True,
+    include_validation: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    계약서 상세 정보 조회 (분류/검증 결과 포함 가능)
+    
+    Args:
+        contract_id: 계약서 ID
+        include_classification: 분류 결과 포함 여부 (기본 True)
+        include_validation: 검증 결과 포함 여부 (기본 True)
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "contract_id": str,
+            "filename": str,
+            "upload_date": str,
+            "status": str,
+            "parsed_data": dict,
+            "parsed_metadata": dict,
+            "classification": dict (optional),
+            "validation": dict (optional)
+        }
+    """
+    try:
+        # 계약서 조회
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계약서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        result = {
+            "contract_id": contract.contract_id,
+            "filename": contract.filename,
+            "upload_date": contract.upload_date.isoformat() if contract.upload_date else None,
+            "status": contract.status,
+            "parsed_data": contract.parsed_data,
+            "parsed_metadata": contract.parsed_metadata
+        }
+        
+        # 분류 결과 포함
+        if include_classification:
+            classification = db.query(ClassificationResult).filter(
+                ClassificationResult.contract_id == contract_id
+            ).first()
+            
+            if classification:
+                result["classification"] = {
+                    "predicted_type": classification.predicted_type,
+                    "confidence": classification.confidence,
+                    "confirmed_type": classification.confirmed_type,
+                    "user_override": classification.user_override
+                }
+        
+        # 검증 결과 포함
+        if include_validation:
+            validation = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+            
+            if validation:
+                result["validation"] = {
+                    "status": "completed" if validation.completeness_check else "not_started",
+                    "has_report": validation.final_report is not None
+                }
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"계약서 상세 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/report/{contract_id}/status")
 async def get_report_status(contract_id: str, db: Session = Depends(get_db)):
     """
