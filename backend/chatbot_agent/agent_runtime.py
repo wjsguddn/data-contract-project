@@ -28,7 +28,7 @@ class AgentRuntime:
     
     def __init__(
         self,
-        azure_client,
+        openai_client,
         tool_registry,
         llm_cache: Optional[LLMCache] = None,
         enable_cache: bool = True,
@@ -38,13 +38,13 @@ class AgentRuntime:
         초기화
         
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
             tool_registry: 툴 레지스트리
             llm_cache: LLM 캐시 (None이면 자동 생성)
             enable_cache: 캐시 활성화 여부
             max_retries: 최대 재시도 횟수
         """
-        self.azure_client = azure_client
+        self.openai_client = openai_client
         self.tool_registry = tool_registry
         self.enable_cache = enable_cache
         self.max_retries = max_retries
@@ -73,6 +73,66 @@ class AgentRuntime:
         }
         
         logger.info(f"AgentRuntime 초기화 완료 (캐시: {enable_cache}, 최대 재시도: {max_retries})")
+    
+    def call_llm_stream(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "gpt-4o",
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        """
+        LLM 스트리밍 호출 (캐싱 미지원)
+        
+        Args:
+            messages: 메시지 리스트
+            model: 모델명
+            temperature: 온도
+            max_tokens: 최대 토큰 수
+            **kwargs: 추가 파라미터
+            
+        Yields:
+            LLM 응답 토큰
+            
+        Raises:
+            Exception: LLM 호출 실패 시
+        """
+        start_time = time.time()
+        
+        try:
+            self.metrics["llm_calls"] += 1
+            
+            call_params = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": True
+            }
+            
+            if max_tokens:
+                call_params["max_tokens"] = max_tokens
+            
+            call_params.update(kwargs)
+            
+            stream = self.openai_client.chat.completions.create(**call_params)
+            
+            for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        yield delta.content
+            
+            execution_time = time.time() - start_time
+            self.metrics["total_execution_time"] += execution_time
+            logger.info(f"LLM 스트리밍 호출 완료 (실행 시간: {execution_time:.2f}s)")
+        
+        except Exception as e:
+            self.metrics["llm_errors"] += 1
+            execution_time = time.time() - start_time
+            self.metrics["total_execution_time"] += execution_time
+            logger.error(f"LLM 스트리밍 호출 실패 (실행 시간: {execution_time:.2f}s): {e}")
+            raise
     
     def call_llm(
         self,
@@ -139,7 +199,7 @@ class AgentRuntime:
             
             call_params.update(kwargs)
             
-            response = self.azure_client.chat.completions.create(**call_params)
+            response = self.openai_client.chat.completions.create(**call_params)
             
             # 토큰 사용량 추적
             if hasattr(response, 'usage') and response.usage:
