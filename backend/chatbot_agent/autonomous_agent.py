@@ -8,7 +8,7 @@ import logging
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from openai import AzureOpenAI
+from openai import OpenAI
 
 from langgraph.graph import StateGraph, END
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +19,7 @@ from backend.chatbot_agent.lightweight_classifier import LightweightClassifier
 from backend.chatbot_agent.agent_runtime import AgentRuntime
 from backend.chatbot_agent.agent_persistence import AgentPersistence
 from backend.chatbot_agent.agent_recovery import AgentRecovery
+from backend.chatbot_agent.function_calling_adapter import FunctionCallingAdapter
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -37,7 +38,7 @@ class AutonomousAgent:
     
     def __init__(
         self,
-        azure_client: AzureOpenAI,
+        openai_client: OpenAI,
         tool_registry: ToolRegistry,
         max_iterations: int = 5,
         enable_cache: bool = True,
@@ -46,24 +47,30 @@ class AutonomousAgent:
     ):
         """
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
             tool_registry: 툴 레지스트리
             max_iterations: 최대 반복 횟수
             enable_cache: LLM 캐시 활성화 여부
             persistence_mode: 영속화 모드 ("memory" 또는 "sqlite")
             checkpoint_db_path: 체크포인트 DB 경로 (persistence_mode="sqlite"인 경우)
         """
-        self.azure_client = azure_client
+        self.openai_client = openai_client
         self.tool_registry = tool_registry
         self.max_iterations = max_iterations
         self.classifier = LightweightClassifier()
         
         # AgentRuntime 초기화
         self.runtime = AgentRuntime(
-            azure_client=azure_client,
+            openai_client=openai_client,
             tool_registry=tool_registry,
             enable_cache=enable_cache,
             max_retries=2
+        )
+        
+        # FunctionCallingAdapter 초기화
+        self.function_adapter = FunctionCallingAdapter(
+            openai_client=openai_client,
+            tool_registry=tool_registry
         )
         
         # AgentPersistence 초기화 (현재는 memory만 지원)
@@ -145,6 +152,230 @@ class AutonomousAgent:
         # 컴파일하지 않고 반환 (AgentPersistence에서 체크포인터와 함께 컴파일)
         return workflow
     
+    def run_stream(
+        self,
+        contract_id: str,
+        user_message: str,
+        session_id: str,
+        previous_turn: List[Dict[str, str]] = None
+    ):
+        """
+        에이전트 실행 (스트리밍 모드)
+        
+        Args:
+            contract_id: 계약서 ID
+            user_message: 사용자 메시지
+            session_id: 세션 ID
+            previous_turn: 직전 대화 이력 (plain dict)
+            
+        Yields:
+            dict: 스트리밍 이벤트
+                - {"type": "token", "content": str} - 응답 토큰
+                - {"type": "sources", "content": list} - 출처 정보
+                - {"type": "thinking", "step": str, "content": str} - 사고 과정
+                - {"type": "error", "content": str} - 에러 메시지
+        """
+        try:
+            # 초기 상태 구성
+            messages = []
+            if previous_turn:
+                messages.extend(previous_turn)
+            messages.append({"role": "user", "content": user_message})
+            
+            unexplored_articles = self._load_contract_structure(contract_id)
+            
+            initial_state: AgentState = {
+                "contract_id": contract_id,
+                "user_message": user_message,
+                "session_id": session_id,
+                "messages": messages,
+                "need_previous_context": False,
+                "contract_structure": None,
+                "tool_history": [],
+                "collected_info": [],
+                "explored_articles": [],
+                "unexplored_articles": unexplored_articles,
+                "iteration_count": 0,
+                "max_iterations": self.max_iterations,
+                "decision_log": [],
+                "next_tools": [],
+                "final_response": None,
+                "sources": []
+            }
+            
+            logger.info(f"[run_stream] 실행 시작: {user_message[:50]}...")
+            
+            # 체크포인트 설정
+            config = {
+                "configurable": {
+                    "thread_id": session_id,
+                    "checkpoint_ns": contract_id
+                }
+            }
+            
+            # 워크플로우 실행 (응답 생성 직전까지)
+            # respond 노드를 제외한 모든 노드 실행
+            final_state = None
+            is_first_planner = True
+            previous_user_articles = set()
+            previous_std_articles = set()
+            
+            for state in self.app.stream(initial_state, config=config):
+                # 마지막 상태 저장
+                if state:
+                    # state는 {node_name: node_output} 형식
+                    for node_name, node_output in state.items():
+                        if node_name == "tool_needed_check":
+                            # check_tool_needed 완료 시 - needs_tools: false면 답변 생성
+                            decision_log = node_output.get("decision_log", [])
+                            if decision_log:
+                                last_decision = decision_log[-1]
+                                action = last_decision.get("action", "")
+                                
+                                if action == "direct_response":
+                                    # 도구 사용 없이 바로 답변 생성
+                                    yield {"type": "thinking", "step": "generating", "content": "..."}
+                            
+                            final_state = node_output
+                            
+                        elif node_name == "planner":
+                            # 1. planner 최초 실행 시
+                            if is_first_planner:
+                                yield {"type": "thinking", "step": "planning", "content": "탐색 계획 수립중..."}
+                                is_first_planner = False
+                            else:
+                                # 5. 재탐색 시
+                                yield {"type": "thinking", "step": "replanning", "content": "계약서 조문 리스트업..."}
+                            
+                            # 2. 도구 선택 완료 시
+                            next_tools = node_output.get("next_tools", [])
+                            for thinking_event in self._generate_tool_selection_events(next_tools, contract_id):
+                                yield thinking_event
+                            
+                            final_state = node_output
+                            
+                        elif node_name in ["executor", "parallel_executor"]:
+                            # 도구 실행 완료 후 추가 이벤트 생성
+                            tool_history = node_output.get("tool_history", [])
+                            if tool_history:
+                                last_tool = tool_history[-1]
+                                tool_name = last_tool.get("tool")
+                                result = last_tool.get("result", {})
+                                
+                                # lookup_standard_contract의 LLM 선별 완료 시
+                                if tool_name == "lookup_standard_contract":
+                                    if isinstance(result, dict):
+                                        data = result.get("data", {})
+                                        method = data.get("method")
+                                        
+                                        # topic 기반 조회이고 표준 조항이 선별된 경우
+                                        if method == "topic_based":
+                                            standard_articles = data.get("standard_articles", [])
+                                            if standard_articles:
+                                                articles_list = []
+                                                for article in standard_articles[:3]:
+                                                    parent_id = article.get("parent_id", "")
+                                                    title = article.get("title", "")
+                                                    if parent_id and title:
+                                                        articles_list.append(f"{parent_id}({title})")
+                                                
+                                                if articles_list:
+                                                    articles_text = ", ".join(articles_list)
+                                                    if len(standard_articles) > 3:
+                                                        articles_text += "..."
+                                                    yield {"type": "thinking", "step": "tool_selected", "content": f"표준계약서 {articles_text}"}
+                            
+                            final_state = node_output
+                            
+                        elif node_name == "evaluator":
+                            # 3. evaluate_sufficiency 진입 시 (새로 추가된 조항만 표시)
+                            for thinking_event in self._generate_evaluation_events(node_output, previous_user_articles, previous_std_articles):
+                                # 내부 업데이트 마커 확인
+                                if thinking_event.get("_internal_update"):
+                                    previous_user_articles = thinking_event["user_articles"]
+                                    previous_std_articles = thinking_event["std_articles"]
+                                    continue
+                                
+                                # 일반 이벤트 출력
+                                yield thinking_event
+                            
+                            # 4. evaluate_sufficiency 완료 시
+                            decision_log = node_output.get("decision_log", [])
+                            if decision_log:
+                                last_decision = decision_log[-1]
+                                action = last_decision.get("action", "")
+                                
+                                if action == "continue":
+                                    # continue 액션이면 missing_info 출력
+                                    missing_info = node_output.get("missing_info")
+                                    if missing_info and missing_info != "null":
+                                        yield {"type": "thinking", "step": "evaluation_result", "content": f"Evaluate {missing_info}"}
+                                elif action == "finish":
+                                    # finish 액션이면 답변 생성 시작
+                                    yield {"type": "thinking", "step": "generating", "content": "..."}
+                            
+                            final_state = node_output
+                            
+                        elif node_name == "respond":
+                            # respond 노드에 도달하면 중단
+                            final_state = node_output
+                            break
+                        else:
+                            final_state = node_output
+            
+            if not final_state:
+                raise Exception("워크플로우 실행 실패")
+            
+            logger.info(f"[run_stream] 워크플로우 완료, 스트리밍 응답 생성 시작")
+            
+            # 스트리밍 응답 생성
+            context = self._build_context_from_collected_info(final_state)
+            
+            system_prompt = """당신은 계약서 질의응답 전문가입니다.
+
+규칙:
+1. 제공된 내용을 기반으로 답변하세요
+2. 계약서에 없는 내용은 추측하지 마세요
+3. 참조한 조항의 출처를 명시하세요
+4. 명확하고 이해하기 쉽게 답변하세요
+5. 불확실한 경우 솔직히 말하세요
+6. 질문의 성향에 따라 표준계약서 내용이 제공될 수 있습니다. 표준계약서는 계약서 작성 시 형식 참고용 템플릿입니다. 표준계약서의 형식이 무조건 옳은 것은 아니며 표준계약서의 내용에 매몰되어선 안됩니다.
+7. 사용자 계약서와 표준계약서의 차이를 명확히 인지하고 구분하세요. 질문이 표준계약서라고 직접 명시하지 않으면 그것은 사용자 계약서에 대한 내용입니다."""
+            
+            user_prompt = f"""
+수집된 정보:
+
+{context}
+
+현재 질문: {final_state['user_message']}
+
+수집된 정보는 질문에 답하기 위해 선별되어 수집된 정보들입니다. 이를 종합하여 질문에 답변해주세요.
+또한 답변은 구조화된 형태일수록 좋습니다."""
+            
+            # 스트리밍 LLM 호출
+            for token in self.runtime.call_llm_stream(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                model="gpt-4o",
+                temperature=0.3,
+                max_completion_tokens=8000
+            ):
+                yield {"type": "token", "content": token}
+            
+            # 출처 정보 전송
+            sources = self._extract_sources(final_state)
+            yield {"type": "sources", "content": sources}
+            
+            logger.info(f"[run_stream] 스트리밍 완료")
+            
+        except Exception as e:
+            logger.error(f"[run_stream] 오류 발생: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            yield {"type": "error", "content": str(e)}
+    
     def run(
         self,
         contract_id: str,
@@ -181,6 +412,7 @@ class AutonomousAgent:
             "user_message": user_message,
             "session_id": session_id,
             "messages": messages,
+            "need_previous_context": False,  # check_tool_needed에서 판단
             "contract_structure": None,
             "tool_history": [],
             "collected_info": [],
@@ -189,7 +421,7 @@ class AutonomousAgent:
             "iteration_count": 0,
             "max_iterations": self.max_iterations,
             "decision_log": [],
-            "next_tool": None,
+            "next_tools": [],
             "final_response": None,
             "sources": []
         }
@@ -301,24 +533,37 @@ class AutonomousAgent:
         # 프롬프트 구성
         context_section = f"이전 대화:\n{context_text}\n" if context_text else ""
         
-        prompt = f"""현재 사용자 질문이 계약서 내용 조회 툴 사용을 필요로 하는지 판단하세요.
+        prompt = f"""현재 사용자 질문을 분석하여 다음 두 가지를 판단하세요:
+
+1. 계약서 내용 조회 툴 사용이 필요한가?
+2. 이전 대화 내용이 현재 질문에 답변하는데 필요한가?
 
 {context_section}현재 사용자 질문: {user_message}
 
-툴 필요성의 판단 기준은, 사용자 질문이 계약에 관한것인지 아닌지이다.
+판단 기준:
 
-판단 기준 예시:
-- 계약 관련 내용, 조항, 조건 등을 물어보는 경우 → 툴 필요
-- 일반적인 인사, 감사 표현 → 툴 불필요
-- 계약과 무관한 질문 → 툴 불필요
+**툴 필요성 (needs_tools)**:
+- 계약 관련 내용, 조항, 조건 등을 물어보는 경우 → true
+- 일반적인 인사, 감사 표현 → false
+- 계약과 무관한 질문 → false
+- 질문이 일반적인 대화같아 보이더라도 이전 대화를 언급하고 있는지에 따라 툴이 필요할 수도 있다
+- 사용자가 "일반적인 계약"과 같은 식으로 언급하는 것이 아니라면, 질문이 언급하는 계약이란 툴을 통해서 조회해야하는 사용자의 계약을 의미한다
+- 질문에 직접적으로 "계약"이나 "조항"같은 언급이 없더라도 데이터계약에 나올만한 내용인지를 고려해야한다
 
-**질문이 일반적인 대화같아 보이더라도 이전 대화를 언급하고 있는지에 따라 툴이 필요할 수도 있다**
-**사용자가 "일반적인 계약"과 같은 식으로 언급하는 것이 아니라면, 질문이 언급하는 계약이란 툴을 통해서 조회해야하는 사용자의 계약을 의미한다**
-**질문에 직접적으로 "계약"이나 "조항"같은 언급이 없더라도 데이터계약에 나올만한 내용인지를 고려해야한다"
+**이전 대화 필요성 (need_previous_context)**:
+- 현재 질문이 이전 대화를 참조하는 경우 (예: "그럼", "그것은", "위에서 말한" 등) → true
+- 현재 질문이 이전 질문의 후속 질문인 경우 → true
+- 이전 답변에 대한 추가 설명을 요청하는 경우 → true
+- 이전 대화처럼 계약에 대한 질문이지만 독립적인 새로운 질문인 경우 → false
+- 이전 대화가 없는 경우 → false
+
+**이전 대화에 대해서 요약 또는 간단히 정리 등을 요구하는 경우 "needs_tools": false, "need_previous_context": true**
+**이전 대화에 대해서 추가질문 또는 상세화 등을 요구하는 경우 "needs_tools": true, "need_previous_context": true**
 
 응답 형식 (JSON):
 {{
     "needs_tools": true/false,
+    "need_previous_context": true/false,
     "reasoning": "판단 근거"
 }}
 
@@ -328,13 +573,13 @@ JSON만 응답하세요."""
             system_msg = "당신은 데이터계약 질문 분석 전문가입니다. JSON 형식으로만 응답하세요."
             
             # 프롬프트 로깅
-            # logger.info("=" * 80)
-            # logger.info("[check_tool_needed] LLM 호출 프롬프트")
-            # logger.info("=" * 80)
-            # logger.info(f"[SYSTEM]\n{system_msg}")
-            # logger.info("-" * 80)
-            # logger.info(f"[USER]\n{prompt}")
-            # logger.info("=" * 80)
+            logger.info("=" * 80)
+            logger.info("[check_tool_needed] LLM 호출 프롬프트")
+            logger.info("=" * 80)
+            logger.info(f"[SYSTEM]\n{system_msg}")
+            logger.info("-" * 80)
+            logger.info(f"[USER]\n{prompt}")
+            logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
@@ -356,7 +601,11 @@ JSON만 응답하세요."""
             result = json.loads(response_text)
             
             needs_tools = result.get("needs_tools", True)
+            need_previous_context = result.get("need_previous_context", False)
             reasoning = result.get("reasoning", "")
+            
+            # 상태에 저장
+            state["need_previous_context"] = need_previous_context
             
             decision = DecisionLog(
                 step="tool_needed_check",
@@ -372,6 +621,7 @@ JSON만 응답하세요."""
             logger.info(
                 f"[check_tool_needed] "
                 f"needs_tools={needs_tools}, "
+                f"need_previous_context={need_previous_context}, "
                 f"action={'use_tools' if needs_tools else 'direct_response'}, "
                 f"reasoning={reasoning}"
             )
@@ -393,7 +643,7 @@ JSON만 응답하세요."""
     
     def plan_next_action(self, state: AgentState) -> AgentState:
         """
-        다음 행동 계획 (중복 검색 방지 포함)
+        다음 행동 계획 (Function Calling 사용, 여러 툴 동시 선택 지원)
         
         Args:
             state: 현재 상태
@@ -401,43 +651,42 @@ JSON만 응답하세요."""
         Returns:
             업데이트된 상태
         """
-        logger.info("[plan_next_action] 행동 계획 수립 시작")
+        logger.info("[plan_next_action] Function Calling으로 계획 수립")
         
         user_message = state["user_message"]
         tool_history = state.get("tool_history", [])
         
-        # 중복 검색 방지: 이미 실행한 툴 확인 (툴 이름 + 파라미터 해시)
+        # 중복 검색 방지: 이미 실행한 툴 확인
         executed_tool_signatures = set()
         for history in tool_history:
             tool_name = history.get("tool")
             args = history.get("args", {})
-            # 파라미터를 문자열로 변환하여 시그니처 생성
             signature = f"{tool_name}:{str(sorted(args.items()))}"
             executed_tool_signatures.add(signature)
         
         logger.info(f"[plan_next_action] 이미 실행한 툴: {len(executed_tool_signatures)}개")
-
-        # 1. 규칙 기반 툴 제안 (최초 1회만 - tool_history가 비어있을 때만)
+        
+        # 1. 규칙 기반 툴 제안 (최초 1회만)
         quick_suggestion = None
         if len(tool_history) == 0:
             quick_suggestion = self.classifier.suggest_tool(user_message)
-
+        
         if quick_suggestion is not None:
             tool_name, args, reasoning = quick_suggestion
             
-            # 중복 검색 방지 (시그니처 비교)
             signature = f"{tool_name}:{str(sorted(args.items()))}"
             if signature in executed_tool_signatures:
-                logger.warning(f"[plan_next_action] 중복 툴 스킵: {tool_name} (이미 실행됨)")
-                # 이미 실행했으면 종료 (더 이상 계획하지 않음)
-                state["next_tool"] = None
+                logger.warning(f"[plan_next_action] 중복 툴 스킵: {tool_name}")
+                state["next_tools"] = []
                 return state
             else:
-                state["next_tool"] = {
+                # 단일 툴을 리스트로 래핑
+                state["next_tools"] = [{
                     "tool": tool_name,
                     "args": args,
-                    "reasoning": reasoning
-                }
+                    "reasoning": reasoning,
+                    "tool_call_id": None  # 규칙 기반은 ID 없음
+                }]
                 
                 decision = DecisionLog(
                     step="planning",
@@ -449,123 +698,118 @@ JSON만 응답하세요."""
                 )
                 state["decision_log"].append(decision.dict())
                 
-                logger.info(
-                    f"[plan_next_action] 규칙 기반 제안: "
-                    f"tool={tool_name}"
-                )
-                
+                logger.info(f"[plan_next_action] 규칙 기반 제안: tool={tool_name}")
                 return state
         
-        # 2. LLM 기반 계획
+        # 2. Function Calling 기반 계획
         status_summary = self._build_status_summary(state)
-        tool_descriptions = self._build_tool_descriptions()
         
-        # 이미 실행한 툴 목록을 명시적으로 제공
-        executed_tools_list = []
-        for history in tool_history:
-            tool_name = history.get("tool")
-            args = history.get("args", {})
-            executed_tools_list.append(f"{tool_name} (args: {args})")
+        # 이전 대화 컨텍스트 추가 (필요한 경우)
+        previous_context_text = ""
+        need_previous_context = state.get("need_previous_context", False)
+        if need_previous_context:
+            previous_context = self._build_previous_context(state)
+            if previous_context:
+                previous_context_text = f"\n\n{previous_context}\n"
         
-        prompt = f"""현재 상태를 분석하여 다음에 실행할 툴을 선택하세요.
-
+        # 이전 툴 실행 이력 (중복 방지용)
+        executed_tools_text = ""
+        if tool_history:
+            executed_list = []
+            for history in tool_history:
+                tool_name = history.get("tool")
+                args = history.get("args", {})
+                executed_list.append(f"- {tool_name} (args: {args})")
+            executed_tools_text = f"\n\n이미 실행한 도구 (중복 실행 금지):\n" + "\n".join(executed_list)
+        
+        # 메시지 구성
+        messages = [
+            {
+                "role": "user",
+                "content": f"""현재 상태를 분석하여 다음에 실행할 도구를 선택하세요.
+{previous_context_text}
 {status_summary}
 
-이미 실행한 툴:
-{chr(10).join([f"- {t}" for t in executed_tools_list]) if executed_tools_list else "없음"}
+질문: {user_message}{executed_tools_text}
 
-사용 가능한 툴:
-{tool_descriptions}
-
-**중요**: 
-1. 위에 나열된 "이미 실행한 툴"은 절대 다시 선택하지 마세요
-2. 같은 툴을 다른 파라미터로 실행하는 것은 가능하지만, 같은 파라미터로는 불가능합니다
-
-다음 툴을 선택하고 파라미터를 결정하세요.
-
-응답 형식 (JSON):
-{{
-    "tool": "툴 이름",
-    "args": {{}},
-    "reasoning": "선택 근거"
-}}
-
-JSON만 응답하세요."""
+적절한 도구를 선택하세요. 필요하다면 여러 도구를 동시에 선택할 수 있습니다."""
+            }
+        ]
         
         try:
-            system_msg = "당신은 계약서 분석 전문가입니다. JSON 형식으로만 응답하세요."
-            
-            # 프롬프트 로깅
-            # logger.info("=" * 80)
-            # logger.info("[plan_next_action] LLM 호출 프롬프트")
-            # logger.info("=" * 80)
-            # logger.info(f"[SYSTEM]\n{system_msg}")
-            # logger.info("-" * 80)
-            # logger.info(f"[USER]\n{prompt}")
-            # logger.info("=" * 80)
-            
-            response_text = self.runtime.call_llm(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_msg
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                model="gpt-4o",
-                temperature=0.3,
-                max_tokens=500,
-                response_format={"type": "json_object"}
+            # Function Calling 호출
+            result = self.function_adapter.call_with_functions(
+                messages=messages,
+                tool_choice="required"  # 반드시 툴 선택 (planner는 항상 툴 실행)
             )
             
-            result = json.loads(response_text)
-            
-            # 중복 검사: LLM이 이미 실행한 툴을 선택했는지 확인
-            selected_tool = result.get("tool")
-            selected_args = result.get("args", {})
-            selected_signature = f"{selected_tool}:{str(sorted(selected_args.items()))}"
-            
-            if selected_signature in executed_tool_signatures:
-                logger.warning(
-                    f"[plan_next_action] LLM이 중복 툴 선택: {selected_tool}, "
-                    f"args={selected_args}. 계획 취소."
-                )
-                state["next_tool"] = None
-                return state
-            
-            state["next_tool"] = result
-            
-            decision = DecisionLog(
-                step="planning",
-                reasoning=result.get("reasoning", ""),
-                action=f"selected_tool: {result.get('tool')}",
-                timestamp=datetime.now().isoformat(),
-                method="llm"
-            )
-            state["decision_log"].append(decision.dict())
-            
-            logger.info(
-                f"[plan_next_action] LLM 계획: "
-                f"tool={result.get('tool')}"
-            )
+            if result["has_tool_calls"]:
+                # 여러 tool_calls를 모두 처리
+                tool_calls = result["tool_calls"]
+                
+                logger.info(f"[plan_next_action] LLM이 선택한 툴: {tool_calls}")
+                
+                # 중복 검사
+                valid_tool_calls = []
+                for tc in tool_calls:
+                    signature = f"{tc['name']}:{str(sorted(tc['args'].items()))}"
+                    logger.info(f"[plan_next_action] 툴 시그니처: {signature}")
+                    logger.info(f"[plan_next_action] 이미 실행한 시그니처: {executed_tool_signatures}")
+                    
+                    if signature not in executed_tool_signatures:
+                        valid_tool_calls.append({
+                            "tool": tc["name"],
+                            "args": tc["args"],
+                            "tool_call_id": tc["id"],
+                            "reasoning": "Function calling으로 선택됨"
+                        })
+                        logger.info(f"[plan_next_action] 툴 추가: {tc['name']}")
+                    else:
+                        logger.warning(
+                            f"[plan_next_action] 중복 툴 스킵: {tc['name']}, "
+                            f"args={tc['args']}"
+                        )
+                
+                state["next_tools"] = valid_tool_calls
+                
+                if valid_tool_calls:
+                    decision = DecisionLog(
+                        step="planning",
+                        reasoning=f"{len(valid_tool_calls)}개 툴 선택됨",
+                        action=f"selected_tools: {[tc['tool'] for tc in valid_tool_calls]}",
+                        timestamp=datetime.now().isoformat(),
+                        method="function_calling"
+                    )
+                    state["decision_log"].append(decision.dict())
+                    
+                    logger.info(
+                        f"[plan_next_action] 선택된 툴: "
+                        f"{[tc['tool'] for tc in valid_tool_calls]}"
+                    )
+                else:
+                    logger.warning("[plan_next_action] 모든 툴이 중복으로 스킵됨")
+            else:
+                # 툴 선택 안 됨 (종료)
+                state["next_tools"] = []
+                logger.info("[plan_next_action] 툴 선택 안 됨 (종료)")
             
         except Exception as e:
             logger.error(f"[plan_next_action] 오류 발생: {e}")
-            # 폴백: 하이브리드 검색 툴
-            state["next_tool"] = {
+            import traceback
+            logger.error(traceback.format_exc())
+            # 폴백: 하이브리드 검색
+            state["next_tools"] = [{
                 "tool": "hybrid_search",
-                "args": {"topics": [state["user_message"][:100]]},
-                "reasoning": "계획 실패, 기본 검색 사용"
-            }
+                "args": {"topics": [{"topic_name": "general", "queries": [user_message[:100]]}]},
+                "reasoning": "계획 실패, 기본 검색 사용",
+                "tool_call_id": None
+            }]
         
         return state
     
     def execute_tools(self, state: AgentState) -> AgentState:
         """
-        툴 실행 (타입 안전)
+        툴 실행 (여러 툴 동시 실행 지원)
         
         Args:
             state: 현재 상태
@@ -573,56 +817,64 @@ JSON만 응답하세요."""
         Returns:
             업데이트된 상태
         """
-        next_tool = state.get("next_tool")
+        next_tools = state.get("next_tools", [])
         
-        if not next_tool:
-            logger.warning("[execute_tools] next_tool이 없습니다")
+        if not next_tools:
+            logger.warning("[execute_tools] next_tools가 비어있습니다")
             return state
         
-        tool_name = next_tool.get("tool")
-        args = next_tool.get("args", {})
         contract_id = state["contract_id"]
         
-        logger.info(f"[execute_tools] 툴 실행: {tool_name}, args={args}")
+        logger.info(f"[execute_tools] {len(next_tools)}개 툴 실행 시작")
         
-        try:
-            # 툴 실행 (AgentRuntime 사용)
-            # contract_id를 args에 추가
-            tool_args = {**args, "contract_id": contract_id}
-            result = self.runtime.execute_tool(
-                tool_name=tool_name,
-                tool_args=tool_args,
-                retry_on_failure=True
-            )
+        # 여러 툴 순차 실행 (병렬 실행은 execute_parallel_tools에서)
+        for tool_info in next_tools:
+            tool_name = tool_info.get("tool")
+            args = tool_info.get("args", {})
+            tool_call_id = tool_info.get("tool_call_id")
             
-            # tool_history에 기록
-            state["tool_history"].append({
-                "tool": tool_name,
-                "args": args,
-                "result": result.dict() if hasattr(result, 'dict') else result,
-                "timestamp": datetime.now().isoformat()
-            })
+            logger.info(f"[execute_tools] 툴 실행: {tool_name}, args={args}")
             
-            # 툴별 상태 업데이트 (explored_articles 업데이트)
-            self._update_explored_articles(state, tool_name, result)
-            
-            # collected_info에 추가
-            if result.success and result.data:
-                info = CollectedInfo(
-                    source=tool_name,
-                    content=result.data.dict() if hasattr(result.data, 'dict') else result.data,
-                    relevance=result.relevance_score or 0.8,
-                    timestamp=datetime.now().isoformat(),
-                    article_refs=[]
+            try:
+                # 툴 실행 (AgentRuntime 사용)
+                tool_args = {**args, "contract_id": contract_id}
+                result = self.runtime.execute_tool(
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    retry_on_failure=True
                 )
-                state["collected_info"].append(info.dict())
-            
-            logger.info(f"[execute_tools] 툴 실행 완료: success={result.success}")
-            
-        except Exception as e:
-            logger.error(f"[execute_tools] 툴 실행 실패: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+                
+                # tool_history에 기록
+                state["tool_history"].append({
+                    "tool": tool_name,
+                    "args": args,
+                    "result": result.dict() if hasattr(result, 'dict') else result,
+                    "tool_call_id": tool_call_id,
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+                # 툴별 상태 업데이트 (explored_articles 업데이트)
+                self._update_explored_articles(state, tool_name, result)
+                
+                # collected_info에 추가
+                if result.success and result.data:
+                    info = CollectedInfo(
+                        source=tool_name,
+                        content=result.data.dict() if hasattr(result.data, 'dict') else result.data,
+                        relevance=result.relevance_score or 0.8,
+                        timestamp=datetime.now().isoformat(),
+                        article_refs=[]
+                    )
+                    state["collected_info"].append(info.dict())
+                
+                logger.info(f"[execute_tools] 툴 실행 완료: {tool_name}, success={result.success}")
+                
+            except Exception as e:
+                logger.error(f"[execute_tools] 툴 실행 실패: {tool_name}, {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"[execute_tools] 전체 툴 실행 완료: {len(next_tools)}개")
         
         return state
     
@@ -654,6 +906,14 @@ JSON만 응답하세요."""
             state["decision_log"].append(decision.dict())
             return state
         
+        # 이전 대화 컨텍스트 추가 (필요한 경우)
+        previous_context_text = ""
+        need_previous_context = state.get("need_previous_context", False)
+        if need_previous_context:
+            previous_context = self._build_previous_context(state)
+            if previous_context:
+                previous_context_text = f"\n\n{previous_context}\n"
+        
         # 수집된 정보 상세
         collected_info = state.get("collected_info", [])
         collected_info_detail = self._build_collected_info_detail(collected_info)
@@ -668,10 +928,10 @@ JSON만 응답하세요."""
         
         # LLM으로 충분성 평가
         prompt = f"""수집된 정보가 질문에 답변하기 충분한지 평가하세요.
-
+{previous_context_text}
 질문: {state['user_message']}
 
-사용자 계약서 탐색 상태:
+[사용자 계약서 탐색 상태]
 - 탐색한 항목 ({len(explored_articles)}개):
 {explored_text}
 
@@ -716,13 +976,13 @@ JSON만 응답하세요."""
             system_msg = "당신은 정보 충분성 평가 전문가입니다. JSON 형식으로만 응답하세요."
             
             # 프롬프트 로깅
-            # logger.info("=" * 80)
-            # logger.info("[evaluate_sufficiency] LLM 호출 프롬프트")
-            # logger.info("=" * 80)
-            # logger.info(f"[SYSTEM]\n{system_msg}")
-            # logger.info("-" * 80)
-            # logger.info(f"[USER]\n{prompt}")
-            # logger.info("=" * 80)
+            logger.info("=" * 80)
+            logger.info("[evaluate_sufficiency] LLM 호출 프롬프트")
+            logger.info("=" * 80)
+            logger.info(f"[SYSTEM]\n{system_msg}")
+            logger.info("-" * 80)
+            logger.info(f"[USER]\n{prompt}")
+            logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
@@ -754,6 +1014,12 @@ JSON만 응답하세요."""
             is_sufficient = result.get("is_sufficient", False)
             reasoning = result.get("reasoning", "평가 근거 없음")
             missing_info = result.get("missing_info")
+
+            # missing_info를 state에 저장 (UI 표시용)
+            if missing_info and missing_info != "null":
+                state["missing_info"] = missing_info
+            else:
+                state["missing_info"] = None
 
             decision = DecisionLog(
                 step="evaluation",
@@ -838,13 +1104,13 @@ JSON만 응답하세요."""
         
         try:
             # 프롬프트 로깅
-            # logger.info("=" * 80)
-            # logger.info("[generate_response] LLM 호출 프롬프트")
-            # logger.info("=" * 80)
-            # logger.info(f"[SYSTEM]\n{system_prompt}")
-            # logger.info("-" * 80)
-            # logger.info(f"[USER]\n{user_prompt}")
-            # logger.info("=" * 80)
+            logger.info("=" * 80)
+            logger.info("[generate_response] LLM 호출 프롬프트")
+            logger.info("=" * 80)
+            logger.info(f"[SYSTEM]\n{system_prompt}")
+            logger.info("-" * 80)
+            logger.info(f"[USER]\n{user_prompt}")
+            logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
@@ -932,9 +1198,7 @@ JSON만 응답하세요."""
         unexplored_text = "\n".join(f"  - {article}" for article in unexplored_articles) if unexplored_articles else "  (없음)"
 
         summary_parts = [
-            f"질문: {state['user_message']}",
-            f"실행한 툴: {len(state.get('tool_history', []))}개",
-            f"\n사용자 계약서 탐색 상태:",
+            f"[사용자 계약서 탐색 상태]",
             f"- 탐색한 항목 ({len(explored_articles)}개):",
             explored_text,
             f"\n- 미탐색 항목 ({len(unexplored_articles)}개):",
@@ -944,71 +1208,7 @@ JSON만 응답하세요."""
 
         return "\n".join(summary_parts)
     
-    def _build_tool_descriptions(self) -> str:
-        """가용 툴 목록 생성 (파라미터 스키마 포함)"""
-        descriptions = []
-        
-        tool_schemas = {
-            "get_article_by_index": {
-                "description": """사용자 계약서의 조 번호 또는 별지 번호로 해당 항목의 상세 내용을 직접 조회합니다.
-- 사용자 계약서 미탐색 항목 중 질문과 연관된 정보가 있을 것으로 판단되는 항목들이 있다면 사용합니다.
-- 수집된 사용자 계약서의 내용에 특정 조나 별지에 대한 참조가 명시되어있고, 해당 참조의 내용이 필요하다고 판단되면 사용합니다.
-- 사용자 질문에서 조 번호나 별지 번호가 직접적으로 언급된 경우 사용합니다.
-- article_numbers와 exhibit_numbers를 모두 명시해도 좋고, 둘 중 하나만 명시해도 좋습니다.""",
-                "parameters": {
-                    "contract_id": "계약서 ID (자동 제공)",
-                    "article_numbers": "조 번호 리스트 [번호, 번호, ...]",
-                    "exhibit_numbers": "별지 번호 리스트 [번호, ...]"
-                }
-            },
-            "get_article_by_title": {
-                "description": """사용자 계약서의 조 제목 또는 별지 제목으로 해당 항목의 상세 내용을 직접 조회합니다.
-- 사용자 질문에서 조의 제목이나 별지의 제목이 직접적으로 언급된 것으로 보이는 경우 사용합니다.
-- 수집된 정보에 사용자 계약서 구조가 있다면, 이 툴은 사용을 지양합니다.(get_article_by_index를 사용할 수 있기 때문에)""",
-                "parameters": {
-                    "contract_id": "계약서 ID (자동 제공)",
-                    "titles": "제목 키워드 리스트 ['제목', '제목', ...]"
-                }
-            },
-            "hybrid_search": {
-                "description": """쿼리 기반 하이브리드 검색으로 사용자 계약서의 관련 조항을 찾습니다.
-- get_article_by_index 또는 get_article_by_title 툴을 통해서 직접 조회를 했음에도 원하는 정보를 얻지 못한 경우 사용합니다.
-- hybrid_search까지 사용하여 정보를 수집했음에도 원하는 정보를 얻지 못한 경우, 이전에 사용하지 않은 새로운 쿼리로 검색을 시도할 수 있습니다.""",
-                "parameters": {
-                    "contract_id": "계약서 ID (자동 제공)",
-                    "topics": "검색 주제 리스트 [{'topic_name': '주제명', 'queries': ['검색쿼리', '검색쿼리']}, {...}]"
-                }
-            },
-            "lookup_standard_contract": {
-                "description": """표준계약서 조문을 조회합니다.(표준계약서란 계약서의 작성 형식에 있어서 참고할만한 모범 템플릿으로, 실제 계약서는 아닙니다.)
-- 사용자가 계약서의 형식 검증이나 작성에 대한 질문을 한 경우 사용합니다.
-- 사용자 계약서의 조항 중에서 모범 템플릿 형식을 파악하고 싶은 조항의 번호와 해당 조항 관련 주제를 입력합니다.
-- 조항 번호를 알 수 없는 경우, 주제만 입력합니다.""",
-                "parameters": {
-                    "contract_id": "계약서 ID (자동 제공)",
-                    "user_article_numbers": "조 번호 리스트 [번호, 번호, ...]",
-                    "topic": "검색 주제 문자열..."
-                }
-            }
-        }
-        
-        for tool_name in self.tool_registry.list_tools():
-            if tool_name in tool_schemas:
-                schema = tool_schemas[tool_name]
-                desc = f"**{tool_name}**\n"
-                desc += f"{schema['description']}\n"
-                desc += f"파라미터: {schema['parameters']}"
-                descriptions.append(desc)
-            else:
-                try:
-                    tool = self.tool_registry.get_tool(tool_name)
-                    desc = f"**{tool_name}**\n"
-                    desc += f"{tool.description[:100]}..."
-                    descriptions.append(desc)
-                except Exception as e:
-                    logger.error(f"툴 설명 생성 실패: {tool_name}, {e}")
-        
-        return "\n\n".join(descriptions)
+
     
     def _build_info_summary(self, state: AgentState) -> str:
         """수집된 정보 요약 - 더 이상 사용하지 않음 (상세 정보로 대체)"""
@@ -1085,7 +1285,7 @@ JSON만 응답하세요."""
         
         # 조항 텍스트 생성
         if articles_dict or exhibits_dict:
-            articles_text = "사용자 계약서 조항:"
+            articles_text = "[사용자 계약서 조항]"
             
             # 조 번호 순으로 정렬
             for article_no in sorted(articles_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999):
@@ -1132,18 +1332,19 @@ JSON만 응답하세요."""
             standard_articles = content.get("standard_articles", [])
             
             if standard_articles:
-                template_text = "계약서 작성 참고용 템플릿(표준계약서) 조항:"
+                template_text = "[계약서 작성 참고용 템플릿(표준계약서) 조항]"
                 
                 for article in standard_articles:
-                    article_no = article.get("article_no", "")
+                    parent_id = article.get("parent_id", "")  # "제18조"
                     title = article.get("title", "")
-                    article_content = article.get("content", [])
+                    chunks = article.get("chunks", [])
                     
-                    template_text += f"\n제{article_no}조({title})\n"
-                    if isinstance(article_content, list):
-                        template_text += "\n".join(article_content)
-                    else:
-                        template_text += str(article_content)
+                    # parent_id와 title로 헤더 구성 (사용자 계약서와 동일한 형식)
+                    template_text += f"\n{parent_id}({title})\n"
+                    
+                    # chunks 배열의 각 text_raw를 개행으로 연결 (원문 구조 유지)
+                    if isinstance(chunks, list) and chunks:
+                        template_text += "\n".join(chunks)
                     template_text += "\n"
                 
                 sections.append(template_text.strip())
@@ -1152,13 +1353,60 @@ JSON만 응답하세요."""
     
     def _build_context_from_collected_info(self, state: AgentState) -> str:
         """수집된 정보를 컨텍스트로 변환 (상세 포맷팅)"""
+        sections = []
+        
+        # 1. 이전 대화 컨텍스트 추가 (필요한 경우)
+        need_previous_context = state.get("need_previous_context", False)
+        if need_previous_context:
+            previous_context = self._build_previous_context(state)
+            if previous_context:
+                sections.append(previous_context)
+        
+        # 2. 수집된 정보 추가
         collected_info = state.get("collected_info", [])
-
-        if not collected_info:
+        if collected_info:
+            # evaluator/planner와 동일한 방식 사용 (중복 제거, 정렬, 구조화)
+            collected_detail = self._build_collected_info_detail(collected_info)
+            sections.append(collected_detail)
+        
+        if not sections:
             return "관련 정보를 찾을 수 없습니다."
-
-        # evaluator/planner와 동일한 방식 사용 (중복 제거, 정렬, 구조화)
-        return self._build_collected_info_detail(collected_info)
+        
+        return "\n\n".join(sections)
+    
+    def _build_previous_context(self, state: AgentState) -> str:
+        """
+        이전 대화를 "수집된 정보" 형식으로 변환
+        
+        Args:
+            state: 현재 상태
+            
+        Returns:
+            이전 대화 컨텍스트 문자열
+        """
+        messages = state.get("messages", [])
+        
+        # 현재 질문 제외하고 직전 1턴만 (최근 2개 메시지)
+        if len(messages) <= 1:
+            return ""
+        
+        previous_turn = messages[-3:-1] if len(messages) >= 3 else messages[:-1]
+        
+        if not previous_turn:
+            return ""
+        
+        context_parts = ["[이전 대화 내용]"]
+        
+        for msg in previous_turn:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            if role == "user":
+                context_parts.append(f"\n이전 질문:\n{content}")
+            elif role == "assistant":
+                context_parts.append(f"\n이전 답변:\n{content}")
+        
+        return "\n".join(context_parts)
     
     def _extract_sources(self, state: AgentState) -> List[Dict[str, Any]]:
         """출처 추출"""
@@ -1344,27 +1592,13 @@ JSON만 응답하세요."""
         Returns:
             병렬 실행 가능 여부
         """
-        # 병렬 실행 가능한 시나리오:
-        # 1. 여러 조 번호 동시 조회
-        
-        next_tool = state.get("next_tool")
-        if not next_tool:
-            return False
-        
-        tool_name = next_tool.get("tool")
-        
-        # article_index_tool이고 여러 조 번호가 있는 경우
-        if tool_name == "article_index_tool":
-            args = next_tool.get("args", {})
-            article_numbers = args.get("article_numbers", [])
-            if len(article_numbers) > 1:
-                return True
-        
-        return False
+        # 여러 툴이 선택된 경우 병렬 실행 가능
+        next_tools = state.get("next_tools", [])
+        return len(next_tools) > 1
     
     def execute_parallel_tools(self, state: AgentState) -> AgentState:
         """
-        병렬 툴 실행
+        병렬 툴 실행 (여러 툴 동시 실행)
         
         Args:
             state: 현재 상태
@@ -1372,78 +1606,61 @@ JSON만 응답하세요."""
         Returns:
             업데이트된 상태
         """
-        next_tool = state.get("next_tool")
-        if not next_tool:
+        next_tools = state.get("next_tools", [])
+        if not next_tools:
             return state
         
-        tool_name = next_tool.get("tool")
-        args = next_tool.get("args", {})
         contract_id = state["contract_id"]
         
-        logger.info(f"[execute_parallel_tools] 병렬 실행 시작: {tool_name}")
-        
-        # 병렬 실행할 툴 목록 구성
-        parallel_tasks = []
-        
-        # 여러 조 번호 동시 조회
-        if tool_name == "article_index_tool":
-            article_numbers = args.get("article_numbers", [])
-            if len(article_numbers) > 1:
-                # 각 조 번호별로 개별 태스크 생성
-                for article_no in article_numbers:
-                    parallel_tasks.append((
-                        tool_name,
-                        {"article_numbers": [article_no]}
-                    ))
-            else:
-                # 병렬 실행 불가능, 일반 실행으로 폴백
-                return self.execute_tools(state)
-        else:
-            # 병렬 실행 불가능, 일반 실행으로 폴백
-            return self.execute_tools(state)
+        logger.info(f"[execute_parallel_tools] {len(next_tools)}개 툴 병렬 실행 시작")
         
         # ThreadPoolExecutor로 병렬 실행
         results = []
-        with ThreadPoolExecutor(max_workers=min(len(parallel_tasks), 4)) as executor:
-            future_to_task = {}
+        with ThreadPoolExecutor(max_workers=min(len(next_tools), 4)) as executor:
+            future_to_tool = {}
             
-            for task_tool_name, task_args in parallel_tasks:
-                tool_args = {**task_args, "contract_id": contract_id}
+            for tool_info in next_tools:
+                tool_name = tool_info.get("tool")
+                args = tool_info.get("args", {})
+                tool_call_id = tool_info.get("tool_call_id")
+                
+                tool_args = {**args, "contract_id": contract_id}
                 future = executor.submit(
                     self.runtime.execute_tool,
-                    task_tool_name,
+                    tool_name,
                     tool_args,
                     True  # retry_on_failure
                 )
-                future_to_task[future] = (task_tool_name, task_args)
+                future_to_tool[future] = (tool_name, args, tool_call_id)
             
             # 결과 수집
-            for future in as_completed(future_to_task):
-                task_tool_name, task_args = future_to_task[future]
+            for future in as_completed(future_to_tool):
+                tool_name, args, tool_call_id = future_to_tool[future]
                 try:
                     result = future.result()
-                    results.append((task_tool_name, task_args, result))
-                    logger.info(f"[execute_parallel_tools] 완료: {task_tool_name}")
+                    results.append((tool_name, args, tool_call_id, result))
+                    logger.info(f"[execute_parallel_tools] 완료: {tool_name}")
                 except Exception as e:
-                    logger.error(f"[execute_parallel_tools] 실패: {task_tool_name}, {e}")
+                    logger.error(f"[execute_parallel_tools] 실패: {tool_name}, {e}")
         
         # 결과를 상태에 반영
-        for task_tool_name, task_args, result in results:
+        for tool_name, args, tool_call_id, result in results:
             # tool_history에 기록
             state["tool_history"].append({
-                "tool": task_tool_name,
-                "args": task_args,
+                "tool": tool_name,
+                "args": args,
                 "result": result.dict() if hasattr(result, 'dict') else result,
+                "tool_call_id": tool_call_id,
                 "timestamp": datetime.now().isoformat()
             })
             
             # 툴별 상태 업데이트 (explored_articles 업데이트)
-            self._update_explored_articles(state, task_tool_name, result)
+            self._update_explored_articles(state, tool_name, result)
             
             # collected_info에 추가
             if result.success and result.data:
                 info = CollectedInfo(
-                    source=task_tool_name,
+                    source=tool_name,
                     content=result.data.dict() if hasattr(result.data, 'dict') else result.data,
                     relevance=result.relevance_score or 0.8,
                     timestamp=datetime.now().isoformat(),
@@ -1551,3 +1768,208 @@ JSON만 응답하세요."""
         """
         recovered_state = self.recover_from_checkpoint(session_id, contract_id)
         return AgentRecovery.get_partial_result(recovered_state)
+    
+    # ============================================
+    # 사고 과정 이벤트 생성 메서드
+    # ============================================
+    
+    def _generate_tool_selection_events(
+        self,
+        next_tools: List[Dict[str, Any]],
+        contract_id: str
+    ):
+        """
+        도구 선택 완료 시 사고 과정 이벤트 생성
+        
+        Args:
+            next_tools: 선택된 도구 리스트
+            contract_id: 계약서 ID
+            
+        Yields:
+            thinking 이벤트
+        """
+        for tool_info in next_tools:
+            tool_name = tool_info.get("tool")
+            args = tool_info.get("args", {})
+            
+            if tool_name == "get_article_by_index":
+                # 제1조, 제2조... (최대 3개)
+                article_numbers = args.get("article_numbers", [])
+                if article_numbers:
+                    articles_text = ", ".join([f"제{num}조" for num in article_numbers[:3]])
+                    if len(article_numbers) > 3:
+                        articles_text += "..."
+                    yield {"type": "thinking", "step": "tool_selected", "content": articles_text}
+            
+            elif tool_name == "get_article_by_title":
+                # 목적 조항, 정의 조항... (최대 3개)
+                keywords = args.get("keywords", [])
+                if keywords:
+                    keywords_text = ", ".join([f"{kw} 조항" for kw in keywords[:3]])
+                    if len(keywords) > 3:
+                        keywords_text += "..."
+                    yield {"type": "thinking", "step": "tool_selected", "content": keywords_text}
+            
+            elif tool_name == "lookup_standard_contract":
+                user_article_numbers = args.get("user_article_numbers")
+                topic = args.get("topic")
+                
+                if user_article_numbers:
+                    # A1 매칭 결과 확인
+                    matched_std_articles = self._get_matched_std_articles(contract_id, user_article_numbers)
+                    
+                    if matched_std_articles:
+                        # A1 매칭 결과 존재
+                        articles_text = ", ".join(matched_std_articles[:3])
+                        if len(matched_std_articles) > 3:
+                            articles_text += "..."
+                        yield {"type": "thinking", "step": "tool_selected", "content": f"표준계약서 {articles_text}"}
+                    else:
+                        # A1 매칭 결과 없음
+                        yield {"type": "thinking", "step": "std_contract_listing", "content": "표준계약서 조문 리스트업..."}
+                elif topic:
+                    # topic만 사용
+                    yield {"type": "thinking", "step": "std_contract_listing", "content": "표준계약서 조문 리스트업..."}
+            
+            elif tool_name == "hybrid_search":
+                # 주제별 쿼리 검색 - "주제: 🔍 쿼리, 쿼리..." 형식
+                topics = args.get("topics", [])
+                
+                for topic_info in topics:
+                    topic_name = topic_info.get("topic_name", "")
+                    queries = topic_info.get("queries", [])
+                    
+                    if topic_name and queries:
+                        # 쿼리들을 쉼표로 나열 (이모지는 주제 앞에만)
+                        queries_text = ", ".join(queries)
+                        content = f"{topic_name}: 🔍 {queries_text}"
+                        yield {"type": "thinking", "step": "hybrid_search_topic", "content": content}
+    
+    def _generate_evaluation_events(self, state: AgentState, previous_user_articles: set = None, previous_std_articles: set = None):
+        """
+        evaluate_sufficiency 진입 시 사고 과정 이벤트 생성
+        
+        Args:
+            state: 현재 상태
+            previous_user_articles: 이전에 읽은 사용자 조항 (중복 제거용)
+            previous_std_articles: 이전에 읽은 표준 조항 (중복 제거용)
+            
+        Yields:
+            thinking 이벤트
+        """
+        collected_info = state.get("collected_info", [])
+        
+        # 사용자 계약서 조항 추출 (중복 제거)
+        user_articles = set()
+        std_articles = set()
+        
+        # 이전에 읽은 조항 초기화
+        if previous_user_articles is None:
+            previous_user_articles = set()
+        if previous_std_articles is None:
+            previous_std_articles = set()
+        
+        for info in collected_info:
+            source = info.get("source")
+            content = info.get("content", {})
+            
+            if source in ["get_article_by_index", "get_article_by_title", "hybrid_search"]:
+                # 사용자 계약서
+                if source == "hybrid_search":
+                    results = content.get("results", {})
+                    for topic_name, articles_list in results.items():
+                        for article in articles_list:
+                            text = article.get("text", "")
+                            if text:
+                                user_articles.add(text)
+                else:
+                    matched_articles = content.get("matched_articles", [])
+                    for article in matched_articles:
+                        article_no = article.get("article_no", 0)
+                        if article_no < 0:
+                            # 별지
+                            title = article.get("title", "")
+                            if title:
+                                user_articles.add(title)
+                        else:
+                            # 조
+                            text = article.get("text", "")
+                            if text:
+                                user_articles.add(text)
+            
+            elif source == "lookup_standard_contract":
+                # 표준계약서
+                standard_articles = content.get("standard_articles", [])
+                for article in standard_articles:
+                    parent_id = article.get("parent_id", "")
+                    title = article.get("title", "")
+                    if parent_id and title:
+                        std_articles.add(f"{parent_id}({title})")
+        
+        # Read 이벤트 생성 (최대 5개, 새로 추가된 것만)
+        new_user_articles = user_articles - previous_user_articles
+        new_std_articles = std_articles - previous_std_articles
+        
+        if new_user_articles:
+            user_articles_list = sorted(list(new_user_articles))[:5]
+            articles_text = ", ".join(user_articles_list)
+            if len(new_user_articles) > 5:
+                articles_text += "..."
+            yield {"type": "thinking", "step": "reading", "content": f"Reading {articles_text}"}
+        
+        if new_std_articles:
+            std_articles_list = sorted(list(new_std_articles))[:5]
+            articles_text = ", ".join(std_articles_list)
+            if len(new_std_articles) > 5:
+                articles_text += "..."
+            yield {"type": "thinking", "step": "reading", "content": f"Reading 표준계약서 {articles_text}"}
+        
+        # 마지막에 업데이트된 조항 정보 반환 (특별한 마커로)
+        yield {"_internal_update": True, "user_articles": user_articles, "std_articles": std_articles}
+    
+    def _get_matched_std_articles(
+        self,
+        contract_id: str,
+        user_article_numbers: List[int]
+    ) -> List[str]:
+        """
+        A1 매칭 결과에서 표준 조항 추출
+        
+        Args:
+            contract_id: 계약서 ID
+            user_article_numbers: 사용자 조 번호 리스트
+            
+        Returns:
+            표준 조항 리스트 (예: ["제1조(목적)", "제2조(정의)"])
+        """
+        try:
+            from backend.shared.database import SessionLocal, ValidationResult
+            
+            db = SessionLocal()
+            try:
+                validation = db.query(ValidationResult).filter(
+                    ValidationResult.contract_id == contract_id
+                ).first()
+                
+                if not validation or not validation.completeness_check:
+                    return []
+                
+                matching_details = validation.completeness_check.get('matching_details', [])
+                
+                # 사용자 조 번호로 표준 조 parent_id 추출
+                standard_parent_ids = set()
+                
+                for detail in matching_details:
+                    user_no = detail.get('user_article_no')
+                    if user_no in user_article_numbers:
+                        matched_articles = detail.get('matched_articles', [])
+                        standard_parent_ids.update(matched_articles)
+                
+                return sorted(list(standard_parent_ids))
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"[_get_matched_std_articles] 오류 발생: {e}")
+            return []
