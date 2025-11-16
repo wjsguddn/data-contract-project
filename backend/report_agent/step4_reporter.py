@@ -597,8 +597,15 @@ class Step4Reporter:
         matching_details = a1_result.get("matching_details", [])
         logger.info(f"🔥 A1 재검증 결과: missing_analysis={len(missing_analysis)}개, matching_details={len(matching_details)}개")
         
-        enriched = []
-        for article_id, clause_ids in grouped.items():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from openai import RateLimitError
+        import time
+        
+        # 병렬 처리 함수
+        def process_missing_article(article_id, clause_ids):
+            """단일 누락 조항 처리 (재시도 로직 포함)"""
+            max_retries = 3
+            
             logger.info(f"🔥 처리 중: {article_id} (clause_ids: {len(clause_ids)}개)")
             
             # A1 재검증 결과에서 해당 조 찾기 (missing_article_analysis 우선)
@@ -611,31 +618,54 @@ class Step4Reporter:
                 logger.info(f"🔥   matching_details에서 찾기: {'발견' if a1_info else '없음'}")
             
             if not a1_info:
-                logger.warning(f"🔥 {article_id}: A1 재검증 정보 없음 (missing_article_analysis와 matching_details 모두 확인) - SKIP")
-                continue
+                logger.warning(f"🔥 {article_id}: A1 재검증 정보 없음 - SKIP")
+                return None
             
             # 표준계약서 조 내용 로드
             std_content = self._load_standard_article_content(article_id, contract_type)
             
             # 가장 유사도 높은 후보 찾기
-            best_candidate = self._get_best_candidate_from_a1(
-                a1_info, 
-                user_contract_data
-            )
+            best_candidate = self._get_best_candidate_from_a1(a1_info, user_contract_data)
             
-            # 서술형 보고서 생성
-            logger.info(f"  {article_id}: 서술형 보고서 생성 시작...")
-            narrative_report = self._generate_missing_clause_narrative(
-                article_id=article_id,
-                std_content=std_content,
-                best_candidate=best_candidate,
-                risk_assessment=a1_info.get("risk_assessment", ""),
-                recommendation=a1_info.get("recommendation", ""),
-                evidence=a1_info.get("evidence", "")
-            )
-            logger.info(f"  {article_id}: 서술형 보고서 생성 완료 (길이: {len(narrative_report)}자)")
+            # 서술형 보고서 생성 (재시도 로직)
+            narrative_report = None
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"  {article_id}: 서술형 보고서 생성 시작... (시도 {attempt + 1}/{max_retries})")
+                    narrative_report = self._generate_missing_clause_narrative(
+                        article_id=article_id,
+                        std_content=std_content,
+                        best_candidate=best_candidate,
+                        risk_assessment=a1_info.get("risk_assessment", ""),
+                        recommendation=a1_info.get("recommendation", ""),
+                        evidence=a1_info.get("evidence", "")
+                    )
+                    logger.info(f"✅ {article_id}: 서술형 보고서 생성 완료 (길이: {len(narrative_report)}자)")
+                    break
+                    
+                except RateLimitError as e:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 5
+                        logger.warning(f"⚠️ {article_id}: Rate Limit 도달. {wait_time}초 대기 후 재시도...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ {article_id}: Rate Limit 초과로 폴백 보고서 생성")
+                        narrative_report = self._generate_missing_clause_fallback(
+                            article_id, std_content, best_candidate,
+                            a1_info.get("risk_assessment", ""),
+                            a1_info.get("recommendation", "")
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"❌ {article_id}: 서술형 보고서 생성 실패: {e}")
+                    narrative_report = self._generate_missing_clause_fallback(
+                        article_id, std_content, best_candidate,
+                        a1_info.get("risk_assessment", ""),
+                        a1_info.get("recommendation", "")
+                    )
+                    break
             
-            enriched.append({
+            result = {
                 "std_article_id": article_id,
                 "std_article_title": std_content.get("title", ""),
                 "std_article_content": std_content,
@@ -645,9 +675,34 @@ class Step4Reporter:
                 "recommendation": a1_info.get("recommendation", ""),
                 "evidence": a1_info.get("evidence", ""),
                 "narrative_report": narrative_report
-            })
+            }
             
             logger.info(f"  {article_id}: 상세 정보 생성 완료 (후보: {best_candidate.get('user_article_no') if best_candidate else 'N/A'})")
+            return result
+        
+        # 병렬 실행 (최대 3개 동시 - 누락 조항은 보통 적음)
+        enriched = []
+        logger.info(f"🚀 누락 조항 서술형 보고서 병렬 생성 시작: {len(grouped)}개 조 (max_workers=3)")
+        start_time = time.time()
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # 모든 누락 조항을 병렬로 제출
+            future_to_article = {
+                executor.submit(process_missing_article, article_id, clause_ids): article_id
+                for article_id, clause_ids in grouped.items()
+            }
+            
+            # 완료된 순서대로 결과 수집
+            completed_count = 0
+            for future in as_completed(future_to_article):
+                result = future.result()
+                if result:
+                    enriched.append(result)
+                    completed_count += 1
+                    logger.info(f"📊 진행률: {completed_count}/{len(grouped)}")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"✨ 누락 조항 서술형 보고서 병렬 생성 완료: {len(enriched)}개 조, 총 소요 시간: {elapsed_time:.1f}초")
         
         logger.info(f"누락된 조항 상세 정보 생성 완료: {len(enriched)}개 조")
         return enriched

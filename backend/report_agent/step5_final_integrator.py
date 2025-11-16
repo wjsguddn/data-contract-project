@@ -332,7 +332,7 @@ class Step5FinalIntegrator:
     def _generate_narrative_reports(self, user_articles: List[Dict], 
                                     contract_type: str) -> List[Dict]:
         """
-        각 조항별로 서술형 보고서 생성
+        각 조항별로 서술형 보고서 생성 (병렬 처리)
         
         Args:
             user_articles: 사용자 조항 리스트
@@ -341,14 +341,65 @@ class Step5FinalIntegrator:
         Returns:
             서술형 보고서가 추가된 user_articles
         """
-        for article in user_articles:
-            try:
-                narrative = self._generate_single_article_narrative(article, contract_type)
-                article["narrative_report"] = narrative
-                logger.info(f"조항 '{article.get('user_article_title')}' 서술형 보고서 생성 완료")
-            except Exception as e:
-                logger.error(f"조항 '{article.get('user_article_title')}' 서술형 보고서 생성 실패: {e}")
-                article["narrative_report"] = self._generate_fallback_narrative(article)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from openai import RateLimitError
+        import time
+        
+        # 병렬 처리 함수
+        def process_single_article(article_index, article):
+            """단일 조항 처리 (재시도 로직 포함)"""
+            max_retries = 3
+            article_title = article.get('user_article_title', f'조항 {article_index}')
+            
+            for attempt in range(max_retries):
+                try:
+                    narrative = self._generate_single_article_narrative(article, contract_type)
+                    article["narrative_report"] = narrative
+                    logger.info(f"✅ [{article_index + 1}/{len(user_articles)}] '{article_title}' 서술형 보고서 생성 완료")
+                    return article
+                    
+                except RateLimitError as e:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 5  # 5초, 10초, 15초
+                        logger.warning(f"⚠️ Rate Limit 도달: '{article_title}'. {wait_time}초 대기 후 재시도... (시도 {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ '{article_title}' Rate Limit 초과로 폴백 보고서 생성")
+                        article["narrative_report"] = self._generate_fallback_narrative(article)
+                        return article
+                        
+                except Exception as e:
+                    logger.error(f"❌ '{article_title}' 서술형 보고서 생성 실패: {e}")
+                    article["narrative_report"] = self._generate_fallback_narrative(article)
+                    return article
+        
+        # 병렬 실행 (최대 5개 동시)
+        logger.info(f"🚀 서술형 보고서 병렬 생성 시작: {len(user_articles)}개 조항 (max_workers=5)")
+        start_time = time.time()
+        
+        # 조항 인덱스와 함께 처리 (순서 추적용)
+        article_with_index = list(enumerate(user_articles))
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # 모든 조항을 병렬로 제출
+            future_to_article = {
+                executor.submit(process_single_article, idx, article): (idx, article)
+                for idx, article in article_with_index
+            }
+            
+            # 완료된 순서대로 결과 수집
+            completed_count = 0
+            for future in as_completed(future_to_article):
+                completed_count += 1
+                idx, article = future_to_article[future]
+                
+                # 진행률 로그
+                if completed_count % 5 == 0 or completed_count == len(user_articles):
+                    elapsed = time.time() - start_time
+                    logger.info(f"📊 진행률: {completed_count}/{len(user_articles)} ({completed_count/len(user_articles)*100:.0f}%) - 경과 시간: {elapsed:.1f}초")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"✨ 서술형 보고서 병렬 생성 완료: {len(user_articles)}개 조항, 총 소요 시간: {elapsed_time:.1f}초")
         
         return user_articles
     
