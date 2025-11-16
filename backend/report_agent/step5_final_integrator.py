@@ -567,10 +567,8 @@ class Step5FinalIntegrator:
 
 ## 🔹 보고서는 반드시 ‘사람이 작성한 컨설팅 보고서 톤’으로 작성 """
 
-
-
         response = self.client.chat.completions.create(
-            model="gpt-4o",  # 종합분석은 gpt-4o 사용 (안정적)
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "당신은 데이터 계약서 검증 전문가입니다. 구조화된 데이터를 사용자 친화적인 서술형 보고서로 변환하는 것이 당신의 역할입니다."},
                 {"role": "user", "content": prompt}
@@ -579,7 +577,10 @@ class Step5FinalIntegrator:
             max_tokens=2000
         )
         
-        return response.choices[0].message.content.strip()
+        result = response.choices[0].message.content.strip()
+        logger.info(f"LLM 서술형 보고서 생성 완료: {user_article_title} (토큰: {response.usage.total_tokens})")
+        
+        return result
     
     def _generate_fallback_narrative(self, article_data: Dict[str, Any]) -> str:
         """

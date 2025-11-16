@@ -582,31 +582,36 @@ class Step4Reporter:
         """
         import re
         
-        logger.info("누락된 조항 상세 정보 생성 시작")
+        logger.info(f"🔥 누락된 조항 상세 정보 생성 시작 (overall_missing: {len(overall_missing)}개)")
         
         if not a1_result:
-            logger.warning("A1 결과가 없어 상세 정보 생성 불가")
+            logger.warning("🔥 A1 결과가 없어 상세 정보 생성 불가")
             return []
         
         # 1. 조 단위로 그룹핑
         grouped = self._group_missing_by_article(overall_missing)
-        logger.info(f"  조 단위 그룹핑 완료: {len(grouped)}개 조")
+        logger.info(f"🔥 조 단위 그룹핑 완료: {len(grouped)}개 조 - {list(grouped.keys())}")
         
         # 2. A1 재검증 결과 파싱
         missing_analysis = a1_result.get("missing_article_analysis", [])
         matching_details = a1_result.get("matching_details", [])
+        logger.info(f"🔥 A1 재검증 결과: missing_analysis={len(missing_analysis)}개, matching_details={len(matching_details)}개")
         
         enriched = []
         for article_id, clause_ids in grouped.items():
+            logger.info(f"🔥 처리 중: {article_id} (clause_ids: {len(clause_ids)}개)")
+            
             # A1 재검증 결과에서 해당 조 찾기 (missing_article_analysis 우선)
             a1_info = self._find_a1_reverification(missing_analysis, article_id)
+            logger.info(f"🔥   missing_analysis에서 찾기: {'발견' if a1_info else '없음'}")
             
             # missing_article_analysis에 없으면 matching_details에서 찾기
             if not a1_info:
                 a1_info = self._find_a1_from_matching_details(matching_details, article_id)
+                logger.info(f"🔥   matching_details에서 찾기: {'발견' if a1_info else '없음'}")
             
             if not a1_info:
-                logger.warning(f"  {article_id}: A1 재검증 정보 없음 (missing_article_analysis와 matching_details 모두 확인)")
+                logger.warning(f"🔥 {article_id}: A1 재검증 정보 없음 (missing_article_analysis와 matching_details 모두 확인) - SKIP")
                 continue
             
             # 표준계약서 조 내용 로드
@@ -619,6 +624,7 @@ class Step4Reporter:
             )
             
             # 서술형 보고서 생성
+            logger.info(f"  {article_id}: 서술형 보고서 생성 시작...")
             narrative_report = self._generate_missing_clause_narrative(
                 article_id=article_id,
                 std_content=std_content,
@@ -627,6 +633,7 @@ class Step4Reporter:
                 recommendation=a1_info.get("recommendation", ""),
                 evidence=a1_info.get("evidence", "")
             )
+            logger.info(f"  {article_id}: 서술형 보고서 생성 완료 (길이: {len(narrative_report)}자)")
             
             enriched.append({
                 "std_article_id": article_id,
@@ -934,8 +941,10 @@ class Step4Reporter:
         Returns:
             서술형 보고서 텍스트
         """
+        logger.info(f"🔥 _generate_missing_clause_narrative 호출됨: {article_id}")
+        
         if not self.client:
-            logger.warning("Azure OpenAI 클라이언트 없음. 폴백 보고서 생성")
+            logger.warning(f"🔥 Azure OpenAI 클라이언트 없음. 폴백 보고서 생성: {article_id}")
             return self._generate_missing_clause_fallback(
                 article_id, std_content, best_candidate, risk_assessment, recommendation
             )
@@ -1000,6 +1009,8 @@ class Step4Reporter:
 """
         
         try:
+            logger.info(f"누락 조항 서술형 보고서 생성 시작: {article_id}")
+            
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -1010,10 +1021,13 @@ class Step4Reporter:
                 max_tokens=1500
             )
             
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+            logger.info(f"누락 조항 서술형 보고서 생성 완료: {article_id} (토큰: {response.usage.total_tokens})")
+            
+            return result
         
         except Exception as e:
-            logger.error(f"서술형 보고서 생성 실패: {e}")
+            logger.error(f"누락 조항 서술형 보고서 생성 실패: {article_id} - {e}")
             return self._generate_missing_clause_fallback(
                 article_id, std_content, best_candidate, risk_assessment, recommendation
             )
