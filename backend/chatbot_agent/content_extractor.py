@@ -7,7 +7,7 @@ DB에서 가져온 조 전체 내용에서 필요한 하위항목만 발췌합�
 import logging
 import json
 from typing import Dict, Any, List
-from openai import AzureOpenAI
+from openai import OpenAI
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -19,12 +19,12 @@ class ContentExtractor:
     DB에서 가져온 조 전체 내용에서 필요한 하위항목만 발췌합니다.
     """
     
-    def __init__(self, azure_client: AzureOpenAI):
+    def __init__(self, openai_client: OpenAI):
         """
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
         """
-        self.client = azure_client
+        self.client = openai_client
         logger.info("ContentExtractor 초기화")
     
     def extract(
