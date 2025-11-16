@@ -8,10 +8,9 @@ import logging
 import json
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
-from openai import AzureOpenAI
+from openai import OpenAI
 
+from backend.chatbot_agent.tools.base import BaseTool
 from backend.shared.database import SessionLocal, ContractDocument, ClassificationResult, ValidationResult
 from backend.chatbot_agent.models import (
     StandardContractToolResult,
@@ -20,19 +19,6 @@ from backend.chatbot_agent.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class StandardContractToolInput(BaseModel):
-    """StandardContractTool 입력 스키마"""
-    contract_id: str = Field(description="계약서 ID")
-    user_article_numbers: Optional[List[int]] = Field(
-        None,
-        description="사용자 조 번호 리스트 (매칭 기반 조회 시 사용)"
-    )
-    topic: Optional[str] = Field(
-        None,
-        description="검색 주제 (주제 기반 조회 시 사용)"
-    )
 
 
 class StandardContractTool(BaseTool):
@@ -44,37 +30,58 @@ class StandardContractTool(BaseTool):
     2. 주제 기반: LLM으로 주제 관련 표준 조 선별 후 조회
     """
     
-    name: str = "lookup_standard_contract"
-    description: str = """
-    표준계약서 조문을 조회합니다.
+    def __init__(self, openai_client: OpenAI):
+        self.openai_client = openai_client
     
-    두 가지 조회 방식:
-    1. 매칭 기반 조회 (user_article_numbers 제공 시):
-       - A1 검증 결과를 활용하여 사용자 조에 대응하는 표준 조 조회
-       - 예: user_article_numbers=[3, 5] → 제3조, 제5조에 매칭된 표준 조 반환
+    @property
+    def name(self) -> str:
+        return "lookup_standard_contract"
     
-    2. 주제 기반 조회 (topic 제공 시):
-       - LLM으로 주제 관련 표준 조 선별 후 조회
-       - 예: topic="데이터 보안" → 보안 관련 표준 조 반환
+    @property
+    def description(self) -> str:
+        return """
+        표준계약서 조문을 조회합니다.
+        
+        두 가지 조회 방식:
+        1. 매칭 기반 조회 (user_article_numbers 제공 시):
+           - A1 검증 결과를 활용하여 사용자 조에 대응하는 표준 조 조회
+           - 예: user_article_numbers=[3, 5] → 제3조, 제5조에 매칭된 표준 조 반환
+        
+        2. 주제 기반 조회 (topic 제공 시):
+           - LLM으로 주제 관련 표준 조 선별 후 조회
+           - 예: topic="데이터 보안" → 보안 관련 표준 조 반환
+        
+        반환 정보:
+        - 표준계약서 조문 전체 텍스트
+        - 조 ID, 제목, 청크 정보
+        - 사용 시 주의사항
+        
+        사용 시기:
+        - 사용자 계약서와 표준계약서를 비교해야 할 때
+        - 표준계약서의 권장 사항을 확인해야 할 때
+        """
     
-    반환 정보:
-    - 표준계약서 조문 전체 텍스트
-    - 조 ID, 제목, 청크 정보
-    - 사용 시 주의사항
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_article_numbers": {
+                        "type": "array",
+                        "description": "사용자 조 번호 리스트 (매칭 기반 조회 시 사용)",
+                        "items": {"type": "integer"}
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "검색 주제 (주제 기반 조회 시 사용)"
+                    }
+                }
+            }
+        }
     
-    사용 시기:
-    - 사용자 계약서와 표준계약서를 비교해야 할 때
-    - 표준계약서의 권장 사항을 확인해야 할 때
-    """
-    args_schema: type[BaseModel] = StandardContractToolInput
-    
-    azure_client: Optional[AzureOpenAI] = None
-    
-    def __init__(self, azure_client: AzureOpenAI, **kwargs):
-        super().__init__(**kwargs)
-        self.azure_client = azure_client
-    
-    def _run(
+    def execute(
         self,
         contract_id: str,
         user_article_numbers: Optional[List[int]] = None,
@@ -317,7 +324,7 @@ class StandardContractTool(BaseTool):
 JSON만 응답하세요."""
         
         try:
-            response = self.azure_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {
@@ -400,33 +407,21 @@ JSON만 응답하세요."""
             # 청크를 order_index로 정렬
             chunks.sort(key=lambda c: c.get('order_index', 0))
             
-            # full_text 생성
-            full_text_parts = []
+            # text_raw 리스트 생성 (순서대로)
+            text_raw_list = []
             for chunk in chunks:
                 text_raw = chunk.get('text_raw', '').strip()
                 if text_raw:
-                    full_text_parts.append(text_raw)
-            
-            full_text = "\n".join(full_text_parts)
+                    text_raw_list.append(text_raw)
             
             standard_articles.append(
                 StandardArticle(
                     parent_id=parent_id,
                     title=article_data['title'],
-                    full_text=full_text,
-                    chunks=chunks
+                    chunks=text_raw_list
                 )
             )
         
         logger.info(f"[StandardContractTool] 표준 조문 로드 완료: {len(standard_articles)}개")
         
         return standard_articles
-    
-    async def _arun(
-        self,
-        contract_id: str,
-        user_article_numbers: Optional[List[int]] = None,
-        topic: Optional[str] = None
-    ) -> StandardContractToolResult:
-        """비동기 실행 (동기 버전 호출)"""
-        return self._run(contract_id, user_article_numbers, topic)
