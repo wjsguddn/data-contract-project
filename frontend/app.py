@@ -660,35 +660,22 @@ def main() -> None:
     
     # 사이드바 - 탭 구조 (챗봇 / 히스토리)
     with st.sidebar:
-        # 챗봇 UI (분류 완료 후에만 표시)
-        if st.session_state.get('classification_done', False) and st.session_state.get('uploaded_contract_data') is not None:
+        # 검증 완료 후에만 챗봇 탭 표시
+        if st.session_state.get('validation_completed', False) and st.session_state.get('uploaded_contract_data') is not None:
             contract_id = st.session_state.uploaded_contract_data['contract_id']
             
-            # 챗봇 활성화 상태 확인
-            chatbot_active = False
-            try:
-                chatbot_status_url = f"http://localhost:8000/api/chatbot/{contract_id}/status"
-                status_resp = requests.get(chatbot_status_url, timeout=10)
-                
-                if status_resp.status_code == 200:
-                    status_data = status_resp.json()
-                    chatbot_active = status_data.get('active', False)
-            except Exception:
-                pass
+            # 탭 생성
+            tab1, tab2 = st.tabs(["💬 챗봇", "📚 히스토리"])
             
-            if chatbot_active:
-                # 탭 생성
-                tab1, tab2 = st.tabs(["💬 챗봇", "📚 히스토리"])
-                
-                with tab1:
-                    # 챗봇 UI 표시
-                    display_chatbot_sidebar(contract_id)
-                
-                with tab2:
-                    # 히스토리 UI 표시
-                    display_contract_history_sidebar()
+            with tab1:
+                # 챗봇 UI 표시
+                display_chatbot_sidebar(contract_id)
+            
+            with tab2:
+                # 히스토리 UI 표시
+                display_contract_history_sidebar()
         else:
-            # 분류 전에는 히스토리만 표시
+            # 검증 전에는 히스토리만 표시
             st.markdown("### 📚 계약서 히스토리")
             display_contract_history_sidebar()
     
@@ -2683,27 +2670,53 @@ def display_manual_checks(manual_checks: dict):
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=60)  # 60초 캐싱
+def fetch_contract_history(limit: int = 20):
+    """
+    계약서 히스토리 조회 (캐싱)
+    
+    Args:
+        limit: 조회할 최대 개수
+        
+    Returns:
+        dict: 히스토리 데이터
+    """
+    history_url = "http://localhost:8000/api/contracts/history"
+    response = requests.get(history_url, params={"limit": limit}, timeout=30)
+    
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+
 def display_contract_history_sidebar():
     """
     사이드바에 계약서 히스토리 표시
     """
     try:
-        # 히스토리 조회 (타임아웃 30초로 증가)
-        history_url = "http://localhost:8000/api/contracts/history"
-        response = requests.get(history_url, params={"limit": 20}, timeout=30)
+        # 캐싱된 히스토리 조회
+        data = fetch_contract_history(limit=20)
         
-        if response.status_code != 200:
+        if data is None:
             st.error("히스토리를 불러올 수 없습니다.")
             return
         
-        data = response.json()
         contracts = data.get('contracts', [])
         
         if not contracts:
             st.info("아직 업로드한 계약서가 없습니다.")
             return
         
-        st.markdown(f"**총 {data.get('total', 0)}개의 계약서**")
+        # 헤더와 새로고침 버튼
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown(f"**총 {data.get('total', 0)}개의 계약서**")
+        with col2:
+            if st.button("🔄", key="refresh_history", help="히스토리 새로고침"):
+                # 캐시 클리어
+                fetch_contract_history.clear()
+                st.rerun()
+        
         st.markdown("---")
         
         # 계약서 목록 표시
