@@ -93,8 +93,7 @@ class StandardArticle(BaseModel):
     """표준계약서 조"""
     parent_id: str = Field(description="조 ID (예: '제5조', '별지1')")
     title: str = Field(description="조 제목")
-    full_text: str = Field(description="조 전체 텍스트")
-    chunks: List[Dict[str, Any]] = Field(description="청크 목록 (원본 데이터)")
+    chunks: List[str] = Field(description="조 내용 (text_raw 리스트, 순서대로)")
 
 
 class StandardContractData(BaseModel):
@@ -249,6 +248,9 @@ class AgentState(TypedDict, total=False):
     # 대화 히스토리 (plain dict 사용)
     messages: List[Dict[str, str]]  # [{"role": "user"|"assistant", "content": str}]
     
+    # 이전 대화 컨텍스트 필요 여부
+    need_previous_context: bool  # 이전 대화가 현재 질문 답변에 필요한지
+    
     # 계약서 구조 정보
     contract_structure: Optional[Dict[str, Any]]  # {articles: [...], exhibits: [...]}
     
@@ -269,8 +271,11 @@ class AgentState(TypedDict, total=False):
     # 의사결정 로그
     decision_log: List[Dict[str, Any]]  # DecisionLog의 dict 형태
     
-    # 다음 실행할 툴 정보
-    next_tool: Optional[Dict[str, Any]]  # {tool: str, args: dict, reasoning: str}
+    # 다음 실행할 툴 정보 (여러 개 가능)
+    next_tools: List[Dict[str, Any]]  # [{tool: str, args: dict, reasoning: str, tool_call_id: str}, ...]
+    
+    # 평가 결과
+    missing_info: Optional[str]  # 부족한 정보 (evaluate_sufficiency에서 설정)
     
     # 최종 출력
     final_response: Optional[str]
