@@ -11,7 +11,7 @@ ScopeValidator - 질문 범위 검증기
 
 import logging
 from typing import List
-from openai import AzureOpenAI
+from openai import OpenAI
 from backend.chatbot_agent.models import ValidationResult
 
 logger = logging.getLogger("uvicorn.error")
@@ -24,12 +24,12 @@ class ScopeValidator:
     계약서 검증과 관련없는 질문을 필터링합니다.
     """
     
-    def __init__(self, azure_client: AzureOpenAI):
+    def __init__(self, openai_client: OpenAI):
         """
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
         """
-        self.client = azure_client
+        self.client = openai_client
         
         # 범위 외 키워드
         self.obvious_out_of_scope = [
@@ -43,7 +43,7 @@ class ScopeValidator:
         
         # 계약서 관련 긍정 신호 키워드
         self.contract_indicators = [
-            "계약", "조", "별지", "조항", "내용", "규정",
+            "계약", "조", "별지", "조항", "항", "내용", "규정",
             "데이터", "제공", "이용", "대가", "지급",
             "기간", "해지", "책임", "의무", "권리",
             "당사자", "제공자", "이용자", "중개자",
@@ -56,8 +56,8 @@ class ScopeValidator:
             "그럼", "그러면", "그래서",      # 접속사
             "그건", "그랬", "그런", "그렇",  # 지시 관형사
             "뭐", "어디", "언제", "왜", "아니",      # 의문사 (단독 사용 시)
-            "더", "또", "다시", "간단", "자세", "상세",             # 추가/반복
-            "아까", "방금", "전에"           # 시간 참조
+            "더", "또", "다시", "간단", "자세", "상세", "요약", "구체", "좀"           # 추가/반복
+            "아까", "방금", "전에"          # 시간 참조
         ]
         
         logger.info("ScopeValidator 초기화")
