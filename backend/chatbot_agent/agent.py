@@ -7,14 +7,13 @@ ChatbotOrchestrator - 챗봇 오케스트레이터
 import logging
 import time
 from typing import Dict, Any, List, Optional
-from openai import AzureOpenAI
+from openai import OpenAI
 from backend.chatbot_agent.models import ChatbotResponse, ToolResult
 from backend.chatbot_agent.tools import ToolRegistry
 from backend.chatbot_agent.tools.hybrid_search_tool import HybridSearchTool
 from backend.chatbot_agent.tools.article_index_tool import ArticleIndexTool
 from backend.chatbot_agent.tools.article_title_tool import ArticleTitleTool
 from backend.chatbot_agent.validators import ScopeValidator, ResponseValidator
-from backend.chatbot_agent.tool_planner import ToolPlanner
 from backend.chatbot_agent.content_extractor import ContentExtractor
 from backend.chatbot_agent.reference_resolver import ReferenceResolver
 from backend.chatbot_agent.context_manager import ContextManager
@@ -38,7 +37,7 @@ class ChatbotOrchestrator:
     
     def __init__(
         self,
-        azure_client: AzureOpenAI,
+        openai_client: OpenAI,
         tool_registry: ToolRegistry = None,
         context_manager: ContextManager = None,
         scope_validator: ScopeValidator = None,
@@ -46,45 +45,44 @@ class ChatbotOrchestrator:
     ):
         """
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
             tool_registry: 도구 레지스트리 (선택, 없으면 자동 생성)
             context_manager: 컨텍스트 관리자 (선택)
             scope_validator: 범위 검증기 (선택)
             use_langgraph: LangGraph 기반 에이전트 사용 여부 (기본: True)
         """
-        self.azure_client = azure_client
+        self.openai_client = openai_client
         self.use_langgraph = use_langgraph
         
         # 도구 레지스트리 초기화
         if tool_registry is None:
             tool_registry = ToolRegistry()
             # 기본 도구 등록
-            tool_registry.register(HybridSearchTool(azure_client))
+            tool_registry.register(HybridSearchTool(openai_client))
             tool_registry.register(ArticleIndexTool())
             tool_registry.register(ArticleTitleTool())
             
             # 신규 도구 등록
             from backend.chatbot_agent.tools.standard_contract_tool import StandardContractTool
-            tool_registry.register(StandardContractTool(azure_client))
+            tool_registry.register(StandardContractTool(openai_client))
         
         self.tool_registry = tool_registry
         
         # 컴포넌트 초기화
         self.context_manager = context_manager or ContextManager()
-        self.scope_validator = scope_validator or ScopeValidator(azure_client)
+        self.scope_validator = scope_validator or ScopeValidator(openai_client)
         self.context_builder = ContextBuilder()
         
         # LangGraph 기반 에이전트 초기화
         if self.use_langgraph:
             self.autonomous_agent = AutonomousAgent(
-                azure_client=azure_client,
+                openai_client=openai_client,
                 tool_registry=tool_registry
             )
             logger.info("ChatbotOrchestrator 초기화 완료 (LangGraph 모드)")
         else:
             # 레거시 컴포넌트 (하위 호환성)
             self.response_validator = ResponseValidator()
-            self.tool_planner = ToolPlanner(azure_client, tool_registry)
             self.content_extractor = ContentExtractor(azure_client)
             self.reference_resolver = ReferenceResolver(tool_registry)
             logger.info("ChatbotOrchestrator 초기화 완료 (레거시 모드)")
@@ -410,7 +408,7 @@ class ChatbotOrchestrator:
         
         messages.append({"role": "user", "content": user_prompt})
         
-        response = self.azure_client.chat.completions.create(
+        response = self.openai_client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
             temperature=0.3,
@@ -554,22 +552,77 @@ class ChatbotOrchestrator:
         Yields:
             dict: 스트리밍 청크 {'token': str} 또는 {'sources': list}
         """
-        # LangGraph 모드에서는 스트리밍을 아직 지원하지 않음
+        # LangGraph 모드에서 스트리밍 지원
         if self.use_langgraph:
-            logger.info("LangGraph 모드: 비스트리밍 처리로 전환")
-            # 비스트리밍으로 처리
-            response = self.process_message(contract_id, user_message, session_id)
-            
-            # 응답을 스트리밍 형식으로 변환
-            if response.success:
-                for char in response.message:
-                    yield {"token": char}
-                if response.sources:
-                    yield {"sources": response.sources}
-            else:
-                error_msg = response.message or "처리 중 오류가 발생했습니다."
+            try:
+                # 세션 ID 생성 (없으면)
+                if not session_id:
+                    session_id = self.context_manager.create_session_id(contract_id)
+                
+                logger.info(f"스트리밍 메시지 처리 시작 (LangGraph): {contract_id}, session={session_id}")
+                
+                # 1. 질문 범위 검증
+                scope_result = self.scope_validator.validate(user_message)
+                if not scope_result.is_valid:
+                    logger.warning(f"범위 외 질문: {scope_result.reason}")
+                    error_msg = "죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서와 관련된 내용에 대해 질문해주세요."
+                    for char in error_msg:
+                        yield {"type": "token", "content": char}
+                    return
+                
+                # 2. 대화 히스토리 로드 (직전 1턴만)
+                conversation_history = self.context_manager.load_history(contract_id, session_id)
+                previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
+                
+                # 3. LangGraph 스트리밍 실행
+                full_response = ""
+                for event in self.autonomous_agent.run_stream(
+                    contract_id=contract_id,
+                    user_message=user_message,
+                    session_id=session_id,
+                    previous_turn=previous_turn
+                ):
+                    event_type = event.get("type")
+                    content = event.get("content")
+                    
+                    if event_type == "token":
+                        full_response += content
+                        yield {"type": "token", "content": content}
+                    elif event_type == "sources":
+                        yield {"type": "sources", "content": content}
+                    elif event_type == "thinking":
+                        # 사고 과정 이벤트 전달
+                        yield event
+                    elif event_type == "error":
+                        logger.error(f"스트리밍 중 오류: {content}")
+                        yield {"type": "error", "content": content}
+                
+                # 4. 대화 히스토리 저장
+                self.context_manager.save_message(
+                    contract_id=contract_id,
+                    session_id=session_id,
+                    role="user",
+                    content=user_message
+                )
+                
+                self.context_manager.save_message(
+                    contract_id=contract_id,
+                    session_id=session_id,
+                    role="assistant",
+                    content=full_response
+                )
+                
+                logger.info(f"스트리밍 메시지 처리 완료 (LangGraph)")
+                
+            except Exception as e:
+                logger.error(f"스트리밍 메시지 처리 실패 (LangGraph): {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                error_msg = "죄송합니다. 처리 중 오류가 발생했습니다. 다시 시도해주세요."
                 for char in error_msg:
-                    yield {"token": char}
+                    yield {"type": "token", "content": char}
+            
             return
         
         # 레거시 모드 (사용되지 않음)
@@ -584,7 +637,7 @@ class ChatbotOrchestrator:
             
             error_msg = "레거시 모드는 더 이상 지원되지 않습니다. LangGraph 모드를 사용하세요."
             for char in error_msg:
-                yield {"token": char}
+                yield {"type": "token", "content": char}
             else:
                 logger.info(f"참조 해결 완료 ({ref_time:.2f}초)")
             
@@ -681,7 +734,7 @@ class ChatbotOrchestrator:
         
         messages.append({"role": "user", "content": user_prompt})
         
-        stream = self.azure_client.chat.completions.create(
+        stream = self.openai_client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
             temperature=0.3,
