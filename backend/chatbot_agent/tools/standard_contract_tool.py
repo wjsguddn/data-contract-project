@@ -307,7 +307,9 @@ class StandardContractTool(BaseTool):
         """
         articles_text = "\n".join([f"- {article}" for article in articles_list])
         
-        prompt = f"""다음은 표준계약서의 조 목록입니다:
+        system_msg = "당신은 계약서 조항 분석 전문가입니다. JSON 형식으로만 응답하세요."
+        
+        user_prompt = f"""다음은 표준계약서의 조 목록입니다:
 
 {articles_text}
 
@@ -323,17 +325,26 @@ class StandardContractTool(BaseTool):
 
 JSON만 응답하세요."""
         
+        # 프롬프트 로깅
+        logger.info("=" * 80)
+        logger.info("[StandardContractTool] 표준계약서 조항 선별 LLM 호출")
+        logger.info("=" * 80)
+        logger.info(f"[SYSTEM]\n{system_msg}")
+        logger.info("-" * 80)
+        logger.info(f"[USER]\n{user_prompt}")
+        logger.info("=" * 80)
+        
         try:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {
                         "role": "system",
-                        "content": "당신은 계약서 조항 분석 전문가입니다. JSON 형식으로만 응답하세요."
+                        "content": system_msg
                     },
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": user_prompt
                     }
                 ],
                 temperature=0.2,
@@ -342,15 +353,25 @@ JSON만 응답하세요."""
             )
             
             response_text = response.choices[0].message.content.strip()
+            
+            # 응답 로깅
+            logger.info("=" * 80)
+            logger.info("[StandardContractTool] LLM 응답")
+            logger.info("=" * 80)
+            logger.info(response_text)
+            logger.info("=" * 80)
+            
             data = json.loads(response_text)
             
             selected = data.get('selected_articles', [])
-            logger.info(f"[StandardContractTool] LLM 선별 결과: {selected}")
+            logger.info(f"[StandardContractTool] 선별된 조항: {selected} ({len(selected)}개)")
             
             return selected
             
         except Exception as e:
             logger.error(f"[StandardContractTool] LLM 선별 실패: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
     
     def _load_std_articles(
