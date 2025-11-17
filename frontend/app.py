@@ -676,7 +676,7 @@ def main() -> None:
                 display_contract_history_sidebar()
         else:
             # 검증 전에는 히스토리만 표시
-            st.markdown("### 📚 계약서 히스토리")
+            st.markdown('<h3 style="color: #1f2937;">📚 계약서 히스토리</h3>', unsafe_allow_html=True)
             display_contract_history_sidebar()
     
     # 상단 헤더
@@ -1153,23 +1153,40 @@ def main() -> None:
 
 
 
+@st.cache_data(ttl=300, show_spinner=False)  # 5분 캐싱
+def fetch_report_data(contract_id: str):
+    """
+    보고서 데이터 조회 (캐싱)
+    
+    Args:
+        contract_id: 계약서 ID
+        
+    Returns:
+        dict: 보고서 데이터
+    """
+    report_url = f"http://localhost:8000/api/report/{contract_id}"
+    response = requests.get(report_url, timeout=60)
+    
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+
 def display_article_selector(contract_id: str, uploaded_data: dict):
     """
-    조항 선택 UI (가로 스크롤 탭 형태)
+    조항 선택 UI (드롭다운 방식)
     
     Args:
         contract_id: 계약서 ID
         uploaded_data: 업로드된 계약서 데이터
     """
     try:
-        # 보고서 데이터 로드
-        report_url = f"http://localhost:8000/api/report/{contract_id}"
-        response = requests.get(report_url, timeout=60)
+        # 캐싱된 보고서 데이터 로드
+        report = fetch_report_data(contract_id)
         
-        if response.status_code != 200:
+        if report is None:
             return
         
-        report = response.json()
         user_articles = report.get('user_articles', [])
         
         if not user_articles:
@@ -1179,45 +1196,45 @@ def display_article_selector(contract_id: str, uploaded_data: dict):
         if 'selected_article_idx' not in st.session_state:
             st.session_state.selected_article_idx = 0
         
-        st.markdown("### 📑 조항 선택")
-        
-        # 가로 스크롤 가능한 버튼 그룹 생성
-        # 한 줄에 최대 8개씩 표시
-        num_cols = min(8, len(user_articles))
-        
-        # 여러 줄로 나누어 표시
-        for row_start in range(0, len(user_articles), num_cols):
-            row_articles = user_articles[row_start:row_start + num_cols]
-            cols = st.columns(num_cols)
+        # 조항 목록 생성
+        article_options = []
+        for idx, article in enumerate(user_articles):
+            article_no = article.get('user_article_no', 0)
+            article_title = article.get('user_article_title', '')
             
-            for col_idx, article in enumerate(row_articles):
-                idx = row_start + col_idx
-                article_no = article.get('user_article_no', 0)
-                article_title = article.get('user_article_title', '')
-                
-                # 조항 헤더
-                if article_no == 0:
-                    article_label = "📄 서문"
-                else:
-                    # 제목만 추출 (괄호 안 내용)
-                    import re
-                    title_match = re.search(r'\(([^)]+)\)', article_title)
-                    if title_match:
-                        short_title = title_match.group(1)
-                        # 너무 길면 자르기
-                        if len(short_title) > 8:
-                            short_title = short_title[:8] + "..."
-                        article_label = f"제{article_no}조\n{short_title}"
-                    else:
-                        article_label = f"제{article_no}조"
-                
-                # 선택된 조항은 primary 버튼으로 표시
-                button_type = "primary" if idx == st.session_state.selected_article_idx else "secondary"
-                
-                with cols[col_idx]:
-                    if st.button(article_label, key=f"article_tab_{idx}", type=button_type, use_container_width=True):
-                        st.session_state.selected_article_idx = idx
-                        st.rerun()
+            # 상태 아이콘
+            insufficient = article.get('insufficient_items', article.get('insufficient', []))
+            missing = article.get('missing_items', article.get('missing', []))
+            
+            if missing:
+                icon = "❌"
+            elif insufficient:
+                icon = "⚠️"
+            else:
+                icon = "✅"
+            
+            if article_no == 0:
+                label = f"{icon} 서문"
+            else:
+                label = f"{icon} {article_title}"
+            
+            article_options.append((idx, label))
+        
+        # 드롭다운으로 조항 선택
+        selected_label = article_options[st.session_state.selected_article_idx][1]
+        
+        # 콜백 함수로 rerun 제거
+        def on_article_change():
+            st.session_state.selected_article_idx = st.session_state[f"article_selector_{contract_id}"]
+        
+        st.selectbox(
+            "조항 선택",
+            options=[opt[0] for opt in article_options],
+            format_func=lambda x: article_options[x][1],
+            index=st.session_state.selected_article_idx,
+            key=f"article_selector_{contract_id}",
+            on_change=on_article_change
+        )
     
     except Exception as e:
         st.error(f"조항 선택 UI 표시 중 오류: {str(e)}")
@@ -1225,22 +1242,20 @@ def display_article_selector(contract_id: str, uploaded_data: dict):
 
 def display_selected_article_content(contract_id: str, uploaded_data: dict):
     """
-    선택된 조항의 내용과 분석 표시 (2단 레이아웃)
+    선택된 조항의 내용과 분석 표시
     
     Args:
         contract_id: 계약서 ID
         uploaded_data: 업로드된 계약서 데이터
     """
     try:
-        # 보고서 데이터 로드
-        report_url = f"http://localhost:8000/api/report/{contract_id}"
-        response = requests.get(report_url, timeout=60)
+        # 캐싱된 보고서 데이터 로드
+        report = fetch_report_data(contract_id)
         
-        if response.status_code != 200:
+        if report is None:
             st.error("보고서를 불러올 수 없습니다.")
             return
         
-        report = response.json()
         user_articles = report.get('user_articles', [])
         
         if not user_articles:
@@ -1257,22 +1272,37 @@ def display_selected_article_content(contract_id: str, uploaded_data: dict):
         user_article_title = selected_article.get('user_article_title', '')
         narrative_report = selected_article.get('narrative_report', '')
         
-        # 2단 레이아웃: 조항 내용 + 종합 분석
-        left_col, right_col = st.columns([1, 1])
+        # 단일 컬럼 레이아웃 (세로 배치)
+        # 조항 제목
+        if user_article_no == 0:
+            st.markdown("### 📄 서문")
+        else:
+            st.markdown(f"### {user_article_title}")
         
-        # 왼쪽: 조항 내용
-        with left_col:
-            st.markdown("### 📄 조항 내용")
+        st.markdown("---")
+        
+        # 디버깅: 데이터 구조 확인
+        with st.expander("� 디버 그 정보", expanded=False):
+            structured_data = uploaded_data.get('structured_data', {})
+            articles = structured_data.get('articles', [])
+            preamble = structured_data.get('preamble', [])
             
-            # 조항 제목
-            if user_article_no == 0:
-                st.markdown("#### 서문")
-            else:
-                st.markdown(f"#### {user_article_title}")
+            st.write(f"**보고서 정보:**")
+            st.write(f"- user_article_no: {user_article_no}")
+            st.write(f"- user_article_title: {user_article_title}")
+            st.write(f"- selected_article_idx: {st.session_state.selected_article_idx}")
             
-            st.markdown("---")
+            st.write(f"\n**structured_data 정보:**")
+            st.write(f"- preamble 개수: {len(preamble)}")
+            st.write(f"- articles 개수: {len(articles)}")
             
-            # structured_data에서 해당 조항의 실제 내용 가져오기
+            if articles:
+                st.write(f"\n**articles 목록:**")
+                for idx, article in enumerate(articles[:5]):  # 처음 5개만
+                    st.write(f"{idx}: {article.get('text', 'N/A')}")
+        
+        # 조항 내용
+        with st.expander("📄 조항 원문 보기", expanded=True):
             structured_data = uploaded_data.get('structured_data', {})
             
             if user_article_no == 0:
@@ -1280,54 +1310,56 @@ def display_selected_article_content(contract_id: str, uploaded_data: dict):
                 preamble = structured_data.get('preamble', [])
                 if preamble:
                     preamble_text = '\n\n'.join(preamble)
-                    st.text_area("", value=preamble_text, height=500, disabled=True, key=f"content_{user_article_no}", label_visibility="collapsed")
+                    st.text_area("", value=preamble_text, height=300, disabled=True, key=f"content_{user_article_no}_{st.session_state.selected_article_idx}", label_visibility="collapsed")
                 else:
                     st.info("서문 내용이 없습니다.")
             else:
-                # 일반 조항
+                # 일반 조항 - user_article_title의 조 번호로 매칭
                 articles = structured_data.get('articles', [])
                 
-                # user_article_no에 해당하는 조항 찾기 (1-based index)
-                if 0 < user_article_no <= len(articles):
-                    article_data = articles[user_article_no - 1]
+                # user_article_title에서 조 번호 추출 (예: "제2조 (데이터 제공 범위 및 방식)" → 2)
+                import re
+                article_num_match = re.search(r'제(\d+)조', user_article_title)
+                
+                if article_num_match:
+                    article_num = int(article_num_match.group(1))
                     
-                    # 조항 내용 구성
-                    article_content = []
-                    article_content.append(article_data.get('text', ''))  # 제목
+                    # articles 배열에서 실제 "제n조"로 시작하는 항목 찾기
+                    found_article = None
+                    for article in articles:
+                        article_text = article.get('text', '')
+                        if article_text.startswith(f'제{article_num}조'):
+                            found_article = article
+                            break
                     
-                    # 하위 항목들
-                    sub_items = article_data.get('sub_items', [])
-                    for sub_item in sub_items:
-                        item_text = sub_item.get('text', '')
-                        if item_text:
-                            article_content.append(item_text)
-                    
-                    full_content = '\n\n'.join(article_content)
-                    st.text_area("", value=full_content, height=500, disabled=True, key=f"content_{user_article_no}", label_visibility="collapsed")
+                    if found_article:
+                        
+                        # 조항 내용 구성
+                        article_content = []
+                        article_content.append(found_article.get('text', ''))  # 제목
+                        
+                        # 하위 항목들
+                        sub_items = found_article.get('sub_items', [])
+                        for sub_item in sub_items:
+                            item_text = sub_item.get('text', '')
+                            if item_text:
+                                article_content.append(item_text)
+                        
+                        full_content = '\n\n'.join(article_content)
+                        st.text_area("", value=full_content, height=300, disabled=True, key=f"content_{user_article_no}_{st.session_state.selected_article_idx}", label_visibility="collapsed")
+                    else:
+                        st.warning(f"제{article_num}조를 찾을 수 없습니다. articles 배열을 확인해주세요.")
                 else:
-                    st.warning("조항 내용을 찾을 수 없습니다.")
+                    st.warning(f"조항 번호를 추출할 수 없습니다: {user_article_title}")
         
-        # 오른쪽: 종합 분석
-        with right_col:
-            st.markdown("### 📊 종합 분석")
-            
-            # 조항 제목 (간단히)
-            if user_article_no == 0:
-                st.markdown("#### 서문")
-            else:
-                st.markdown(f"#### {user_article_title}")
-            
-            st.markdown("---")
-            
-            # 서술형 보고서 표시
-            if narrative_report:
-                # 스크롤 가능한 컨테이너로 표시
-                st.markdown(
-                    f'<div style="height: 500px; overflow-y: auto; padding: 1rem; background-color: #1e1e1e; border-radius: 0.5rem;">{narrative_report}</div>',
-                    unsafe_allow_html=True
-                )
-            else:
-                st.info("분석 결과가 아직 생성되지 않았습니다.")
+        # 종합 분석 (메인 콘텐츠)
+        st.markdown("### 📊 AI 분석 결과")
+        
+        if narrative_report:
+            # 마크다운으로 표시 (스크롤 가능)
+            st.markdown(narrative_report)
+        else:
+            st.info("분석 결과가 아직 생성되지 않았습니다.")
     
     except Exception as e:
         st.error(f"조항 내용 표시 중 오류: {str(e)}")
@@ -2670,7 +2702,7 @@ def display_manual_checks(manual_checks: dict):
         st.markdown(f"<p style='text-align:right; color:#6b7280; font-size:0.85rem;'>처리 시간: {processing_time:.2f}초</p>", unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=60)  # 60초 캐싱
+@st.cache_data(ttl=600, show_spinner=False)  # 10분 캐싱 (타임아웃 방지)
 def fetch_contract_history(limit: int = 20):
     """
     계약서 히스토리 조회 (캐싱)
@@ -2698,7 +2730,7 @@ def display_contract_history_sidebar():
         data = fetch_contract_history(limit=20)
         
         if data is None:
-            st.error("히스토리를 불러올 수 없습니다.")
+            st.warning("⏳ 히스토리를 불러오는 중입니다...")
             return
         
         contracts = data.get('contracts', [])
