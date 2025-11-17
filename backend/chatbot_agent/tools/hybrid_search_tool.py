@@ -22,7 +22,7 @@ from backend.chatbot_agent.models import (
 from backend.consistency_agent.hybrid_searcher import HybridSearcher
 from backend.shared.services import get_knowledge_base_loader
 from backend.shared.database import SessionLocal, ContractDocument
-from openai import AzureOpenAI
+from openai import OpenAI
 import os
 
 logger = logging.getLogger("uvicorn.error")
@@ -38,12 +38,12 @@ class HybridSearchTool(BaseTool):
     - 주제별 독립 검색
     """
     
-    def __init__(self, azure_client: AzureOpenAI):
+    def __init__(self, openai_client: OpenAI):
         """
         Args:
-            azure_client: Azure OpenAI 클라이언트
+            openai_client: OpenAI 클라이언트
         """
-        self.azure_client = azure_client
+        self.openai_client = openai_client
         self.kb_loader = get_knowledge_base_loader()
         
         # 챗봇용 가중치 설정
@@ -282,7 +282,7 @@ class HybridSearchTool(BaseTool):
             
             # HybridSearcher 초기화 (RRF 사용)
             searcher = HybridSearcher(
-                azure_client=self.azure_client,
+                azure_client=self.openai_client,
                 dense_weight=self.dense_weight,  # RRF에서는 사용 안 함
                 fusion_method="rrf"  # 챗봇은 RRF 사용
             )
@@ -525,7 +525,7 @@ class HybridSearchTool(BaseTool):
 JSON만 응답하세요."""
         
         try:
-            response = self.azure_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {

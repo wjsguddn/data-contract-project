@@ -7,7 +7,7 @@ st.set_page_config(
     page_title="데이터 표준계약 검증",
     page_icon="",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # 전역 CSS 스타일 설정
@@ -63,7 +63,7 @@ st.markdown(
     /* 사이드바 너비 설정 */
     [data-testid="stSidebar"][aria-expanded="true"] {
         min-width: 470px !important;
-        max-width: 700px !important;
+        max-width: 750px !important;
     }
     
     [data-testid="stSidebar"][aria-expanded="false"] {
@@ -137,6 +137,34 @@ st.markdown(
     .streamlit-expanderHeader {
         font-weight: 500;
         border-radius: 8px;
+    }
+    
+    
+    /* 1. Running 상태 표시 숨기기 */
+    .stApp [data-testid="stStatusWidget"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    /* 4. 메인 페이지의 포인터 이벤트 활성화 */
+    section[data-testid="stMain"],
+    section[data-testid="stMain"] * {
+        pointer-events: auto !important;
+    }
+    
+    /* 7. 전역 포인터 이벤트 활성화 */
+    .stApp [data-testid="stAppViewContainer"],
+    .stApp [data-testid="stAppViewBlockContainer"] {
+        pointer-events: auto !important;
+    }
+    
+    /* 8. 비활성화되어야 하는 요소만 제외 */
+    button:disabled,
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+        pointer-events: none !important;
+        opacity: 0.5 !important;
     }
 
     </style>
@@ -590,38 +618,7 @@ def main() -> None:
             margin-right: auto;
             margin-left: auto;
         }
-        /* 사이드바 배경색을 하얀색으로 */
-        section[data-testid="stSidebar"] {
-            background-color: #ffffff !important;
-        }
-        section[data-testid="stSidebar"] > div {
-            background-color: #ffffff !important;
-        }
-        /* 채팅 입력창 배경색 */
-        section[data-testid="stSidebar"] .stChatInput textarea {
-            background-color: #f3f4f6 !important;
-            color: #1f2937 !important;
-        }
-        section[data-testid="stSidebar"] .stChatInput {
-            background-color: #f3f4f6 !important;
-        }
-        /* 사이드바 텍스트 색상 조정 (검은색으로) */
-        section[data-testid="stSidebar"] {
-            color: #1f2937 !important;
-        }
-        section[data-testid="stSidebar"] h2,
-        section[data-testid="stSidebar"] p,
-        section[data-testid="stSidebar"] span {
-            color: #1f2937 !important;
-        }
-        /* 챗봇 메시지 배경색 조정 */
-        section[data-testid="stSidebar"] .stChatMessage {
-            background-color: #f9fafb !important;
-            color: #1f2937 !important;
-        }
-        section[data-testid="stSidebar"] .stChatMessage p {
-            color: #1f2937 !important;
-        }
+        
         /* 사이드바 스크롤바 숨기기 */
         section[data-testid="stSidebar"] {
             overflow-y: auto;
@@ -641,7 +638,7 @@ def main() -> None:
         }
         /* 사이드바 상단 여백 제거 - emotion 클래스 타겟팅 */
         section[data-testid="stSidebar"] .st-emotion-cache-16txtl3 {
-            padding: 1rem 1.5rem !important;
+            padding: 0.5rem 1.5rem !important;
         }
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0 !important;
@@ -2882,10 +2879,10 @@ def display_chatbot_sidebar(contract_id: str):
     Args:
         contract_id: 계약서 ID
     """
-    # 채팅 컨테이너 높이 설정 516
+    # 채팅 컨테이너 높이 설정 475
     # 작업표시줄 on:    그램 544  모니터 758
     # 작업표시줄 off:   그램 591  모니터 805
-    CHAT_CONTAINER_HEIGHT = 516
+    CHAT_CONTAINER_HEIGHT = 540
     
     # CSS로 스크롤바 숨기기 및 채팅 스타일링 (헤더보다 먼저 배치)
     # CSS 템플릿에서 HEIGHT_PLACEHOLDER를 실제 높이로 치환
@@ -2966,6 +2963,18 @@ def display_chatbot_sidebar(contract_id: str):
             text-align: right !important;
         }
         
+        /* 사용자 메시지 배경색 - 사이드바 배경과 조화로운 푸른 먹색 계열 */
+        section[data-testid="stSidebar"] .stChatMessage[data-testid*="user"],
+        section[data-testid="stSidebar"] [data-testid="stChatMessage"]:nth-child(odd) {
+            background-color: #1a1d23 !important;
+        }
+        
+        /* 사용자 메시지 내부 컨텐츠 배경색도 동일하게 */
+        section[data-testid="stSidebar"] .stChatMessage[data-testid*="user"] > div,
+        section[data-testid="stSidebar"] [data-testid="stChatMessage"]:nth-child(odd) > div {
+            background-color: #1a1d23 !important;
+        }
+        
         /* Clear 버튼을 텍스트 링크처럼 만들기 */
         section[data-testid="stSidebar"] button[data-testid*="baseButton"] {
             background: none !important;
@@ -3019,7 +3028,7 @@ def display_chatbot_sidebar(contract_id: str):
     
     with col1:
         st.markdown('''
-            <div style="display: flex; align-items: baseline; margin-bottom: 0; margin-top: -1rem;">
+            <div style="display: flex; align-items: baseline; margin-bottom: 0; margin-top: -3rem;">
                 <h2 style="margin: 0; font-size: 1.5rem;">계약서 챗봇</h2>
                 <p style="margin: 0; margin-left: 0.75rem; color: #6b7280; font-size: 0.875rem;">계약서 내용에 대해 질문하세요</p>
             </div>
@@ -3035,6 +3044,17 @@ def display_chatbot_sidebar(contract_id: str):
     # 중간 영역 - 채팅 히스토리 (스크롤 가능)
     chat_container = st.container(height=CHAT_CONTAINER_HEIGHT)
     
+    # 스트리밍 중인지 확인
+    is_streaming = False
+    streaming_message_idx = -1
+    
+    # 마지막 메시지가 assistant이고 내용이 비어있으면 스트리밍 중
+    if st.session_state.chatbot_messages:
+        last_message = st.session_state.chatbot_messages[-1]
+        if last_message.get('role') == 'assistant' and not last_message.get('content'):
+            is_streaming = True
+            streaming_message_idx = len(st.session_state.chatbot_messages) - 1
+    
     with chat_container:
         if not st.session_state.chatbot_messages:
             # 안내 메시지를 컨테이너 하단에 표시 (상단에 큰 마진 추가)
@@ -3047,100 +3067,155 @@ def display_chatbot_sidebar(contract_id: str):
                 content = message.get('content', '')
                 
                 with st.chat_message(role):
-                    st.markdown(content)
+                    # 스트리밍 중인 메시지인 경우
+                    if is_streaming and idx == streaming_message_idx:
+                        # 사고 과정 표시 영역
+                        thinking_placeholder = st.empty()
+                        # 응답 표시 영역
+                        response_placeholder = st.empty()
+                        
+                        full_response = ""
+                        sources_data = []
+                        thinking_steps = []
+                        
+                        # 스트리밍 API 호출
+                        try:
+                            # 이전 메시지에서 사용자 질문 가져오기
+                            user_message = st.session_state.chatbot_messages[idx - 1].get('content', '')
+                            
+                            response = requests.post(
+                                f"http://localhost:8000/api/chatbot/{contract_id}/message",
+                                params={
+                                    'message': user_message,
+                                    'session_id': st.session_state.chatbot_session_id
+                                },
+                                stream=True,
+                                timeout=120
+                            )
+                            
+                            if response.status_code == 200:
+                                # 스트리밍 응답 처리 (실시간 업데이트)
+                                import json
+                                for line in response.iter_lines():
+                                    if line:
+                                        decoded_line = line.decode('utf-8')
+                                        
+                                        if decoded_line.startswith('data: '):
+                                            data_str = decoded_line[6:]
+                                            
+                                            if data_str == '[DONE]':
+                                                break
+                                            
+                                            try:
+                                                data = json.loads(data_str)
+                                                event_type = data.get('type')
+                                                
+                                                if event_type == 'thinking':
+                                                    # 사고 과정 이벤트
+                                                    step = data.get('step', '')
+                                                    content = data.get('content', '')
+                                                    
+                                                    # step에 따라 줄바꿈 여부 결정
+                                                    needs_newline = step in [
+                                                        'hybrid_search_topic',      # hybrid_search 주제별 쿼리
+                                                        'reading',                  # Read 출력
+                                                        'evaluation_result',        # missing_info
+                                                        'replanning',               # 재탐색
+                                                        'std_contract_listing',     # 표준계약서 리스트업
+                                                        'generating'                # 답변 생성
+                                                    ]
+                                                    
+                                                    if needs_newline and thinking_steps:
+                                                        # 줄바꿈 추가
+                                                        thinking_steps.append("")  # 빈 줄
+                                                    
+                                                    thinking_steps.append(content)
+                                                    
+                                                    # evaluation_result 뒤에도 줄바꿈 추가
+                                                    if step == 'evaluation_result':
+                                                        thinking_steps.append("")  # 빈 줄
+                                                    
+                                                    # 사고 과정 표시 (밝은 회색, 조금 큰 텍스트)
+                                                    thinking_lines = []
+                                                    for s in thinking_steps:
+                                                        if s == "":
+                                                            thinking_lines.append("<br>")
+                                                        else:
+                                                            thinking_lines.append(f"<span style='color: #9ca3af; font-size: 0.95rem;'>{s}</span>")
+                                                    
+                                                    thinking_text = "\n".join(thinking_lines)
+                                                    thinking_placeholder.markdown(thinking_text, unsafe_allow_html=True)
+                                                
+                                                elif event_type == 'token':
+                                                    # 첫 토큰이 오면 사고 과정 숨김
+                                                    if not full_response:
+                                                        thinking_placeholder.empty()
+                                                    
+                                                    token_content = data.get('content', '')
+                                                    full_response += token_content
+                                                    # 실시간 업데이트 (커서 표시)
+                                                    response_placeholder.markdown(full_response + "▌")
+                                                
+                                                elif event_type == 'sources':
+                                                    sources_data = data.get('content', [])
+                                                
+                                                elif event_type == 'error':
+                                                    error_msg = f"⚠️ {data.get('content', '오류 발생')}"
+                                                    response_placeholder.markdown(error_msg)
+                                                    st.session_state.chatbot_messages[idx]['content'] = error_msg
+                                                    break
+                                            
+                                            except json.JSONDecodeError:
+                                                continue
+                                
+                                # 커서 제거 및 최종 응답 표시
+                                response_placeholder.markdown(full_response)
+                                
+                                # 세션 상태 업데이트
+                                st.session_state.chatbot_messages[idx]['content'] = full_response
+                                st.session_state.chatbot_messages[idx]['sources'] = sources_data
+                            else:
+                                error_msg = f"⚠️ 서버 오류 (HTTP {response.status_code})"
+                                response_placeholder.markdown(error_msg)
+                                st.session_state.chatbot_messages[idx]['content'] = error_msg
+                        
+                        except requests.exceptions.Timeout:
+                            error_msg = "⚠️ 요청 시간 초과"
+                            response_placeholder.markdown(error_msg)
+                            st.session_state.chatbot_messages[idx]['content'] = error_msg
+                        
+                        except requests.exceptions.ConnectionError:
+                            error_msg = "⚠️ 서버 연결 실패"
+                            response_placeholder.markdown(error_msg)
+                            st.session_state.chatbot_messages[idx]['content'] = error_msg
+                        
+                        except Exception as e:
+                            error_msg = f"⚠️ 오류: {str(e)}"
+                            response_placeholder.markdown(error_msg)
+                            st.session_state.chatbot_messages[idx]['content'] = error_msg
+                    else:
+                        # 일반 메시지 표시
+                        st.markdown(content)
     
     # 푸터 (고정) - 입력창만
     # 메시지 입력창
     user_input = st.chat_input("질문을 입력하세요...", key=f"chatbot_input_sidebar_{contract_id}")
     
     if user_input and user_input.strip():
-        # 사용자 메시지 추가
-        st.session_state.chatbot_messages.append({
-            'role': 'user',
-            'content': user_input.strip()
-        })
-        
-        # 챗봇 응답 생성
-        try:
-            response = requests.post(
-                f"http://localhost:8000/api/chatbot/{contract_id}/message",
-                params={
-                    'message': user_input.strip(),
-                    'session_id': st.session_state.chatbot_session_id
-                },
-                stream=True,
-                timeout=120
-            )
-            
-            if response.status_code == 200:
-                full_response = ""
-                sources_data = []
-                
-                # 스트리밍 응답 처리
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8')
-                        
-                        if decoded_line.startswith('data: '):
-                            data_str = decoded_line[6:]
-                            
-                            if data_str == '[DONE]':
-                                break
-                            
-                            try:
-                                import json
-                                data = json.loads(data_str)
-                                
-                                if 'token' in data:
-                                    full_response += data['token']
-                                
-                                if 'sources' in data:
-                                    sources_data = data['sources']
-                            
-                            except json.JSONDecodeError:
-                                continue
-                
-                # 최종 응답 저장
-                if full_response:
-                    st.session_state.chatbot_messages.append({
-                        'role': 'assistant',
-                        'content': full_response,
-                        'sources': sources_data
-                    })
-                else:
-                    st.session_state.chatbot_messages.append({
-                        'role': 'assistant',
-                        'content': "응답을 생성할 수 없습니다."
-                    })
-            else:
-                error_msg = f"⚠️ 서버 오류 (HTTP {response.status_code})"
-                st.session_state.chatbot_messages.append({
-                    'role': 'assistant',
-                    'content': error_msg
-                })
-        
-        except requests.exceptions.Timeout:
-            error_msg = "⚠️ 요청 시간 초과"
-            st.session_state.chatbot_messages.append({
+        # 사용자 메시지와 빈 assistant 메시지를 한 번에 추가
+        st.session_state.chatbot_messages.extend([
+            {
+                'role': 'user',
+                'content': user_input.strip()
+            },
+            {
                 'role': 'assistant',
-                'content': error_msg
-            })
+                'content': '',
+                'sources': []
+            }
+        ])
         
-        except requests.exceptions.ConnectionError:
-            error_msg = "⚠️ 서버 연결 실패"
-            st.session_state.chatbot_messages.append({
-                'role': 'assistant',
-                'content': error_msg
-            })
-        
-        except Exception as e:
-            error_msg = f"⚠️ 오류: {str(e)}"
-            st.session_state.chatbot_messages.append({
-                'role': 'assistant',
-                'content': error_msg
-            })
-        
-        # 리렌더링
+        # 페이지 리렌더링
         st.rerun()
 
 

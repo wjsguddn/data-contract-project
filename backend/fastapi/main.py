@@ -807,16 +807,22 @@ async def chatbot_message(
                 api_key=os.getenv('OPENAI_API_KEY')
             )
 
-            orchestrator = ChatbotOrchestrator(azure_client=openai_client)
+            orchestrator = ChatbotOrchestrator(openai_client=openai_client)
             
             # 스트리밍 메시지 처리
+            logger.info(f"[chatbot_message] 스트리밍 시작: contract_id={contract_id}, message={message[:50]}")
+            
             async for chunk in orchestrator.process_message_stream(
                 contract_id=contract_id,
                 user_message=message,
                 session_id=session_id
             ):
+                chunk_type = chunk.get('type', 'unknown')
+                logger.debug(f"[chatbot_message] 청크 전송: type={chunk_type}")
                 yield f"data: {json.dumps(chunk)}\n\n"
                 await asyncio.sleep(0)  # 이벤트 루프에 제어권 양보
+            
+            logger.info(f"[chatbot_message] 스트리밍 완료")
             
             # 완료 신호
             yield "data: [DONE]\n\n"
