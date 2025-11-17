@@ -78,43 +78,46 @@ class AgentRuntime:
         self,
         messages: List[Dict[str, str]],
         model: str = "gpt-4o",
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ):
         """
         LLM 스트리밍 호출 (캐싱 미지원)
-        
+
         Args:
             messages: 메시지 리스트
             model: 모델명
-            temperature: 온도
+            temperature: 온도 (None이면 모델 기본값 사용, o1 시리즈는 지원하지 않음)
             max_tokens: 최대 토큰 수
             **kwargs: 추가 파라미터
-            
+
         Yields:
             LLM 응답 토큰
-            
+
         Raises:
             Exception: LLM 호출 실패 시
         """
         start_time = time.time()
-        
+
         try:
             self.metrics["llm_calls"] += 1
-            
+
             call_params = {
                 "model": model,
                 "messages": messages,
-                "temperature": temperature,
                 "stream": True
             }
-            
+
+            # o1 시리즈 모델은 temperature를 지원하지 않음
+            if temperature is not None and not model.startswith("gpt-5"):
+                call_params["temperature"] = temperature
+
             if max_tokens:
                 call_params["max_tokens"] = max_tokens
-            
+
             call_params.update(kwargs)
-            
+
             stream = self.openai_client.chat.completions.create(**call_params)
             
             for chunk in stream:
@@ -138,30 +141,30 @@ class AgentRuntime:
         self,
         messages: List[Dict[str, str]],
         model: str = "gpt-4o",
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         response_format: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> str:
         """
         LLM 호출 (캐싱 포함)
-        
+
         Args:
             messages: 메시지 리스트
             model: 모델명
-            temperature: 온도
+            temperature: 온도 (None이면 모델 기본값 사용, o1 시리즈는 지원하지 않음)
             max_tokens: 최대 토큰 수
             response_format: 응답 형식
             **kwargs: 추가 파라미터
-            
+
         Returns:
             LLM 응답 텍스트
-            
+
         Raises:
             Exception: LLM 호출 실패 시
         """
         start_time = time.time()
-        
+
         try:
             # 캐시 확인
             if self.enable_cache and self.llm_cache:
@@ -172,33 +175,36 @@ class AgentRuntime:
                     max_tokens=max_tokens,
                     **kwargs
                 )
-                
+
                 if cached_response:
                     self.metrics["llm_cache_hits"] += 1
                     execution_time = time.time() - start_time
                     self.metrics["total_execution_time"] += execution_time
                     logger.info(f"LLM 캐시 히트 (실행 시간: {execution_time:.2f}s)")
                     return cached_response
-                
+
                 self.metrics["llm_cache_misses"] += 1
-            
+
             # LLM 호출
             self.metrics["llm_calls"] += 1
-            
+
             call_params = {
                 "model": model,
-                "messages": messages,
-                "temperature": temperature
+                "messages": messages
             }
-            
+
+            # o1 시리즈 모델은 temperature를 지원하지 않음
+            if temperature is not None and not model.startswith("gpt-5"):
+                call_params["temperature"] = temperature
+
             if max_tokens:
                 call_params["max_tokens"] = max_tokens
-            
+
             if response_format:
                 call_params["response_format"] = response_format
-            
+
             call_params.update(kwargs)
-            
+
             response = self.openai_client.chat.completions.create(**call_params)
             
             # 토큰 사용량 추적
