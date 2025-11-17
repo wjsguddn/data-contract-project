@@ -7,7 +7,7 @@ st.set_page_config(
     page_title="데이터 표준계약 검증",
     page_icon="",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # 전역 CSS 스타일 설정
@@ -63,7 +63,7 @@ st.markdown(
     /* 사이드바 너비 설정 */
     [data-testid="stSidebar"][aria-expanded="true"] {
         min-width: 470px !important;
-        max-width: 700px !important;
+        max-width: 750px !important;
     }
     
     [data-testid="stSidebar"][aria-expanded="false"] {
@@ -2850,7 +2850,7 @@ def display_chatbot_sidebar(contract_id: str):
     # 채팅 컨테이너 높이 설정 475
     # 작업표시줄 on:    그램 544  모니터 758
     # 작업표시줄 off:   그램 591  모니터 805
-    CHAT_CONTAINER_HEIGHT = 475
+    CHAT_CONTAINER_HEIGHT = 540
     
     # CSS로 스크롤바 숨기기 및 채팅 스타일링 (헤더보다 먼저 배치)
     # CSS 템플릿에서 HEIGHT_PLACEHOLDER를 실제 높이로 치환
