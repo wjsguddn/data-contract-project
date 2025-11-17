@@ -189,19 +189,19 @@ class FunctionCallingAdapter:
                 ] + messages
             
             # 프롬프트 로깅
-            logger.info("=" * 80)
-            logger.info("[FunctionCalling] LLM 호출 프롬프트")
-            logger.info("=" * 80)
-            for idx, msg in enumerate(messages):
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                logger.info(f"[Message {idx+1}] Role: {role}")
-                if content:
-                    logger.info(f"Content:\n{content}")
-                if msg.get("tool_calls"):
-                    logger.info(f"Tool Calls: {msg.get('tool_calls')}")
-                logger.info("-" * 80)
-            logger.info("=" * 80)
+            # logger.info("=" * 80)
+            # logger.info("[FunctionCalling] LLM 호출 프롬프트")
+            # logger.info("=" * 80)
+            # for idx, msg in enumerate(messages):
+            #     role = msg.get("role", "")
+            #     content = msg.get("content", "")
+            #     logger.info(f"[Message {idx+1}] Role: {role}")
+            #     if content:
+            #         logger.info(f"Content:\n{content}")
+            #     if msg.get("tool_calls"):
+            #         logger.info(f"Tool Calls: {msg.get('tool_calls')}")
+            #     logger.info("-" * 80)
+            # logger.info("=" * 80)
             
             # OpenAI API 호출
             response = self.client.chat.completions.create(

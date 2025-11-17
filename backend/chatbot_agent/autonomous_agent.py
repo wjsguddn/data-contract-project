@@ -573,13 +573,13 @@ JSON만 응답하세요."""
             system_msg = "당신은 데이터계약 질문 분석 전문가입니다. JSON 형식으로만 응답하세요."
             
             # 프롬프트 로깅
-            logger.info("=" * 80)
-            logger.info("[check_tool_needed] LLM 호출 프롬프트")
-            logger.info("=" * 80)
-            logger.info(f"[SYSTEM]\n{system_msg}")
-            logger.info("-" * 80)
-            logger.info(f"[USER]\n{prompt}")
-            logger.info("=" * 80)
+            # logger.info("=" * 80)
+            # logger.info("[check_tool_needed] LLM 호출 프롬프트")
+            # logger.info("=" * 80)
+            # logger.info(f"[SYSTEM]\n{system_msg}")
+            # logger.info("-" * 80)
+            # logger.info(f"[USER]\n{prompt}")
+            # logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
@@ -976,13 +976,13 @@ JSON만 응답하세요."""
             system_msg = "당신은 정보 충분성 평가 전문가입니다. JSON 형식으로만 응답하세요."
             
             # 프롬프트 로깅
-            logger.info("=" * 80)
-            logger.info("[evaluate_sufficiency] LLM 호출 프롬프트")
-            logger.info("=" * 80)
-            logger.info(f"[SYSTEM]\n{system_msg}")
-            logger.info("-" * 80)
-            logger.info(f"[USER]\n{prompt}")
-            logger.info("=" * 80)
+            # logger.info("=" * 80)
+            # logger.info("[evaluate_sufficiency] LLM 호출 프롬프트")
+            # logger.info("=" * 80)
+            # logger.info(f"[SYSTEM]\n{system_msg}")
+            # logger.info("-" * 80)
+            # logger.info(f"[USER]\n{prompt}")
+            # logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
@@ -1104,13 +1104,13 @@ JSON만 응답하세요."""
         
         try:
             # 프롬프트 로깅
-            logger.info("=" * 80)
-            logger.info("[generate_response] LLM 호출 프롬프트")
-            logger.info("=" * 80)
-            logger.info(f"[SYSTEM]\n{system_prompt}")
-            logger.info("-" * 80)
-            logger.info(f"[USER]\n{user_prompt}")
-            logger.info("=" * 80)
+            # logger.info("=" * 80)
+            # logger.info("[generate_response] LLM 호출 프롬프트")
+            # logger.info("=" * 80)
+            # logger.info(f"[SYSTEM]\n{system_prompt}")
+            # logger.info("-" * 80)
+            # logger.info(f"[USER]\n{user_prompt}")
+            # logger.info("=" * 80)
             
             response_text = self.runtime.call_llm(
                 messages=[
