@@ -1120,26 +1120,36 @@ async def get_contract_history(
         }
     """
     try:
+        from sqlalchemy.orm import joinedload
+        
         # 전체 개수 조회
         total = db.query(ContractDocument).count()
         
-        # 계약서 목록 조회 (최신순)
+        # 계약서 목록 조회 (최신순) - 최적화: JOIN으로 한 번에 조회
         contracts = db.query(ContractDocument).order_by(
             ContractDocument.upload_date.desc()
         ).limit(limit).offset(offset).all()
         
-        # 각 계약서의 상세 정보 조회
+        # contract_id 리스트 추출
+        contract_ids = [c.contract_id for c in contracts]
+        
+        # 분류 결과 일괄 조회 (N+1 문제 해결)
+        classifications = db.query(ClassificationResult).filter(
+            ClassificationResult.contract_id.in_(contract_ids)
+        ).all()
+        classification_map = {c.contract_id: c for c in classifications}
+        
+        # 검증 결과 일괄 조회 (N+1 문제 해결)
+        validations = db.query(ValidationResult).filter(
+            ValidationResult.contract_id.in_(contract_ids)
+        ).all()
+        validation_map = {v.contract_id: v for v in validations}
+        
+        # 결과 조합
         result = []
         for contract in contracts:
-            # 분류 결과 확인
-            classification = db.query(ClassificationResult).filter(
-                ClassificationResult.contract_id == contract.contract_id
-            ).first()
-            
-            # 검증 결과 확인
-            validation = db.query(ValidationResult).filter(
-                ValidationResult.contract_id == contract.contract_id
-            ).first()
+            classification = classification_map.get(contract.contract_id)
+            validation = validation_map.get(contract.contract_id)
             
             result.append({
                 "contract_id": contract.contract_id,
