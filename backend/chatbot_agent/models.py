@@ -196,6 +196,7 @@ class ValidationResult(BaseModel):
     reason: Optional[str] = Field(None, description="검증 실패 이유")
     confidence: Optional[float] = Field(None, description="신뢰도 (0.0-1.0)")
     method: Optional[str] = Field(None, description="검증 방법 (rule_based, llm 등)")
+    references_previous_context: Optional[bool] = Field(None, description="이전 대화 참조 여부")
 
 
 # ============================================
@@ -273,6 +274,9 @@ class AgentState(TypedDict, total=False):
     
     # 다음 실행할 툴 정보 (여러 개 가능)
     next_tools: List[Dict[str, Any]]  # [{tool: str, args: dict, reasoning: str, tool_call_id: str}, ...]
+    
+    # 툴 선택 상태
+    all_tools_skipped: bool  # 모든 툴이 중복으로 스킵되었는지 여부
     
     # 평가 결과
     missing_info: Optional[str]  # 부족한 정보 (evaluate_sufficiency에서 설정)
