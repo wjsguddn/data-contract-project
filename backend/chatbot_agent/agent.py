@@ -574,13 +574,19 @@ class ChatbotOrchestrator:
                 conversation_history = self.context_manager.load_history(contract_id, session_id)
                 previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
                 
-                # 3. LangGraph 스트리밍 실행
+                # 3. 이전 대화 참조 여부 추출 (ScopeValidator에서 판단)
+                need_previous_context = scope_result.references_previous_context
+                if need_previous_context:
+                    logger.info(f"ScopeValidator: 이전 대화 참조 감지")
+                
+                # 4. LangGraph 스트리밍 실행
                 full_response = ""
                 for event in self.autonomous_agent.run_stream(
                     contract_id=contract_id,
                     user_message=user_message,
                     session_id=session_id,
-                    previous_turn=previous_turn
+                    previous_turn=previous_turn,
+                    need_previous_context=need_previous_context
                 ):
                     event_type = event.get("type")
                     content = event.get("content")
@@ -597,7 +603,7 @@ class ChatbotOrchestrator:
                         logger.error(f"스트리밍 중 오류: {content}")
                         yield {"type": "error", "content": content}
                 
-                # 4. 대화 히스토리 저장
+                # 5. 대화 히스토리 저장
                 self.context_manager.save_message(
                     contract_id=contract_id,
                     session_id=session_id,
