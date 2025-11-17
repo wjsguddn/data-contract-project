@@ -17,7 +17,7 @@ pandas==2.1.4
 numpy==1.26.3
 
 # AI (used by all agents)
-openai>=1.50.0
+openai>=1.70.0
 httpx>=0.27.0
 
 # Search (used by all agents)
