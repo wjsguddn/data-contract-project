@@ -8,7 +8,7 @@ st.set_page_config(
     page_title="데이터 표준계약 검증",
     page_icon="",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # 전역 CSS 스타일 설정
@@ -262,6 +262,36 @@ st.markdown(
         color: #d4d4d4;
         font-size: 14px;
         line-height: 1.5;
+    }
+    
+    /* 히스토리 버튼 스타일 */
+    [data-testid="stSidebar"] button p {
+        font-size: 1rem;
+    }
+    
+    /* 히스토리 삭제 버튼 (secondary) - 텍스트처럼 보이게 */
+    [data-testid="stSidebar"] button[kind="secondary"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0.25rem 0.5rem !important;
+    }
+    
+    [data-testid="stSidebar"] button[kind="secondary"]:hover {
+        background: rgba(239, 68, 68, 0.1) !important;
+        border: none !important;
+    }
+    
+    [data-testid="stSidebar"] button[kind="secondary"]:active {
+        background: rgba(239, 68, 68, 0.2) !important;
+    }
+    
+    /* 히스토리 열기 버튼 (primary) - 파란색 배경 유지하되 크기 조정 */
+    [data-testid="stSidebar"] button[kind="primary"] {
+        margin-top: 0.5rem !important;
+        font-size: 0.9rem !important;
+        min-height: auto !important;
+        height: auto !important;
     }
 
     </style>
@@ -1133,6 +1163,10 @@ def main() -> None:
         import uuid
         st.session_state.chatbot_session_id = str(uuid.uuid4())
     
+    # 계약서별 세션 관리 (contract_id -> session_id 매핑)
+    if 'contract_sessions' not in st.session_state:
+        st.session_state.contract_sessions = {}
+    
     # 사이드바 스타일 조정 CSS
     st.markdown("""
         <style>
@@ -1181,8 +1215,8 @@ def main() -> None:
     
     # 사이드바 - 탭 구조 (챗봇 / 히스토리)
     with st.sidebar:
-        # 검증 완료 후에만 챗봇 탭 표시
-        if st.session_state.get('validation_completed', False) and st.session_state.get('uploaded_contract_data') is not None:
+        # 업로드 완료 후 챗봇 탭 표시
+        if st.session_state.get('uploaded_contract_data') is not None:
             contract_id = st.session_state.uploaded_contract_data['contract_id']
             
             # 탭 생성
@@ -1196,8 +1230,8 @@ def main() -> None:
                 # 히스토리 UI 표시
                 display_contract_history_sidebar()
         else:
-            # 검증 전에는 히스토리만 표시
-            st.markdown('<h3 style="color: #1f2937;">📚 계약서 히스토리</h3>', unsafe_allow_html=True)
+            # 업로드 전에는 히스토리만 표시
+            st.markdown('<h3 style="color: #ffffff;">📚 계약서 히스토리</h3>', unsafe_allow_html=True)
             display_contract_history_sidebar()
     
     # 상단 헤더
@@ -1278,6 +1312,9 @@ def main() -> None:
 
         # 업로드 버튼 클릭 처리
         if upload_clicked:
+            # 업로드 중 플래그 설정
+            st.session_state.uploading = True
+            
             try:
                 backend_url = "http://localhost:8000/upload"
                 files = {"file": (file.name, file.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
@@ -1311,14 +1348,25 @@ def main() -> None:
                     # 기존 검증 결과 데이터 삭제 (같은 파일 재업로드 시 갱신 위해)
                     if 'validation_result_data' in st.session_state:
                         del st.session_state.validation_result_data
+                    
+                    # 챗봇 세션 초기화 (새 계약서)
+                    st.session_state.chatbot_messages = []
+                    # 계약서별 세션 ID 생성
+                    st.session_state.contract_sessions[contract_id] = f"{contract_id}_session"
+                    st.session_state.chatbot_session_id = f"{contract_id}_session"
+                    
+                    # 업로드 완료 플래그 해제
+                    st.session_state.uploading = False
 
                     # 페이지 리렌더링 강제
                     st.rerun()
 
                 else:
                     st.error(f"업로드 실패: {resp.status_code} - {resp.text}")
+                    st.session_state.uploading = False
             except Exception as e:
                 st.error(f"연결 오류: {e}")
+                st.session_state.uploading = False
 
     # session_state에 업로드된 데이터가 있으면 UI 표시
     if st.session_state.uploaded_contract_data is not None:
@@ -4169,7 +4217,7 @@ def display_manual_checks(manual_checks: dict):
 
 def fetch_contract_history(limit: int = 20):
     """
-    계약서 히스토리 조회 (캐싱 제거, 빠른 타임아웃)
+    계약서 히스토리 조회
     
     Args:
         limit: 조회할 최대 개수
@@ -4179,7 +4227,7 @@ def fetch_contract_history(limit: int = 20):
     """
     try:
         history_url = "http://localhost:8000/api/contracts/history"
-        response = requests.get(history_url, params={"limit": limit}, timeout=3)  # 3초로 단축
+        response = requests.get(history_url, params={"limit": limit}, timeout=10)  # 10초로 증가
         
         if response.status_code == 200:
             return response.json()
@@ -4196,31 +4244,45 @@ def display_contract_history_sidebar():
     """
     사이드바에 계약서 히스토리 표시
     """
+    # 업로드 중일 때는 로딩 메시지만 표시
+    if st.session_state.get('uploading', False):
+        st.info("📤 파일 업로드 중...")
+        return
+    
     try:
-        # 캐싱된 히스토리 조회
+        # 히스토리 조회
         data = fetch_contract_history(limit=20)
         
         if data is None:
             st.warning("⏳ 히스토리를 불러오는 중입니다...")
             return
         
+        # 에러 체크
+        if 'error' in data:
+            error_type = data['error']
+            if error_type == 'timeout':
+                st.warning("⏳ 서버 응답이 느립니다. 잠시 후 다시 시도해주세요.")
+            elif error_type == 'connection':
+                st.error("❌ 서버에 연결할 수 없습니다.")
+            else:
+                st.error(f"히스토리 로딩 오류: {error_type}")
+            return
+        
         contracts = data.get('contracts', [])
+        
+        # 헤더와 새로고침 버튼 (항상 표시)
+        col1, col2 = st.columns([5, 0.4])
+        with col1:
+            st.markdown(f"**총 {data.get('total', 0)}개의 계약서**")
+        with col2:
+            if st.button("⭮", key="refresh_history", help="히스토리 새로고침"):
+                st.rerun()
+        
+        st.markdown('<hr style="margin-top: 0; margin-bottom: 1rem;">', unsafe_allow_html=True)
         
         if not contracts:
             st.info("아직 업로드한 계약서가 없습니다.")
             return
-        
-        # 헤더와 새로고침 버튼
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown(f"**총 {data.get('total', 0)}개의 계약서**")
-        with col2:
-            if st.button("🔄", key="refresh_history", help="히스토리 새로고침"):
-                # 캐시 클리어
-                fetch_contract_history.clear()
-                st.rerun()
-        
-        st.markdown("---")
         
         # 계약서 목록 표시
         for contract in contracts:
@@ -4255,19 +4317,26 @@ def display_contract_history_sidebar():
             
             # 카드 형태로 표시
             with st.container():
-                col1, col2 = st.columns([4, 1])
+                col1, col2, col3 = st.columns([2.5, 0.6, 0.3])
                 
                 with col1:
                     st.markdown(f"**{status_icon} {filename}**")
                     st.markdown(f"<small style='color: #6b7280;'>{type_label} • {formatted_date}</small>", unsafe_allow_html=True)
                 
                 with col2:
-                    if st.button("열기", key=f"load_{contract_id}", use_container_width=True):
+                    if st.button("열기", key=f"load_{contract_id}", type="primary"):
                         # 해당 계약서 로드
                         load_contract_from_history(contract_id)
                         st.rerun()
                 
-                st.markdown("---")
+                with col3:
+                    if st.button("🗑️", key=f"delete_{contract_id}"):
+                        # 계약서 삭제 중 스피너 표시
+                        with st.spinner(""):
+                            delete_contract(contract_id)
+                        st.rerun()
+                
+                st.markdown('<hr style="margin-top: 0.5rem; margin-bottom: 1rem;">', unsafe_allow_html=True)
         
     except requests.exceptions.Timeout:
         st.warning("⏳ 서버 응답이 느립니다. 잠시 후 다시 시도해주세요.")
@@ -4329,10 +4398,13 @@ def load_contract_from_history(contract_id: str):
                     st.session_state.validation_completed = False
                     st.session_state.validation_started = False
                 
-                # 챗봇 대화 초기화
-                st.session_state.chatbot_messages = []
-                import uuid
-                st.session_state.chatbot_session_id = str(uuid.uuid4())
+                # 챗봇 세션 설정 (계약서별)
+                if contract_id not in st.session_state.contract_sessions:
+                    st.session_state.contract_sessions[contract_id] = f"{contract_id}_session"
+                
+                # 세션 ID를 임시로 다른 값으로 설정 (display_chatbot_sidebar에서 변경 감지하도록)
+                st.session_state.chatbot_session_id = "temp_loading"
+                st.session_state.chatbot_messages = []  # 임시로 비움 (사이드바에서 로드됨)
                 
                 st.success(f"✅ {data.get('filename')} 불러오기 완료!")
             else:
@@ -4346,6 +4418,49 @@ def load_contract_from_history(contract_id: str):
             st.error(f"계약서 로딩 중 오류: {str(e)}")
 
 
+def delete_contract(contract_id: str):
+    """
+    계약서 삭제
+    
+    Args:
+        contract_id: 계약서 ID
+    """
+    try:
+        delete_url = f"http://localhost:8000/api/contracts/{contract_id}"
+        response = requests.delete(delete_url, timeout=10)
+        
+        if response.status_code == 200:
+            # 현재 로드된 계약서가 삭제된 계약서인 경우 세션 초기화
+            if st.session_state.get('uploaded_contract_data', {}).get('contract_id') == contract_id:
+                st.session_state.uploaded_contract_data = None
+                st.session_state.classification_done = False
+                st.session_state.validation_completed = False
+                st.session_state.chatbot_messages = []
+            
+            # 세션 매핑에서도 제거
+            if 'contract_sessions' in st.session_state and contract_id in st.session_state.contract_sessions:
+                del st.session_state.contract_sessions[contract_id]
+            
+            # 삭제 성공 - 에러 메시지 표시 안 함
+            return True
+        elif response.status_code == 404:
+            st.error("계약서를 찾을 수 없습니다.")
+            return False
+        else:
+            st.error(f"삭제 실패: {response.status_code}")
+            return False
+    
+    except requests.exceptions.Timeout:
+        st.error("⏳ 서버 응답 시간 초과")
+        return False
+    except requests.exceptions.ConnectionError:
+        st.error("❌ 서버 연결 실패")
+        return False
+    except Exception as e:
+        st.error(f"삭제 중 오류: {str(e)}")
+        return False
+
+
 def display_chatbot_sidebar(contract_id: str):
     """
     사이드바에 챗봇 인터페이스 표시
@@ -4353,6 +4468,50 @@ def display_chatbot_sidebar(contract_id: str):
     Args:
         contract_id: 계약서 ID
     """
+    # 계약서별 세션 관리
+    if contract_id not in st.session_state.contract_sessions:
+        # 새 계약서: 세션 ID 생성 (계약서 ID 기반)
+        st.session_state.contract_sessions[contract_id] = f"{contract_id}_session"
+    
+    # 현재 계약서의 세션 ID 설정
+    current_session_id = st.session_state.contract_sessions[contract_id]
+    
+    # 세션이 변경되었는지 확인
+    session_changed = st.session_state.chatbot_session_id != current_session_id
+    
+    if session_changed:
+        st.session_state.chatbot_session_id = current_session_id
+        
+        # DB에서 대화 내역 로드
+        try:
+            history_url = f"http://localhost:8000/api/chatbot/{contract_id}/history"
+            response = requests.get(
+                history_url,
+                params={"session_id": current_session_id},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                history = data.get('history', [])
+                
+                # 대화 내역 복원 (system 메시지 제외)
+                loaded_messages = [
+                    {
+                        'role': msg['role'],
+                        'content': msg['content']
+                    }
+                    for msg in history
+                    if msg['role'] in ['user', 'assistant']
+                ]
+                
+                # 메시지가 있으면 로드, 없으면 빈 배열 유지
+                st.session_state.chatbot_messages = loaded_messages
+                
+        except Exception as e:
+            # 로드 실패 시 빈 대화로 시작
+            st.session_state.chatbot_messages = []
+    
     # 채팅 컨테이너 높이 설정 475
     # 작업표시줄 on:    그램 544  모니터 758
     # 작업표시줄 off:   그램 591  모니터 805
@@ -4510,9 +4669,19 @@ def display_chatbot_sidebar(contract_id: str):
     
     with col2:
         if st.button("Clear", key=f"reset_chat_header_{contract_id}", use_container_width=True):
+            # 1. 프론트엔드 메시지 삭제
             st.session_state.chatbot_messages = []
-            import uuid
-            st.session_state.chatbot_session_id = str(uuid.uuid4())
+            
+            # 2. 백엔드 DB에서 세션 삭제
+            session_id = st.session_state.contract_sessions.get(contract_id)
+            if session_id:
+                try:
+                    delete_url = f"http://localhost:8000/api/chatbot/{contract_id}/session/{session_id}"
+                    requests.delete(delete_url, timeout=5)
+                except Exception as e:
+                    pass  # 삭제 실패해도 UI는 초기화
+            
+            # 3. 세션 ID는 유지 (계약서 기반이므로 변경 안 함)
             st.rerun()
     
     # 중간 영역 - 채팅 히스토리 (스크롤 가능)
@@ -4712,9 +4881,19 @@ def display_chatbot_interface(contract_id: str):
         )
     with col2:
         if st.button("채팅 초기화", key=f"reset_chat_{contract_id}", use_container_width=True):
+            # 1. 프론트엔드 메시지 삭제
             st.session_state.chatbot_messages = []
-            import uuid
-            st.session_state.chatbot_session_id = str(uuid.uuid4())
+            
+            # 2. 백엔드 DB에서 세션 삭제
+            session_id = st.session_state.contract_sessions.get(contract_id)
+            if session_id:
+                try:
+                    delete_url = f"http://localhost:8000/api/chatbot/{contract_id}/session/{session_id}"
+                    requests.delete(delete_url, timeout=5)
+                except Exception as e:
+                    pass  # 삭제 실패해도 UI는 초기화
+            
+            # 3. 세션 ID는 유지 (계약서 기반이므로 변경 안 함)
             st.rerun()
     
     st.markdown('<div style="height: 1rem;"></div>', unsafe_allow_html=True)
