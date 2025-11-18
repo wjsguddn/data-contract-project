@@ -10,7 +10,7 @@ import json
 logger = logging.getLogger("uvicorn.error")
 
 from backend.fastapi.user_contract_parser import UserContractParser
-from backend.shared.database import init_db, get_db, ContractDocument, ClassificationResult, ValidationResult, TokenUsage
+from backend.shared.database import init_db, get_db, ContractDocument, ClassificationResult, ValidationResult, TokenUsage, ChatbotSession
 from backend.classification_agent.agent import classify_contract_task
 from backend.consistency_agent.agent import validate_contract_task, validate_contract_parallel_task
 
@@ -935,6 +935,120 @@ async def chatbot_history(
     
     except Exception as e:
         logger.exception(f"대화 히스토리 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/chatbot/{contract_id}/session/{session_id}")
+async def delete_chatbot_session(
+    contract_id: str,
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    챗봇 세션 삭제 (대화 내역 초기화)
+    
+    Args:
+        contract_id: 계약서 ID
+        session_id: 세션 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        삭제된 메시지 개수
+    """
+    try:
+        # 해당 세션의 모든 메시지 삭제
+        deleted_count = db.query(ChatbotSession).filter(
+            ChatbotSession.contract_id == contract_id,
+            ChatbotSession.session_id == session_id
+        ).delete()
+        
+        db.commit()
+        
+        logger.info(f"챗봇 세션 삭제 완료: contract={contract_id}, session={session_id}, count={deleted_count}")
+        
+        return {
+            "success": True,
+            "contract_id": contract_id,
+            "session_id": session_id,
+            "deleted_count": deleted_count
+        }
+    
+    except Exception as e:
+        logger.exception(f"챗봇 세션 삭제 중 오류: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/contracts/{contract_id}")
+async def delete_contract(
+    contract_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    계약서 및 관련 데이터 전체 삭제
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        삭제 결과
+    """
+    try:
+        # 1. 챗봇 세션 삭제
+        chatbot_deleted = db.query(ChatbotSession).filter(
+            ChatbotSession.contract_id == contract_id
+        ).delete()
+        
+        # 2. 분류 결과 삭제
+        classification_deleted = db.query(ClassificationResult).filter(
+            ClassificationResult.contract_id == contract_id
+        ).delete()
+        
+        # 3. 검증 결과 삭제
+        validation_deleted = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).delete()
+        
+        # 4. 토큰 사용량 삭제
+        token_deleted = db.query(TokenUsage).filter(
+            TokenUsage.contract_id == contract_id
+        ).delete()
+        
+        # 5. 계약서 문서 삭제
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        if not contract:
+            raise HTTPException(status_code=404, detail="계약서를 찾을 수 없습니다")
+        
+        db.delete(contract)
+        db.commit()
+        
+        logger.info(
+            f"계약서 삭제 완료: contract={contract_id}, "
+            f"chatbot={chatbot_deleted}, classification={classification_deleted}, "
+            f"validation={validation_deleted}, token={token_deleted}"
+        )
+        
+        return {
+            "success": True,
+            "contract_id": contract_id,
+            "deleted": {
+                "chatbot_sessions": chatbot_deleted,
+                "classification_results": classification_deleted,
+                "validation_results": validation_deleted,
+                "token_usage": token_deleted,
+                "contract_document": 1
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"계약서 삭제 중 오류: {e}")
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
