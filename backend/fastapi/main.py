@@ -1469,3 +1469,287 @@ async def get_article_report_sections(
     except Exception as e:
         logger.exception(f"조별 보고서 섹션 조회 중 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/report/{contract_id}/generate-article-revision")
+async def generate_article_revision(
+    contract_id: str,
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    특정 조항의 수정본 생성 (리스크 + 권고사항 반영)
+    
+    Args:
+        contract_id: 계약서 ID
+        request: {"article_number": int}
+        
+    Returns:
+        {
+            "contract_id": str,
+            "article_number": int,
+            "original_content": str,
+            "revised_content": str,
+            "changes": [...]
+        }
+    """
+    try:
+        from openai import AzureOpenAI
+        import os
+        
+        # 요청 데이터 추출
+        article_number = request.get("article_number")
+        
+        if not article_number:
+            raise HTTPException(status_code=400, detail="article_number is required")
+        
+        # DB에서 ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation:
+            raise HTTPException(status_code=404, detail="검증 결과를 찾을 수 없습니다")
+        
+        # article_reports에서 해당 조항 데이터 가져오기
+        article_reports = validation.article_reports or {}
+        article_key = str(article_number)
+        
+        logger.info(f"[REVISION DEBUG] article_reports keys: {list(article_reports.keys())}")
+        
+        if article_key not in article_reports:
+            raise HTTPException(status_code=404, detail=f"제{article_number}조 보고서를 찾을 수 없습니다")
+        
+        article_data = article_reports[article_key]
+        sections = article_data.get("sections", {})
+        
+        logger.info(f"[REVISION DEBUG] sections keys: {list(sections.keys())}")
+        
+        # 사용자 조항 내용, 리스크, 권고사항 추출
+        # final_report에서 사용자 조항 내용 가져오기
+        final_report = validation.final_report or {}
+        
+        # user_articles에서 제목 가져오기
+        user_articles = final_report.get("user_articles", [])
+        article_title = f"제{article_number}조"
+        for article in user_articles:
+            if article.get("user_article_no") == article_number:
+                article_title = article.get("user_article_title", f"제{article_number}조")
+                break
+        
+        # all_clause_contents["user_articles"]에서 user_article_{번호} 키로 접근
+        all_clause_contents = final_report.get("all_clause_contents", {})
+        user_articles_contents = all_clause_contents.get("user_articles", {})
+        
+        user_article_key = f"user_article_{article_number}"
+        user_content_data = user_articles_contents.get(user_article_key, {})
+        
+        # content 추출
+        original_content = ""
+        if isinstance(user_content_data, dict):
+            # content 필드가 있는지 확인
+            if "content" in user_content_data:
+                content = user_content_data.get("content")
+                
+                # content가 dict이고 그 안에 또 content가 있는 경우
+                if isinstance(content, dict) and "content" in content:
+                    inner_content = content.get("content")
+                    if isinstance(inner_content, list):
+                        original_content = "\n".join(str(item) for item in inner_content if item)
+                    else:
+                        original_content = str(inner_content)
+                # content가 리스트인 경우
+                elif isinstance(content, list):
+                    original_content = "\n".join(str(item) for item in content if item)
+                # content가 문자열인 경우
+                else:
+                    original_content = str(content)
+        
+        if not original_content:
+            raise HTTPException(status_code=404, detail=f"제{article_number}조 내용을 찾을 수 없습니다")
+        
+        # 리스크와 권고사항
+        risks = sections.get("section_5_practical_risks", "")
+        recommendations = sections.get("section_6_improvement_recommendations", "")
+        
+        logger.info(f"[REVISION] 제{article_number}조: 원본={len(original_content)}자, 리스크={len(risks)}자, 권고={len(recommendations)}자")
+        
+        # Azure OpenAI 클라이언트 초기화
+        api_key = os.getenv('AZURE_OPENAI_API_KEY')
+        endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        
+        if not api_key or not endpoint:
+            raise ValueError("Azure OpenAI 환경 변수가 설정되지 않음")
+        
+        client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version="2024-02-01"
+        )
+        
+        # LLM 프롬프트
+        prompt = f"""당신은 데이터 계약서 전문 검토자이며, 사용자가 제공한 “기존 조항”을 최소한으로 개선하는 전문가입니다.
+
+이번 작업은 다음의 개선 규칙을 반드시 지키면서 수행해야 합니다.
+
+────────────────────────────────────
+📌 개선 절대 원칙 (필수 준수)
+
+1) 조(條)·항(項)·호(號)의 번호는 절대 변경하지 않는다.
+   - ① ② ③ 등 번호 그대로 유지.
+   - 문단 순서도 동일하게 유지.
+   - 항 새로 생성 금지, 삭제 금지, 병합 금지.
+
+2) 전체 문장을 재작성하거나 문체를 통째로 바꾸지 않는다.
+   - “리스크·권고사항”에서 지적된 부분에 한해 필요한 최소한의 수정만 한다.
+   - 원본 의미를 변경하는 수정 금지.
+   - 원본에 없는 개념·절차를 임의 도입 금지.
+
+3) 표준계약서 문구의 직접 복사 금지.
+   - 의미는 반영하되 표현은 자연스럽고 최소한으로 조정.
+
+4) 수정이 필요 없는 문장은 그대로 둔다.
+   - 수정이 발생한 문장만 정확히 표시해야 한다.
+
+5) 전체 길이를 원본보다 과도하게 늘리지 않는다.
+────────────────────────────────────
+
+【원본 조항】
+제{article_number}조
+{original_content}
+
+【실무적 리스크】
+{risks if risks else '없음'}
+
+【개선 권고사항】
+{recommendations if recommendations else '없음'}
+
+────────────────────────────────────
+📌 작업 지침
+1. 원본 조항의 조 → 항 → 호 구조는 그대로 유지한다.
+2. 리스크/권고사항에 해당하는 문장만 최소한으로 보완한다.
+3. 개선된 전체 조항을 먼저 작성한다.
+4. 이후 "변경된 부분만" 목록으로 정리한다.
+────────────────────────────────────
+
+📌 출력 형식 (반드시 준수)
+개선된 조항:
+[여기에 최종 개선본]
+
+변경 사항:
+1. [추가] 변경 이유 포함
+2. [수정] 변경 이유 포함
+3. [삭제] 변경 이유 포함
+(없으면 “해당 없음”)
+
+────────────────────────────────────
+📌 출력 규칙
+- Markdown의 **굵게**만 사용 가능.
+- HTML 태그(<div>, <span>, <p> 등)는 절대 사용하지 않는다.
+- 색상·배경 등 스타일 사용 금지.
+- 반드시 텍스트 기반 Markdown만 출력할 것.
+────────────────────────────────────
+
+출력을 시작하세요."""
+        
+        response = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 데이터 계약서 전문 검토자입니다. "
+                        "사용자 조항을 원본 구조 그대로 유지하면서 "
+                        "리스크와 권고사항에 해당하는 부분만 최소한으로 수정합니다."
+                    )
+                },
+                {"role": "user", "content": prompt}
+            ],
+        )
+        
+        revised_text = response.choices[0].message.content
+        
+        logger.info(f"[REVISION DEBUG] LLM 응답 길이: {len(revised_text)}")
+        logger.info(f"[REVISION DEBUG] LLM 응답 미리보기: {revised_text[:500]}")
+        
+        # 응답 파싱 (유연한 방식)
+        revised_content = ""
+        changes = []
+        
+        lines = revised_text.split('\n')
+        in_revised = False
+        in_changes = False
+        
+        for line in lines:
+            # 코드블록 마커 스킵
+            if line.strip().startswith("```"):
+                continue
+            
+            # 공백 제거한 normalized 버전
+            normalized = line.replace(" ", "").replace(":", "").lower()
+            
+            # "개선된 조항" 섹션 시작 감지 (유연하게)
+            if any(key in normalized for key in ["개선된조항", "개선된사항", "수정된조항", "최종조항"]):
+                in_revised = True
+                in_changes = False
+                logger.info(f"[REVISION DEBUG] '개선된 조항' 섹션 시작: {line}")
+                continue
+            # Markdown 헤더로 시작하는 경우
+            elif line.strip().startswith("#") and "개선" in line and "조항" in line:
+                in_revised = True
+                in_changes = False
+                logger.info(f"[REVISION DEBUG] '개선된 조항' 섹션 시작 (헤더): {line}")
+                continue
+            
+            # "변경 사항" 섹션 시작 감지 (유연하게)
+            if any(key in normalized for key in ["변경사항", "변경내역", "변경내용", "수정사항"]):
+                in_revised = False
+                in_changes = True
+                logger.info(f"[REVISION DEBUG] '변경 사항' 섹션 시작, revised_content 길이: {len(revised_content)}")
+                continue
+            # Markdown 헤더로 시작하는 경우
+            elif line.strip().startswith("#") and "변경" in line:
+                in_revised = False
+                in_changes = True
+                logger.info(f"[REVISION DEBUG] '변경 사항' 섹션 시작 (헤더): {line}")
+                continue
+            
+            if in_revised and line.strip():
+                revised_content += line + '\n'
+            elif in_changes and line.strip() and line.startswith(('1.', '2.', '3.', '4.', '5.')):
+                # 변경 사항 파싱
+                change_text = line.split('.', 1)[1].strip() if '.' in line else line
+                
+                if '[추가]' in change_text:
+                    change_type = 'added'
+                    reason = change_text.replace('[추가]', '').strip()
+                elif '[수정]' in change_text:
+                    change_type = 'modified'
+                    reason = change_text.replace('[수정]', '').strip()
+                elif '[삭제]' in change_text:
+                    change_type = 'deleted'
+                    reason = change_text.replace('[삭제]', '').strip()
+                else:
+                    continue
+                
+                changes.append({
+                    "type": change_type,
+                    "reason": reason
+                })
+        
+        logger.info(f"조항 수정본 생성 완료: {contract_id}, 제{article_number}조")
+        
+        return {
+            "contract_id": contract_id,
+            "article_number": article_number,
+            "article_title": article_title,
+            "original_content": original_content,
+            "revised_content": revised_content.strip(),
+            "changes": changes
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"조항 수정본 생성 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

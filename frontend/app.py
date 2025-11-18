@@ -342,82 +342,57 @@ def show_validation_results_page(contract_id: str):
     # 탭 2: 기술 검증 상세
     with tab2:
         display_technical_validation_tab(contract_id)
-
-
-def display_final_report_tab(contract_id: str):
-    """
-    최종 보고서 탭 표시 (우측 네비게이션 + 전체 스크롤)
     
-    Args:
-        contract_id: 계약서 ID
-    """
-    # 보고서 로딩
+    # 🆕 페이지 제일 아래: 수정본 생성 버튼
+    st.markdown("---")
+    st.markdown("""
+    <div class="report-card card-success">
+        <div class="report-card-header">📝 리스크+권고사항 반영 수정본 생성</div>
+        <div class="report-card-content">
+            각 조항별로 리스크와 권고사항을 반영한 수정본을 생성할 수 있습니다.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 보고서 로드
     try:
         report_url = f"http://localhost:8000/api/report/{contract_id}"
         response = requests.get(report_url, timeout=60)
         
-        if response.status_code != 200:
-            st.error(f"보고서를 불러올 수 없습니다. (HTTP {response.status_code})")
-            st.write(f"응답: {response.text[:500]}")
-            return
-        
-        report = response.json()
-        
-        # 상태 확인
-        if report.get('status') == 'generating':
-            st.info("📝 보고서 생성 중입니다...")
-            with st.spinner("보고서 생성 대기 중..."):
-                time.sleep(2)
-                st.rerun()
-            return
-        elif report.get('status') in ['not_ready', 'failed']:
-            st.error(f"보고서 상태: {report.get('message', '알 수 없는 오류')}")
-            return
-        
-        # 계약서 정보 헤더
-        st.markdown(f"**계약서 ID**: `{report.get('contract_id', 'N/A')}`")
-        st.markdown(f"**계약 유형**: {_format_contract_type(report.get('contract_type', 'N/A'))}")
-        st.markdown(f"**생성 일시**: {report.get('generated_at', 'N/A')}")
-        st.markdown("---")
-        
-        # 모든 섹션을 순차적으로 렌더링 (스크롤 가능)
-        
-        # 섹션 1: 요약 통계
-        st.markdown('<div id="summary"></div>', unsafe_allow_html=True)
-        render_summary_section(report)
-        st.markdown("---")
-        
-        # 섹션 2: 사용자 계약서 내용
-        st.markdown('<div id="user_contract"></div>', unsafe_allow_html=True)
-        render_user_contract_section(report)
-        st.markdown("---")
-        
-        # 섹션 3: 충족된 기준
-        st.markdown('<div id="satisfied"></div>', unsafe_allow_html=True)
-        render_satisfied_criteria_section(report)
-        st.markdown("---")
-        
-        # 섹션 4: 불충분한 요소
-        st.markdown('<div id="insufficient"></div>', unsafe_allow_html=True)
-        render_insufficient_elements_section(report)
-        st.markdown("---")
-        
-        # 섹션 5: 실무적 리스크
-        st.markdown('<div id="risks"></div>', unsafe_allow_html=True)
-        render_practical_risks_section(report)
-        st.markdown("---")
-        
-        # 섹션 6: 개선 권고사항
-        st.markdown('<div id="recommendations"></div>', unsafe_allow_html=True)
-        render_improvement_recommendations_section(report)
-        st.markdown("---")
-        
-        # 섹션 7: 종합 판단
-        st.markdown('<div id="assessment"></div>', unsafe_allow_html=True)
-        render_overall_assessment_section(report)
-    
+        if response.status_code == 200:
+            report = response.json()
+            user_articles = report.get('user_articles', [])
+            
+            if user_articles:
+                # 조항 선택 드롭다운
+                article_options = {}
+                for article in user_articles:
+                    article_no = article.get('user_article_no', 0)
+                    article_title = article.get('user_article_title', '')
+                    if article_no > 0:
+                        if article_title:
+                            article_options[f"제{article_no}조 - {article_title}"] = article_no
+                        else:
+                            article_options[f"제{article_no}조"] = article_no
+                
+                if article_options:
+                    selected_article = st.selectbox(
+                        "수정본을 생성할 조항을 선택하세요",
+                        options=list(article_options.keys()),
+                        key="article_revision_select_bottom"
+                    )
+                    
+                    if st.button(
+                        "✏️ 선택한 조항의 수정본 생성",
+                        use_container_width=True,
+                        key="generate_revision_btn_bottom"
+                    ):
+                        article_no = article_options[selected_article]
+                        generate_article_revision(contract_id, article_no)
     except Exception as e:
-        st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
+        st.error(f"수정본 생성 섹션 로딩 중 오류: {str(e)}")
+
+
 
 
 def render_summary_section(report: dict):
@@ -485,12 +460,24 @@ def render_user_contract_section(report: dict):
         with st.expander(f"{article_header}", expanded=False):
             if user_content:
                 title = user_content.get('title', '')
-                content = user_content.get('content', '')
+                
+                # 서문(제0조)의 경우 text 필드 사용, 일반 조항은 content 필드 사용
+                if user_article_no == 0:
+                    content = user_content.get('text', '')
+                else:
+                    content = user_content.get('content', '')
                 
                 if title:
                     st.markdown(f"**{title}**")
-                if content:
-                    st.text(content)
+                
+                # content가 리스트인 경우 처리
+                if isinstance(content, list):
+                    content_text = '\n'.join(str(item) for item in content if item)
+                else:
+                    content_text = str(content) if content else ''
+                
+                if content_text:
+                    st.text(content_text)
             else:
                 st.info("조항 내용을 불러올 수 없습니다.")
 
@@ -733,8 +720,89 @@ def render_improvement_recommendations_section(report: dict):
                     st.markdown("---")
 
 
-def render_overall_assessment_section(report: dict):
-    """종합 판단 섹션"""
+def generate_article_revision(contract_id: str, article_no: int):
+    """
+    조항 수정본 생성 및 표시
+    
+    Args:
+        contract_id: 계약서 ID
+        article_no: 조 번호
+    """
+    try:
+        with st.spinner(f"제{article_no}조 수정본을 생성 중입니다..."):
+            revision_url = f"http://localhost:8000/api/report/{contract_id}/generate-article-revision"
+            
+            response = requests.post(
+                revision_url,
+                json={"article_number": article_no},
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                st.error(f"수정본 생성 실패: HTTP {response.status_code}")
+                return
+            
+            revision_data = response.json()
+            
+            # 수정본 표시
+            st.markdown("---")
+            st.markdown("""
+            <div class="report-card card-success">
+                <div class="report-card-header">✏️ 수정본 (리스크+권고사항 반영)</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 수정본 표시 (변경된 부분 굵게)
+            import difflib
+            import html
+            import re
+            
+            original = revision_data.get('original_content', '')
+            revised = revision_data.get('revised_content', '')
+            
+            # 단어 단위로 비교
+            original_words = original.split()
+            revised_words = revised.split()
+            
+            # SequenceMatcher로 차이 찾기
+            matcher = difflib.SequenceMatcher(None, original_words, revised_words)
+            
+            # 수정본에서 변경된 부분 표시
+            highlighted_text = []
+            for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+                if tag == 'equal':
+                    # 변경 없는 부분
+                    highlighted_text.append(html.escape(' '.join(revised_words[j1:j2])))
+                elif tag == 'replace' or tag == 'insert':
+                    # 변경되거나 추가된 부분 (굵게 + 초록색)
+                    highlighted_text.append(f'<strong style="color: #4CAF50;">{html.escape(" ".join(revised_words[j1:j2]))}</strong>')
+                # delete는 수정본에 표시하지 않음 (원본에만 있던 것)
+            
+            highlighted_html = ' '.join(highlighted_text)
+            
+            # 항 번호(①②③) 앞에 줄바꿈 추가
+            highlighted_html = re.sub(r'([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮])', r'<br>\1', highlighted_html)
+            
+            st.markdown("**✏️ 개선된 조항** (변경된 부분은 굵게 표시)")
+            st.markdown(
+                f"""
+                <div style="background-color: #1e1e1e; padding: 20px; border-radius: 8px; border-left: 4px solid #4CAF50;">
+                    <div style="line-height: 1.8; color: #e5e7eb; font-size: 0.95rem;">
+                        {highlighted_html}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            
+
+    
+    except Exception as e:
+        st.error(f"수정본 생성 중 오류 발생: {str(e)}")
+
+
+def render_overall_assessment_section(report: dict, contract_id: str = None):
+    """종합 판단 섹션 + 수정본 생성"""
     st.markdown("""
     <div class="report-card card-info">
         <div class="report-card-header">📋 종합 판단</div>
@@ -750,17 +818,8 @@ def render_overall_assessment_section(report: dict):
         st.info("종합 판단 내용이 없습니다.")
         return
     
-    # 서술형 보고서가 있는 조항만 표시
-    articles_with_narrative = [
-        article for article in user_articles
-        if article.get('narrative_report')
-    ]
-    
-    if not articles_with_narrative:
-        st.info("서술형 보고서가 아직 생성되지 않았습니다.")
-        return
-    
-    for article in articles_with_narrative:
+    # 모든 조항 표시 (서술형 보고서 유무와 관계없이)
+    for article in user_articles:
         user_article_no = article.get('user_article_no', 0)
         user_article_title = article.get('user_article_title', '')
         narrative_report = article.get('narrative_report', '')
@@ -771,12 +830,26 @@ def render_overall_assessment_section(report: dict):
             article_header = user_article_title if user_article_title else f"제{user_article_no}조"
         
         with st.expander(f"{article_header}", expanded=False):
-            st.markdown(narrative_report)
+            # 서술형 보고서가 있으면 표시
+            if narrative_report:
+                st.markdown(narrative_report)
+            else:
+                st.info("상세 분석 내용이 아직 생성되지 않았습니다.")
+            
+            # 수정본 생성 버튼 (조항 번호가 있을 때만)
+            if user_article_no > 0 and contract_id:
+                st.markdown("---")
+                if st.button(
+                    f"✏️ 제{user_article_no}조 수정본 생성 (리스크+권고사항 반영)",
+                    key=f"revision_btn_{user_article_no}",
+                    use_container_width=True
+                ):
+                    generate_article_revision(contract_id, user_article_no)
 
 
-def display_final_report_tab_old(contract_id: str):
+def display_final_report_tab(contract_id: str):
     """
-    기존 최종 보고서 탭 (백업용)
+    최종 보고서 탭 표시
     """
     # 보고서 로딩
     try:
@@ -1831,7 +1904,13 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
     user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
     
     if user_content:
-        content = user_content.get('content', '')
+        # 서문(제0조)의 경우 text 필드 사용, 일반 조항은 content 필드 사용
+        if article_no == 0:
+            # 서문: text 필드에 전체 내용이 있음
+            content = user_content.get('text', '')
+        else:
+            # 일반 조항: content 필드 사용
+            content = user_content.get('content', '')
         
         # 타입에 따라 처리
         if isinstance(content, list):
@@ -1967,399 +2046,20 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
             st.markdown(str(narrative_report))
     else:
         st.info("종합 분석 보고서가 아직 생성되지 않았습니다.")
+    
+    # 🆕 수정본 생성 버튼 (제일 아래)
+    st.markdown("---")
+    st.markdown("## 📝 리스크+권고사항 반영 수정본 생성")
+    
+    if st.button(
+        f"✏️ 제{article_no}조 수정본 생성",
+        use_container_width=True,
+        key=f"generate_revision_single_{article_no}"
+    ):
+        generate_article_revision(contract_id, article_no)
 
 
-def display_single_article_with_sticky_nav(article: dict, all_contents: dict, contract_id: str):
-    """
-    단일 조항 표시 + Sticky Navigation
-    
-    Args:
-        article: 조항 데이터
-        all_contents: 전체 조항 내용
-        contract_id: 계약서 ID
-    """
-    article_no = article.get('user_article_no', 0)
-    article_title = article.get('user_article_title', '')
-    narrative_report = article.get('narrative_report', {})
-    
-    # Sticky Navigation CSS
-    st.markdown("""
-        <style>
-        [data-testid="column"]:nth-of-type(2) {
-            position: sticky;
-            top: 3rem;
-            height: fit-content;
-            max-height: calc(100vh - 6rem);
-            overflow-y: auto;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    # 2컬럼 레이아웃
-    col_main, col_nav = st.columns([3, 1])
-    
-    with col_nav:
-        st.markdown("### 📑 목차")
-        
-        # 섹션 버튼들 (narrative_report가 dict인 경우)
-        if isinstance(narrative_report, dict):
-            if narrative_report.get('positive_evaluation'):
-                st.button("✅ 긍정적 평가", key=f"nav_pos_{article_no}", use_container_width=True)
-            if narrative_report.get('insufficient_elements'):
-                st.button("⚠️ 불충분한 요소", key=f"nav_insuf_{article_no}", use_container_width=True)
-            if narrative_report.get('missing_elements'):
-                st.button("❌ 누락된 요소", key=f"nav_miss_{article_no}", use_container_width=True)
-            if narrative_report.get('practical_risks'):
-                st.button("🔍 실무적 리스크", key=f"nav_risk_{article_no}", use_container_width=True)
-            if narrative_report.get('improvement_recommendations'):
-                st.button("💡 개선 권고사항", key=f"nav_rec_{article_no}", use_container_width=True)
-            if narrative_report.get('overall_assessment'):
-                st.button("📋 종합 판단", key=f"nav_overall_{article_no}", use_container_width=True)
-    
-    with col_main:
-        # 사용자 계약서 원문
-        st.markdown("## 📄 사용자 계약서 원문")
-        
-        user_article_key = f"user_article_{article_no}"
-        user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
-        
-        if user_content:
-            title = user_content.get('title', '')
-            content = user_content.get('content', '')
-            
-            st.markdown(
-                f"""
-                <div class="card">
-                    <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #3b82f6;">
-                        {article_title}
-                    </div>
-                    <div style="white-space: pre-wrap; line-height: 1.8; color: #e5e7eb;">
-                        {content}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.info("조항 원문을 불러올 수 없습니다.")
-        
-        st.markdown("---")
-        
-        # 종합 분석 (narrative_report가 dict인 경우)
-        st.markdown("## 📝 종합 분석")
-        
-        if isinstance(narrative_report, dict):
-            # 1. 긍정적 평가
-            if narrative_report.get('positive_evaluation'):
-                with st.expander("✅ 긍정적으로 평가되는 요소", expanded=True):
-                    st.markdown(narrative_report['positive_evaluation'])
-            
-            # 2. 불충분한 요소
-            if narrative_report.get('insufficient_elements'):
-                with st.expander("⚠️ 불충분하거나 불명확한 요소", expanded=True):
-                    st.markdown(narrative_report['insufficient_elements'])
-            
-            # 3. 누락된 요소
-            if narrative_report.get('missing_elements'):
-                with st.expander("❌ 누락된 핵심 요소", expanded=True):
-                    st.markdown(narrative_report['missing_elements'])
-            
-            # 4. 실무적 리스크
-            if narrative_report.get('practical_risks'):
-                with st.expander("🔍 실무적 리스크", expanded=False):
-                    st.markdown(narrative_report['practical_risks'])
-            
-            # 5. 개선 권고사항
-            if narrative_report.get('improvement_recommendations'):
-                with st.expander("💡 개선 권고사항", expanded=False):
-                    st.markdown(narrative_report['improvement_recommendations'])
-            
-            # 6. 종합 판단
-            if narrative_report.get('overall_assessment'):
-                with st.expander("📋 종합적 판단", expanded=True):
-                    st.markdown(narrative_report['overall_assessment'])
-        
-        elif isinstance(narrative_report, str):
-            # 기존 텍스트 형식 (하위 호환성)
-            st.markdown(narrative_report)
-        
-        else:
-            st.info("종합 분석 보고서가 아직 생성되지 않았습니다.")
 
-
-def display_single_article_analysis(article: dict, all_contents: dict, contract_id: str):
-    """
-    단일 조항의 원문 + 종합분석 표시 (Sticky Navigation 포함)
-    
-    Args:
-        article: 조항 데이터
-        all_contents: 전체 조항 내용
-        contract_id: 계약서 ID
-    """
-    article_no = article.get('user_article_no', 0)
-    article_title = article.get('user_article_title', '')
-    
-    # Sticky Navigation CSS
-    st.markdown("""
-        <style>
-        /* Sticky navigation 컬럼 고정 */
-        [data-testid="column"]:nth-of-type(2) {
-            position: sticky;
-            top: 3rem;
-            height: fit-content;
-            max-height: calc(100vh - 6rem);
-            overflow-y: auto;
-        }
-        
-        /* 네비게이션 버튼 스타일 */
-        .nav-button {
-            display: block;
-            width: 100%;
-            padding: 0.75rem 1rem;
-            margin-bottom: 0.5rem;
-            background: #2A2C2E;
-            border: 1px solid #3d3d4d;
-            border-radius: 8px;
-            color: #e5e7eb;
-            text-align: left;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-        }
-        
-        .nav-button:hover {
-            background: #3d3d4d;
-            border-color: #3b82f6;
-            transform: translateX(4px);
-        }
-        
-        /* 섹션 앵커 */
-        .section-anchor {
-            scroll-margin-top: 4rem;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    # 2컬럼 레이아웃: 메인 컨텐츠 + Sticky Navigation
-    col_main, col_nav = st.columns([3, 1])
-    
-    with col_nav:
-        st.markdown("### 📑 목차")
-        
-        # 섹션 버튼들
-        if st.button("📄 계약서 원문", key=f"nav_original_{article_no}", use_container_width=True):
-            st.session_state[f'scroll_to_{article_no}'] = 'original'
-        
-        matched = article.get('matched_standard_articles', article.get('matched', []))
-        if matched:
-            if st.button("✅ 충족된 기준", key=f"nav_satisfied_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'satisfied'
-        
-        insufficient = article.get('insufficient_items', article.get('insufficient', []))
-        if insufficient:
-            if st.button("⚠️ 불충분한 요소", key=f"nav_insufficient_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'insufficient'
-        
-        missing = article.get('missing_items', article.get('missing', []))
-        if missing:
-            if st.button("❌ 누락된 요소", key=f"nav_missing_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'missing'
-        
-        if insufficient or missing:
-            if st.button("🔍 실무적 리스크", key=f"nav_risks_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'risks'
-            
-            if st.button("💡 개선 권고사항", key=f"nav_recommendations_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'recommendations'
-        
-        narrative_report = article.get('narrative_report', '')
-        if narrative_report:
-            if st.button("📋 종합 판단", key=f"nav_overall_{article_no}", use_container_width=True):
-                st.session_state[f'scroll_to_{article_no}'] = 'overall'
-    
-    with col_main:
-        # 1. 사용자 계약서 원문
-        st.markdown('<div id="original" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## 📄 사용자 계약서 원문")
-    
-    user_article_key = f"user_article_{article_no}"
-    user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
-    
-    if user_content:
-        title = user_content.get('title', '')
-        content = user_content.get('content', '')
-        
-        # 카드 스타일로 표시
-        st.markdown(
-            f"""
-            <div class="card">
-                <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #3b82f6;">
-                    {article_title}
-                </div>
-                <div style="white-space: pre-wrap; line-height: 1.8; color: #e5e7eb;">
-                    {content}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.info("조항 원문을 불러올 수 없습니다.")
-    
-        st.markdown("---")
-        
-        # 2. 종합 분석
-        st.markdown("## 📝 종합 분석")
-        
-        # 2-1. 충족된 기준
-        matched = article.get('matched_standard_articles', article.get('matched', []))
-        if matched:
-            st.markdown('<div id="satisfied" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("✅ 충족된 기준", expanded=True):
-                # A1 조 단위 매칭과 A3 항 단위 매칭 분리
-                a1_matches = []
-                a3_matches = []
-                
-                for m in matched:
-                    std_clause_id = m.get('std_clause_id', '')
-                    if ':cla:' in std_clause_id or ':sub:' in std_clause_id:
-                        a3_matches.append(m)
-                    else:
-                        a1_matches.append(m)
-                
-                if a1_matches:
-                    st.markdown("**조 단위 매칭:**")
-                    for m in a1_matches:
-                        st.markdown(f"- **{m.get('std_clause_title', '')}**")
-                        analysis = m.get('analysis', '')
-                        if analysis and analysis != "표준 조항과 매칭됨":
-                            st.markdown(f"  > {analysis}")
-                
-                if a3_matches:
-                    st.markdown("**항/호 단위 매칭 (상세 분석):**")
-                    for m in a3_matches:
-                        st.markdown(f"- {m.get('std_clause_title', '')}")
-    
-        # 2-2. 불충분한 요소
-        insufficient = article.get('insufficient_items', article.get('insufficient', []))
-        if insufficient:
-            st.markdown('<div id="insufficient" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("⚠️ 불충분한 요소", expanded=True):
-                for item in insufficient:
-                    st.markdown(f"**{item.get('std_clause_title', '')}**")
-                    st.markdown(f"> {item.get('analysis', '')}")
-                    st.markdown("---")
-        
-        # 2-3. 누락된 요소
-        missing = article.get('missing_items', article.get('missing', []))
-        if missing:
-            st.markdown('<div id="missing" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("❌ 누락된 요소", expanded=True):
-                for item in missing:
-                    st.markdown(f"**{item.get('std_clause_title', '')}**")
-                    st.markdown(f"> {item.get('analysis', '')}")
-                    st.markdown("---")
-        
-        # 2-4. 실무적 리스크 (불충분 + 누락 종합)
-        if insufficient or missing:
-            st.markdown('<div id="risks" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("🔍 실무적 리스크", expanded=False):
-                if insufficient:
-                    st.markdown("**불충분한 조항으로 인한 리스크:**")
-                    for item in insufficient:
-                        st.markdown(f"- {item.get('std_clause_title', '')}: {item.get('analysis', '')}")
-                
-                if missing:
-                    st.markdown("**누락된 조항으로 인한 리스크:**")
-                    for item in missing:
-                        st.markdown(f"- {item.get('std_clause_title', '')}: {item.get('analysis', '')}")
-        
-        # 2-5. 개선 권고사항
-        if insufficient or missing:
-            st.markdown('<div id="recommendations" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("💡 개선 권고사항", expanded=False):
-                if insufficient:
-                    st.markdown("**불충분한 조항 개선:**")
-                    for item in insufficient:
-                        st.markdown(f"- {item.get('std_clause_title', '')}")
-                        st.markdown(f"  {item.get('analysis', '')}")
-                
-                if missing:
-                    st.markdown("**누락된 조항 추가:**")
-                    for item in missing:
-                        st.markdown(f"- {item.get('std_clause_title', '')}")
-                        st.markdown(f"  {item.get('analysis', '')}")
-    
-        # 2-6. 종합 판단 (narrative_report)
-        narrative_report = article.get('narrative_report', '')
-        if narrative_report:
-            st.markdown('<div id="overall" class="section-anchor"></div>', unsafe_allow_html=True)
-            with st.expander("📋 종합 판단 (AI 분석)", expanded=True):
-                st.markdown(narrative_report)
-        else:
-            st.info("종합 판단 보고서가 아직 생성되지 않았습니다.")
-
-
-def display_report_with_sticky_nav(contract_id: str, uploaded_data: dict):
-    """
-    벨로그 스타일 레이아웃: 메인 컨텐츠 + Sticky Navigation
-    
-    Args:
-        contract_id: 계약서 ID
-        uploaded_data: 업로드된 계약서 데이터
-    """
-
-    
-    # 보고서 데이터 로드
-    try:
-        report_url = f"http://localhost:8000/api/report/{contract_id}"
-        response = requests.get(report_url, timeout=60)
-        
-        if response.status_code != 200:
-            st.error("보고서를 불러올 수 없습니다.")
-            return
-        
-        report = response.json()
-        
-        # 메인 컨텐츠: 모든 섹션을 순서대로 표시
-        
-        # 1. 사용자 계약서 내용
-        st.markdown('<div id="user-contract" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## 📄 사용자 계약서 내용")
-        render_main_user_contract_section(report)
-        st.markdown("---")
-        
-        # 2. 충족된 기준
-        st.markdown('<div id="satisfied" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## ✅ 충족된 기준")
-        render_main_satisfied_criteria_section(report)
-        st.markdown("---")
-        
-        # 3. 불충분한 요소
-        st.markdown('<div id="insufficient" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## ⚠️ 불충분한 요소")
-        render_main_insufficient_elements_section(report)
-        st.markdown("---")
-        
-        # 4. 실무적 리스크
-        st.markdown('<div id="risks" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## 🔍 실무적 리스크")
-        render_main_practical_risks_section(report)
-        st.markdown("---")
-        
-        # 5. 개선 권고사항
-        st.markdown('<div id="recommendations" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## 💡 개선 권고사항")
-        render_main_improvement_recommendations_section(report)
-        st.markdown("---")
-        
-        # 6. 종합 판단
-        st.markdown('<div id="overall" class="section-anchor"></div>', unsafe_allow_html=True)
-        st.markdown("## 📋 종합 판단")
-        render_main_overall_assessment_section(report)
-    
-    except Exception as e:
-        st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
 
 
 def render_main_user_contract_section(report: dict):
@@ -2389,12 +2089,24 @@ def render_main_user_contract_section(report: dict):
         with st.expander(f"{article_header}", expanded=False):
             if user_content:
                 title = user_content.get('title', '')
-                content = user_content.get('content', '')
+                
+                # 서문(제0조)의 경우 text 필드 사용, 일반 조항은 content 필드 사용
+                if user_article_no == 0:
+                    content = user_content.get('text', '')
+                else:
+                    content = user_content.get('content', '')
                 
                 if title:
                     st.markdown(f"**{title}**")
-                if content:
-                    st.text(content)
+                
+                # content가 리스트인 경우 처리
+                if isinstance(content, list):
+                    content_text = '\n'.join(str(item) for item in content if item)
+                else:
+                    content_text = str(content) if content else ''
+                
+                if content_text:
+                    st.text(content_text)
             else:
                 st.info("조항 내용을 불러올 수 없습니다.")
 
@@ -4169,7 +3881,7 @@ def display_manual_checks(manual_checks: dict):
 
 def fetch_contract_history(limit: int = 20):
     """
-    계약서 히스토리 조회 (캐싱 제거, 빠른 타임아웃)
+    계약서 히스토리 조회
     
     Args:
         limit: 조회할 최대 개수
@@ -4179,7 +3891,7 @@ def fetch_contract_history(limit: int = 20):
     """
     try:
         history_url = "http://localhost:8000/api/contracts/history"
-        response = requests.get(history_url, params={"limit": limit}, timeout=3)  # 3초로 단축
+        response = requests.get(history_url, params={"limit": limit}, timeout=10)
         
         if response.status_code == 200:
             return response.json()
@@ -4197,11 +3909,16 @@ def display_contract_history_sidebar():
     사이드바에 계약서 히스토리 표시
     """
     try:
-        # 캐싱된 히스토리 조회
+        # 히스토리 조회
         data = fetch_contract_history(limit=20)
         
         if data is None:
             st.warning("⏳ 히스토리를 불러오는 중입니다...")
+            return
+        
+        # 에러 확인
+        if 'error' in data:
+            st.error(f"히스토리 조회 실패: {data['error']}")
             return
         
         contracts = data.get('contracts', [])

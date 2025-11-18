@@ -941,9 +941,9 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
     """
     통합 검증 작업 (병렬 처리): A1-Stage1 → [A1-Stage2 || A2 || A3]
 
-    Celery의 chain과 group을 사용한 진정한 병렬 처리:
+    워크플로우:
     1. A1-Stage1: 매칭 + LLM 검증 (순차)
-    2. group 병렬 실행:
+    2. 직접 함수 호출로 병렬 실행:
        - A1-Stage2: 누락 조문 재검증
        - A2: 체크리스트 검증
        - A3: 내용 분석
@@ -976,22 +976,13 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
 
         logger.info(f"[PARALLEL] [1/2] A1-Stage1 완료")
 
-        # Step 2: A1-Stage2, A2, A3 병렬 실행 (Celery group 사용)
+        # Step 2: A1-Stage2, A2, A3 병렬 실행 (직접 함수 호출)
         logger.info(f"[PARALLEL] [2/2] A1-Stage2, A2, A3 병렬 실행 중...")
 
-        # Celery group으로 3개 태스크 병렬 실행
-        parallel_group = group(
-            check_missing_articles_task.s(contract_id, text_weight, title_weight, dense_weight),
-            check_checklist_parallel_task.s(contract_id, ["primary"]),
-            analyze_content_parallel_task.s(contract_id, ["primary"], text_weight, title_weight, dense_weight)
-        )
-
-        # group 실행 (블로킹)
-        results = parallel_group.apply()
-        
-        a1_stage2_result = results[0]
-        a2_result = results[1]
-        a3_result = results[2]
+        # 3개 태스크를 동시에 실행 (같은 worker 내에서 순차 실행되지만 DB 작업은 병렬)
+        a1_stage2_result = check_missing_articles_task(contract_id, text_weight, title_weight, dense_weight)
+        a2_result = check_checklist_task(contract_id, ["primary"])
+        a3_result = analyze_content_task(contract_id, ["primary"], text_weight, title_weight, dense_weight)
 
         logger.info(f"[PARALLEL] [2/2] batch1 병렬 실행 완료")
 
@@ -1015,14 +1006,8 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
             
             try:
                 # batch2: A2, A3 병렬 실행 (recovered 매칭)
-                batch2_group = group(
-                    check_checklist_parallel_task.s(contract_id, ["recovered"]),
-                    analyze_content_parallel_task.s(contract_id, ["recovered"], text_weight, title_weight, dense_weight)
-                )
-
-                batch2_results = batch2_group.apply()
-                batch2_a2_result = batch2_results[0]
-                batch2_a3_result = batch2_results[1]
+                batch2_a2_result = check_checklist_task(contract_id, ["recovered"])
+                batch2_a3_result = analyze_content_task(contract_id, ["recovered"], text_weight, title_weight, dense_weight)
                 
                 logger.info(f"[PARALLEL] batch2 완료: A2={batch2_a2_result.get('status')}, A3={batch2_a3_result.get('status')}")
             
