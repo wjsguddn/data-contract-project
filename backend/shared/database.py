@@ -104,6 +104,7 @@ class ValidationResult(Base):
     report_step3_resolved = Column(JSON, nullable=True)  # Step 3: 충돌 해소 결과
     report_step4_formatted = Column(JSON, nullable=True)  # Step 4: 포맷팅 결과
     final_report = Column(JSON, nullable=True)  # Step 5: 최종 보고서 (체크리스트 통합)
+    article_reports = Column(JSON, nullable=True)  # 조별 보고서 섹션 (파싱된 narrative_report)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

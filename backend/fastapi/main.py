@@ -1338,3 +1338,134 @@ async def get_report_status(contract_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.exception(f"보고서 상태 조회 중 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/report/{contract_id}/article-reports")
+async def get_article_reports(contract_id: str, db: Session = Depends(get_db)):
+    """
+    조별 보고서 섹션 조회
+    
+    step5에서 생성된 narrative_report를 파싱한 7개 섹션을 조회합니다.
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "contract_id": str,
+            "status": "ok" | "not_found" | "not_generated",
+            "article_reports": {
+                "10": {
+                    "article_title": "비밀유지 의무",
+                    "sections": {
+                        "section_1_overview": "검토 개요 텍스트",
+                        "section_2_fulfilled_criteria": "충족된 기준 텍스트",
+                        ...
+                        "section_7_comprehensive_judgment": "종합 판단 텍스트"
+                    }
+                },
+                ...
+            }
+        }
+    """
+    try:
+        from backend.report_agent.report_section_saver import ReportSectionSaver
+        
+        # ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation:
+            return {
+                "contract_id": contract_id,
+                "status": "not_found",
+                "message": "검증 결과를 찾을 수 없습니다"
+            }
+        
+        # article_reports 확인
+        if not validation.article_reports:
+            return {
+                "contract_id": contract_id,
+                "status": "not_generated",
+                "message": "조별 보고서가 아직 생성되지 않았습니다",
+                "article_reports": {}
+            }
+        
+        return {
+            "contract_id": contract_id,
+            "status": "ok",
+            "article_reports": validation.article_reports
+        }
+    
+    except Exception as e:
+        logger.exception(f"조별 보고서 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/report/{contract_id}/article-reports/{article_number}")
+async def get_article_report_sections(
+    contract_id: str,
+    article_number: int,
+    db: Session = Depends(get_db)
+):
+    """
+    특정 조의 7개 섹션 조회
+    
+    Args:
+        contract_id: 계약서 ID
+        article_number: 조 번호 (예: 10)
+        db: 데이터베이스 세션
+        
+    Returns:
+        {
+            "contract_id": str,
+            "article_number": int,
+            "article_title": str,
+            "sections": {
+                "section_1_overview": "텍스트",
+                "section_2_fulfilled_criteria": "텍스트",
+                ...
+                "section_7_comprehensive_judgment": "텍스트"
+            }
+        }
+    """
+    try:
+        from backend.report_agent.report_section_saver import ReportSectionSaver
+        
+        # ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation or not validation.article_reports:
+            raise HTTPException(
+                status_code=404,
+                detail=f"조별 보고서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        # 특정 조 조회
+        article_reports = validation.article_reports
+        article_key = str(article_number)
+        
+        if article_key not in article_reports:
+            raise HTTPException(
+                status_code=404,
+                detail=f"제{article_number}조 보고서를 찾을 수 없습니다"
+            )
+        
+        article_data = article_reports[article_key]
+        
+        return {
+            "contract_id": contract_id,
+            "article_number": article_number,
+            "article_title": article_data.get("article_title", f"제{article_number}조"),
+            "sections": article_data.get("sections", {})
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"조별 보고서 섹션 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

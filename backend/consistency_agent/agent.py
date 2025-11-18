@@ -12,7 +12,6 @@ import logging
 import os
 from typing import List
 from openai import AzureOpenAI
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
@@ -942,13 +941,13 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
     """
     통합 검증 작업 (병렬 처리): A1-Stage1 → [A1-Stage2 || A2 || A3]
 
-    워크플로우:
+    Celery의 chain과 group을 사용한 진정한 병렬 처리:
     1. A1-Stage1: 매칭 + LLM 검증 (순차)
     2. group 병렬 실행:
        - A1-Stage2: 누락 조문 재검증
        - A2: 체크리스트 검증
        - A3: 내용 분석
-    3. 결과 통합
+    3. batch2 조건부 실행 (recovered 매칭 있을 경우)
 
     Args:
         contract_id: 검증할 계약서 ID
@@ -977,27 +976,22 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
 
         logger.info(f"[PARALLEL] [1/2] A1-Stage1 완료")
 
-        # Step 2: A1-Stage2, A2, A3 병렬 실행
+        # Step 2: A1-Stage2, A2, A3 병렬 실행 (Celery group 사용)
         logger.info(f"[PARALLEL] [2/2] A1-Stage2, A2, A3 병렬 실행 중...")
 
-        # ThreadPoolExecutor를 사용한 병렬 실행
-        # 주의: 같은 worker 내에서 실행되므로 I/O 바운드 작업만 병렬화됨
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # 3개 태스크를 동시 제출
-            future_a1_s2 = executor.submit(
-                check_missing_articles_task, contract_id, text_weight, title_weight, dense_weight
-            )
-            future_a2 = executor.submit(
-                check_checklist_task, contract_id, ["primary"]
-            )
-            future_a3 = executor.submit(
-                analyze_content_task, contract_id, ["primary"], text_weight, title_weight, dense_weight
-            )
+        # Celery group으로 3개 태스크 병렬 실행
+        parallel_group = group(
+            check_missing_articles_task.s(contract_id, text_weight, title_weight, dense_weight),
+            check_checklist_parallel_task.s(contract_id, ["primary"]),
+            analyze_content_parallel_task.s(contract_id, ["primary"], text_weight, title_weight, dense_weight)
+        )
 
-            # 결과 수집
-            a1_stage2_result = future_a1_s2.result()
-            a2_result = future_a2.result()
-            a3_result = future_a3.result()
+        # group 실행 (블로킹)
+        results = parallel_group.apply()
+        
+        a1_stage2_result = results[0]
+        a2_result = results[1]
+        a3_result = results[2]
 
         logger.info(f"[PARALLEL] [2/2] batch1 병렬 실행 완료")
 
@@ -1019,46 +1013,18 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
         if has_batch2:
             logger.info(f"[PARALLEL] batch2 실행 필요, recovered 매칭 처리 중...")
             
-            # batch2를 직접 실행 (Celery task가 아닌 일반 함수로)
-            # ThreadPoolExecutor를 사용하여 동기적으로 완료 대기
             try:
-                # DB에서 recovered_matching_details 확인
-                db = next(get_db())
-                try:
-                    existing_result = db.query(ValidationResult).filter(
-                        ValidationResult.contract_id == contract_id
-                    ).first()
-                    
-                    if not existing_result or not existing_result.completeness_check:
-                        logger.info(f"[PARALLEL] batch2: 검증 결과 없음, 건너뜀")
-                        has_batch2 = False
-                    else:
-                        recovered_details = existing_result.completeness_check.get('recovered_matching_details', [])
-                        
-                        if not recovered_details:
-                            logger.info(f"[PARALLEL] batch2: recovered 매칭 없음, 건너뜀")
-                            has_batch2 = False
-                        else:
-                            logger.info(f"[PARALLEL] batch2: recovered 매칭 {len(recovered_details)}개 발견, A2/A3 실행")
-                finally:
-                    db.close()
+                # batch2: A2, A3 병렬 실행 (recovered 매칭)
+                batch2_group = group(
+                    check_checklist_parallel_task.s(contract_id, ["recovered"]),
+                    analyze_content_parallel_task.s(contract_id, ["recovered"], text_weight, title_weight, dense_weight)
+                )
+
+                batch2_results = batch2_group.apply()
+                batch2_a2_result = batch2_results[0]
+                batch2_a3_result = batch2_results[1]
                 
-                if has_batch2:
-                    # A2, A3 병렬 실행 (동기적으로 완료 대기)
-                    with ThreadPoolExecutor(max_workers=2) as executor:
-                        future_a2 = executor.submit(
-                            check_checklist_task, contract_id, ["recovered"]
-                        )
-                        future_a3 = executor.submit(
-                            analyze_content_task, contract_id, ["recovered"],
-                            text_weight, title_weight, dense_weight
-                        )
-                        
-                        # 결과 수집 (블로킹)
-                        batch2_a2_result = future_a2.result()
-                        batch2_a3_result = future_a3.result()
-                    
-                    logger.info(f"[PARALLEL] batch2 완료: A2={batch2_a2_result.get('status')}, A3={batch2_a3_result.get('status')}")
+                logger.info(f"[PARALLEL] batch2 완료: A2={batch2_a2_result.get('status')}, A3={batch2_a3_result.get('status')}")
             
             except Exception as batch2_error:
                 logger.error(f"[PARALLEL] batch2 실패: {batch2_error}")

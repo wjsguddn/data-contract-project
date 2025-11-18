@@ -1077,7 +1077,7 @@ class Step4Reporter:
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "당신은 데이터 계약서 검증 전문가입니다. 구조화된 데이터를 사용자 친화적인 서술형 보고서로 변환하는 것이 당신의 역할입니다."},
+                    {"role": "system", "content": "당신은 데이터 계약서 검증 전문가입니다. 구조화된 데이터를 사용자 친화적인 서술형 보고서로 변환하는 것이 당신의 역할입니다. 절대로 제목을 생성하지 마세요."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
@@ -1085,6 +1085,13 @@ class Step4Reporter:
             )
             
             result = response.choices[0].message.content.strip()
+            
+            # 🔥 제목 제거 후처리
+            result = self._remove_title_from_narrative(result)
+            
+            # 🔥 텍스트를 JSON으로 변환
+            result = self._convert_narrative_to_json(result)
+            
             logger.info(f"누락 조항 서술형 보고서 생성 완료: {article_id} (토큰: {response.usage.total_tokens})")
             
             return result
@@ -1094,6 +1101,153 @@ class Step4Reporter:
             return self._generate_missing_clause_fallback(
                 article_id, std_content, best_candidate, risk_assessment, recommendation
             )
+    
+    def _convert_narrative_to_json(self, narrative: str) -> str:
+        """
+        서술형 보고서(텍스트)를 JSON 형식으로 변환
+        
+        입력: "1. 검토 개요\n내용1\n2. 충족된 기준\n내용2\n..."
+        출력: JSON 문자열
+        
+        Args:
+            narrative: 서술형 보고서 텍스트
+            
+        Returns:
+            JSON 형식의 보고서
+        """
+        import re
+        import json
+        
+        sections = {
+            "section_1_overview": "",
+            "section_2_fulfilled_criteria": "",
+            "section_3_insufficient_elements": "",
+            "section_4_missing_core_elements": "",
+            "section_5_practical_risks": "",
+            "section_6_improvement_recommendations": "",
+            "section_7_comprehensive_judgment": ""
+        }
+        
+        if not narrative or len(narrative.strip()) < 50:
+            logger.warning("narrative가 너무 짧음. 빈 JSON 반환")
+            return json.dumps(sections, ensure_ascii=False)
+        
+        section_map = {
+            '1': 'section_1_overview',
+            '2': 'section_2_fulfilled_criteria',
+            '3': 'section_3_insufficient_elements',
+            '4': 'section_4_missing_core_elements',
+            '5': 'section_5_practical_risks',
+            '6': 'section_6_improvement_recommendations',
+            '7': 'section_7_comprehensive_judgment'
+        }
+        
+        # 패턴: "숫자. 제목" 형식
+        pattern = r'(\d)\.\s+([^\n]+?)(?=\n\d\.\s+|$)'
+        matches = list(re.finditer(pattern, narrative, flags=re.MULTILINE | re.DOTALL))
+        
+        if not matches:
+            logger.warning("섹션 패턴을 찾을 수 없음")
+            sections['section_1_overview'] = narrative.strip()
+            return json.dumps(sections, ensure_ascii=False)
+        
+        # 각 섹션의 내용 추출
+        for idx, match in enumerate(matches):
+            section_num = match.group(1)
+            section_title = match.group(2)
+            
+            content_start = match.end(2)
+            
+            if idx + 1 < len(matches):
+                content_end = matches[idx + 1].start()
+            else:
+                content_end = len(narrative)
+            
+            content = narrative[content_start:content_end].strip()
+            
+            if section_num in section_map:
+                sections[section_map[section_num]] = content
+        
+        # 빈 섹션 채우기
+        for key in sections:
+            if not sections[key] or sections[key].strip() == "":
+                sections[key] = "[데이터 없음]"
+        
+        # JSON 문자열로 변환
+        return json.dumps(sections, ensure_ascii=False)
+    
+    def _remove_title_from_narrative(self, narrative: str) -> str:
+        """
+        LLM이 생성한 narrative_report에서 제목을 제거
+        
+        LLM이 프롬프트를 무시하고 제목을 생성하는 경우가 있으므로,
+        제목을 감지하고 제거합니다.
+        
+        제목 패턴:
+        - "검토 보고서: 제11조"
+        - "데이터 보안 및 관리 조항 검토 보고서"
+        - "데이터 거래 계약서 검토 보고서"
+        - "제4조 검토 결과"
+        - "분석 보고서"
+        등
+        
+        주의: 제목과 "1. 검토 개요" 등이 줄바꿈 없이 붙어있을 수 있음
+        예: "데이터 거래 계약서 검토 보고서1. 검토 개요..."
+        
+        Args:
+            narrative: LLM이 생성한 narrative_report
+            
+        Returns:
+            제목이 제거된 narrative_report
+        """
+        import re
+        
+        # 🔥 패턴 1: 제목이 "1. 검토 개요" 바로 앞에 붙어있는 경우
+        # "데이터 거래 계약서 검토 보고서1. 검토 개요" → "1. 검토 개요"
+        # 더 강력한 패턴: 어떤 텍스트 + "보고서" + 숫자 + 점
+        pattern_attached = r'.*?(?:검토|분석|결과)\s*보고서(\d\.\s+)'
+        match = re.search(pattern_attached, narrative)
+        if match:
+            logger.info(f"🔥 붙어있는 제목 감지 및 제거: '{narrative[:50]}...'")
+            # 매칭된 부분 이후부터 시작
+            start_pos = match.start(1)
+            narrative = narrative[start_pos:]
+            logger.info(f"🔥 제거 후: '{narrative[:50]}...'")
+
+        
+        # 🔥 패턴 2: 제목이 줄바꿈으로 분리된 경우
+        lines = narrative.split('\n')
+        
+        # 첫 번째 라인이 제목인지 확인
+        if lines:
+            first_line = lines[0].strip()
+            
+            # 제목 패턴 감지 (더 광범위한 패턴)
+            title_patterns = [
+                r'검토\s*보고서',  # "검토 보고서", "조항 검토 보고서", "데이터 거래 계약서 검토 보고서" 등
+                r'분석\s*보고서',  # "분석 보고서" 등
+                r'결과\s*보고서',  # "결과 보고서" 등
+                r'^제\d+조.*검토',  # "제11조 검토" 등
+                r'^제\d+조.*분석',  # "제11조 분석" 등
+                r'^제\d+조.*결과',  # "제11조 결과" 등
+                r'조항.*검토',  # "○○ 조항 검토" 등
+                r'조항.*분석',  # "○○ 조항 분석" 등
+                r'조항.*결과',  # "○○ 조항 결과" 등
+            ]
+            
+            is_title = any(re.search(pattern, first_line) for pattern in title_patterns)
+            
+            if is_title:
+                logger.info(f"🔥 제목 감지 및 제거: '{first_line}'")
+                # 제목 라인 제거
+                lines = lines[1:]
+                
+                # 제목 다음의 빈 라인도 제거
+                while lines and not lines[0].strip():
+                    lines.pop(0)
+        
+        result = '\n'.join(lines).strip()
+        return result
     
     def _generate_missing_clause_fallback(self, article_id: str,
                                          std_content: Dict[str, Any],

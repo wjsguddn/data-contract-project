@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import requests
+import json
 
 
 st.set_page_config(
@@ -214,6 +215,55 @@ st.markdown(
         opacity: 0.5 !important;
     }
 
+    /* 스크롤 컨테이너 스타일 */
+    .scrollable-container {
+        max-height: 600px;
+        overflow-y: auto;
+        border: 1px solid #3d3d4d;
+        border-radius: 8px;
+        padding: 16px;
+        background-color: #0f1013;
+    }
+
+    .scrollable-container::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .scrollable-container::-webkit-scrollbar-track {
+        background: #1E1F22;
+        border-radius: 4px;
+    }
+
+    .scrollable-container::-webkit-scrollbar-thumb {
+        background: #3d3d4d;
+        border-radius: 4px;
+    }
+
+    .scrollable-container::-webkit-scrollbar-thumb:hover {
+        background: #4d4d5d;
+    }
+
+    /* 스크롤 컨테이너 내 항목 스타일 */
+    .scrollable-item {
+        margin-bottom: 16px;
+        padding: 12px;
+        background-color: #1E1F22;
+        border-left: 3px solid #f59e0b;
+        border-radius: 4px;
+    }
+
+    .scrollable-item-title {
+        font-weight: 600;
+        color: #ffffff;
+        margin-bottom: 8px;
+    }
+
+    .scrollable-item-content {
+        color: #d4d4d4;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -330,112 +380,41 @@ def display_final_report_tab(contract_id: str):
         st.markdown(f"**생성 일시**: {report.get('generated_at', 'N/A')}")
         st.markdown("---")
         
-        # 2컬럼 레이아웃: 메인 컨텐츠 + 우측 네비게이션
-        col_main, col_nav = st.columns([4, 1])
+        # 모든 섹션을 순차적으로 렌더링 (스크롤 가능)
         
-        with col_nav:
-            # 우측 고정 네비게이션
-            st.markdown("""
-            <style>
-            .sticky-nav {
-                position: sticky;
-                top: 80px;
-                background: #1E1F22;
-                padding: 16px;
-                border-radius: 8px;
-                border: 1px solid #3d3d4d;
-            }
-            .nav-item {
-                padding: 8px 12px;
-                margin: 4px 0;
-                border-radius: 6px;
-                cursor: pointer;
-                transition: all 0.2s;
-                font-size: 14px;
-            }
-            .nav-item:hover {
-                background: #2A2C2E;
-            }
-            .nav-item.active {
-                background: #3b82f6;
-                font-weight: 600;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            
-            st.markdown('<div class="sticky-nav">', unsafe_allow_html=True)
-            st.markdown("**📑 목차**")
-            
-            # 네비게이션 버튼들
-            sections = [
-                ("summary", "📊 요약 통계"),
-                ("user_contract", "📄 사용자 계약서"),
-                ("satisfied", "✅ 충족된 기준"),
-                ("insufficient", "⚠️ 불충분한 요소"),
-                ("risks", "🔍 실무적 리스크"),
-                ("recommendations", "💡 개선 권고"),
-                ("assessment", "📋 종합 판단")
-            ]
-            
-            for section_id, section_name in sections:
-                if st.button(section_name, key=f"nav_{section_id}_{contract_id}", use_container_width=True):
-                    st.session_state[f"scroll_to_{contract_id}"] = section_id
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        # 섹션 1: 요약 통계
+        st.markdown('<div id="summary"></div>', unsafe_allow_html=True)
+        render_summary_section(report)
+        st.markdown("---")
         
-        with col_main:
-            # 모든 섹션을 순차적으로 렌더링 (스크롤 가능)
-            
-            # 섹션 1: 요약 통계
-            st.markdown('<div id="summary"></div>', unsafe_allow_html=True)
-            render_summary_section(report)
-            st.markdown("---")
-            
-            # 섹션 2: 사용자 계약서 내용
-            st.markdown('<div id="user_contract"></div>', unsafe_allow_html=True)
-            render_user_contract_section(report)
-            st.markdown("---")
-            
-            # 섹션 3: 충족된 기준
-            st.markdown('<div id="satisfied"></div>', unsafe_allow_html=True)
-            render_satisfied_criteria_section(report)
-            st.markdown("---")
-            
-            # 섹션 4: 불충분한 요소
-            st.markdown('<div id="insufficient"></div>', unsafe_allow_html=True)
-            render_insufficient_elements_section(report)
-            st.markdown("---")
-            
-            # 섹션 5: 실무적 리스크
-            st.markdown('<div id="risks"></div>', unsafe_allow_html=True)
-            render_practical_risks_section(report)
-            st.markdown("---")
-            
-            # 섹션 6: 개선 권고사항
-            st.markdown('<div id="recommendations"></div>', unsafe_allow_html=True)
-            render_improvement_recommendations_section(report)
-            st.markdown("---")
-            
-            # 섹션 7: 종합 판단
-            st.markdown('<div id="assessment"></div>', unsafe_allow_html=True)
-            render_overall_assessment_section(report)
+        # 섹션 2: 사용자 계약서 내용
+        st.markdown('<div id="user_contract"></div>', unsafe_allow_html=True)
+        render_user_contract_section(report)
+        st.markdown("---")
         
-        # JavaScript로 스크롤 처리
-        scroll_target = st.session_state.get(f"scroll_to_{contract_id}")
-        if scroll_target:
-            st.markdown(f"""
-            <script>
-            setTimeout(function() {{
-                const element = document.getElementById('{scroll_target}');
-                if (element) {{
-                    element.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-                }}
-            }}, 100);
-            </script>
-            """, unsafe_allow_html=True)
-            # 스크롤 후 상태 초기화
-            del st.session_state[f"scroll_to_{contract_id}"]
+        # 섹션 3: 충족된 기준
+        st.markdown('<div id="satisfied"></div>', unsafe_allow_html=True)
+        render_satisfied_criteria_section(report)
+        st.markdown("---")
+        
+        # 섹션 4: 불충분한 요소
+        st.markdown('<div id="insufficient"></div>', unsafe_allow_html=True)
+        render_insufficient_elements_section(report)
+        st.markdown("---")
+        
+        # 섹션 5: 실무적 리스크
+        st.markdown('<div id="risks"></div>', unsafe_allow_html=True)
+        render_practical_risks_section(report)
+        st.markdown("---")
+        
+        # 섹션 6: 개선 권고사항
+        st.markdown('<div id="recommendations"></div>', unsafe_allow_html=True)
+        render_improvement_recommendations_section(report)
+        st.markdown("---")
+        
+        # 섹션 7: 종합 판단
+        st.markdown('<div id="assessment"></div>', unsafe_allow_html=True)
+        render_overall_assessment_section(report)
     
     except Exception as e:
         st.error(f"보고서 로딩 중 오류 발생: {str(e)}")
@@ -618,7 +597,7 @@ def render_insufficient_elements_section(report: dict):
         else:
             article_header = user_article_title if user_article_title else f"제{user_article_no}조"
         
-        with st.expander(f"⚠️ {article_header}", expanded=True):
+        with st.expander(f"⚠️ {article_header}", expanded=False):
             for item in insufficient:
                 std_clause_title = item.get('std_clause_title', '')
                 std_clause_id = item.get('std_clause_id', '')
@@ -1701,19 +1680,6 @@ def display_article_tabs_with_analysis(contract_id: str, uploaded_data: dict):
             st.info("조항 정보가 없습니다.")
             return
         
-        # Sticky Navigation CSS
-        st.markdown("""
-            <style>
-            [data-testid="column"]:nth-of-type(2) {
-                position: sticky;
-                top: 3rem;
-                height: fit-content;
-                max-height: calc(100vh - 6rem);
-                overflow-y: auto;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-        
         # 컨텐츠 최대 너비 확장 CSS
         st.markdown("""
             <style>
@@ -1725,103 +1691,66 @@ def display_article_tabs_with_analysis(contract_id: str, uploaded_data: dict):
             </style>
         """, unsafe_allow_html=True)
         
-        # 2컬럼 레이아웃: 메인 컨텐츠 + Sticky Navigation
-        col_main, col_nav = st.columns([4, 1])
+        # 탭 스크롤 CSS 추가
+        st.markdown("""
+            <style>
+            /* 탭 컨테이너 스크롤 가능하게 */
+            .stTabs [data-baseweb="tab-list"] {
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+            
+            /* 스크롤바 스타일 */
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+                height: 8px;
+            }
+            
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+                background: #2A2C2E;
+                border-radius: 4px;
+            }
+            
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+                background: #3b82f6;
+                border-radius: 4px;
+            }
+            
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
+                background: #2563eb;
+            }
+            </style>
+        """, unsafe_allow_html=True)
         
-        with col_nav:
-            st.markdown("### 📑 목차")
-            st.markdown("---")
+        # 탭 레이블 생성
+        tab_labels = []
+        for article in user_articles:
+            article_no = article.get('user_article_no', 0)
             
-            # 섹션 상태 초기화
-            if 'expanded_section' not in st.session_state:
-                st.session_state.expanded_section = None
+            # 상태 아이콘
+            insufficient = article.get('insufficient_items', article.get('insufficient', []))
+            missing = article.get('missing_items', article.get('missing', []))
             
-            # 섹션 버튼들 (고정)
-            if st.button("✅ 긍정적 평가", key="nav_positive", use_container_width=True):
-                st.session_state.expanded_section = "positive"
-                st.rerun()
+            if missing:
+                icon = "❌"
+            elif insufficient:
+                icon = "⚠️"
+            else:
+                icon = "✅"
             
-            if st.button("⚠️ 불충분한 요소", key="nav_insufficient", use_container_width=True):
-                st.session_state.expanded_section = "insufficient"
-                st.rerun()
+            if article_no == 0:
+                label = f"{icon} 서문"
+            else:
+                label = f"{icon} 제{article_no}조"
             
-            if st.button("❌ 누락된 요소", key="nav_missing", use_container_width=True):
-                st.session_state.expanded_section = "missing"
-                st.rerun()
-            
-            if st.button("🔍 실무적 리스크", key="nav_risks", use_container_width=True):
-                st.session_state.expanded_section = "risks"
-                st.rerun()
-            
-            if st.button("💡 개선 권고사항", key="nav_recommendations", use_container_width=True):
-                st.session_state.expanded_section = "recommendations"
-                st.rerun()
-            
-            if st.button("📋 종합 판단", key="nav_overall", use_container_width=True):
-                st.session_state.expanded_section = "overall"
-                st.rerun()
+            tab_labels.append(label)
         
-        with col_main:
-            # 탭 스크롤 CSS 추가
-            st.markdown("""
-                <style>
-                /* 탭 컨테이너 스크롤 가능하게 */
-                .stTabs [data-baseweb="tab-list"] {
-                    overflow-x: auto;
-                    white-space: nowrap;
-                }
-                
-                /* 스크롤바 스타일 */
-                .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
-                    height: 8px;
-                }
-                
-                .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-track {
-                    background: #2A2C2E;
-                    border-radius: 4px;
-                }
-                
-                .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
-                    background: #3b82f6;
-                    border-radius: 4px;
-                }
-                
-                .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
-                    background: #2563eb;
-                }
-                </style>
-            """, unsafe_allow_html=True)
-            
-            # 탭 레이블 생성
-            tab_labels = []
-            for article in user_articles:
-                article_no = article.get('user_article_no', 0)
-                
-                # 상태 아이콘
-                insufficient = article.get('insufficient_items', article.get('insufficient', []))
-                missing = article.get('missing_items', article.get('missing', []))
-                
-                if missing:
-                    icon = "❌"
-                elif insufficient:
-                    icon = "⚠️"
-                else:
-                    icon = "✅"
-                
-                if article_no == 0:
-                    label = f"{icon} 서문"
-                else:
-                    label = f"{icon} 제{article_no}조"
-                
-                tab_labels.append(label)
-            
-            # 탭 생성 (스크롤 가능)
-            tabs = st.tabs(tab_labels)
-            
-            # 각 탭에 내용 표시
-            for idx, (tab, article) in enumerate(zip(tabs, user_articles)):
-                with tab:
-                    display_single_article_content(article, all_contents, contract_id)
+        # 탭 생성 (스크롤 가능)
+        tabs = st.tabs(tab_labels)
+        
+        # 각 탭에 내용 표시
+        for idx, (tab, article) in enumerate(zip(tabs, user_articles)):
+            with tab:
+                display_single_article_content(article, all_contents, contract_id)
     
     except Exception as e:
         st.error(f"조항별 분석 표시 중 오류 발생: {str(e)}")
@@ -1936,19 +1865,62 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
     
     st.markdown("---")
     
+    # 불충분한 요소 표시
+    insufficient_items = article.get('insufficient_items', article.get('insufficient', []))
+    if insufficient_items:
+        st.markdown("## ⚠️ 불충분한 요소")
+        st.markdown("본 조항에 포함되어 있으나 내용이 불충분한 요소들입니다.")
+        
+        for item in insufficient_items:
+            std_clause_title = item.get('std_clause_title', '')
+            std_clause_id = item.get('std_clause_id', '')
+            analysis = item.get('analysis', '')
+            
+            st.markdown(f"**⚠️ {std_clause_title}** (`{std_clause_id}`)")
+            if analysis:
+                st.markdown(analysis)
+            st.markdown("---")
+    
+    # 누락된 요소 표시
+    missing_items = article.get('missing_items', article.get('missing', []))
+    if missing_items:
+        st.markdown("## ❌ 누락된 요소")
+        st.markdown("본 조항에서 누락된 핵심 요소들입니다.")
+        
+        for item in missing_items:
+            std_clause_title = item.get('std_clause_title', '')
+            std_clause_id = item.get('std_clause_id', '')
+            analysis = item.get('analysis', '')
+            
+            st.markdown(f"**❌ {std_clause_title}** (`{std_clause_id}`)")
+            if analysis:
+                st.markdown(analysis)
+            st.markdown("---")
+    
     # 종합 분석
     st.markdown("## 📝 종합 분석")
     
     if narrative_report:
-        # narrative_report가 문자열인지 dict인지 확인
-        if isinstance(narrative_report, str):
-            # 텍스트를 섹션별로 파싱
+        # narrative_report가 JSON 문자열인지 dict인지 확인
+        sections = {}
+        try:
+            if isinstance(narrative_report, str):
+                # JSON 파싱 시도
+                narrative_data = json.loads(narrative_report)
+                # sections 필드가 있으면 사용, 없으면 전체를 sections로 간주
+                if 'sections' in narrative_data:
+                    sections = narrative_data.get('sections', {})
+                else:
+                    sections = narrative_data
+            elif isinstance(narrative_report, dict):
+                # 이미 dict 형태면 sections 추출 또는 직접 사용
+                if 'sections' in narrative_report:
+                    sections = narrative_report.get('sections', {})
+                else:
+                    sections = narrative_report
+        except (json.JSONDecodeError, TypeError):
+            # JSON 파싱 실패 시 텍스트로 파싱
             sections = parse_narrative_to_sections(narrative_report)
-        elif isinstance(narrative_report, dict):
-            # 이미 dict 형태면 그대로 사용
-            sections = narrative_report
-        else:
-            sections = {}
         
         # 현재 확장된 섹션 가져오기
         expanded_section = st.session_state.get('expanded_section', None)
@@ -1965,45 +1937,34 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
                 </script>
             """, height=0)
         
-        # 1. 긍정적 평가
-        if sections.get('positive_evaluation'):
-            st.markdown('<div id="positive"></div>', unsafe_allow_html=True)
-            with st.expander("✅ 긍정적으로 평가되는 요소", expanded=(expanded_section == "positive")):
-                st.markdown(sections['positive_evaluation'])
+        # 섹션 필드명 매핑 (다양한 형식 지원)
+        section_keys = {
+            'overview': ['1_검토개요', 'section_1_overview'],
+            'satisfied': ['2_충족된기준', 'section_2_fulfilled_criteria'],
+            'insufficient': ['3_불충분한요소', 'section_3_insufficient_elements'],
+            'missing': ['4_누락된핵심요소', 'section_4_missing_core_elements'],
+            'risks': ['5_실무적리스크', 'section_5_practical_risks'],
+            'recommendations': ['6_개선권고사항', 'section_6_improvement_recommendations'],
+            'overall': ['7_종합판단', 'section_7_comprehensive_judgment']
+        }
         
-        # 2. 불충분한 요소
-        if sections.get('insufficient_elements'):
-            st.markdown('<div id="insufficient"></div>', unsafe_allow_html=True)
-            with st.expander("⚠️ 불충분하거나 불명확한 요소", expanded=(expanded_section == "insufficient")):
-                st.markdown(sections['insufficient_elements'])
-        
-        # 3. 누락된 요소
-        if sections.get('missing_elements'):
-            st.markdown('<div id="missing"></div>', unsafe_allow_html=True)
-            with st.expander("❌ 누락된 핵심 요소", expanded=(expanded_section == "missing")):
-                st.markdown(sections['missing_elements'])
-        
-        # 4. 실무적 리스크
-        if sections.get('practical_risks'):
+        # 5. 실무적 리스크
+        risks_content = next((sections.get(key) for key in section_keys['risks'] if key in sections), None)
+        if risks_content:
             st.markdown('<div id="risks"></div>', unsafe_allow_html=True)
-            with st.expander("🔍 실무적 리스크", expanded=(expanded_section == "risks")):
-                st.markdown(sections['practical_risks'])
+            with st.expander("� 실무 적 리스크", expanded=(expanded_section == "risks")):
+                st.markdown(risks_content)
         
-        # 5. 개선 권고사항
-        if sections.get('improvement_recommendations'):
+        # 6. 개선 권고사항
+        recommendations_content = next((sections.get(key) for key in section_keys['recommendations'] if key in sections), None)
+        if recommendations_content:
             st.markdown('<div id="recommendations"></div>', unsafe_allow_html=True)
             with st.expander("💡 개선 권고사항", expanded=(expanded_section == "recommendations")):
-                st.markdown(sections['improvement_recommendations'])
-        
-        # 6. 종합 판단
-        if sections.get('overall_assessment'):
-            st.markdown('<div id="overall"></div>', unsafe_allow_html=True)
-            with st.expander("📋 종합적 판단", expanded=(expanded_section == "overall")):
-                st.markdown(sections['overall_assessment'])
+                st.markdown(recommendations_content)
         
         # 파싱 실패 시 전체 텍스트 표시
-        if not any(sections.values()):
-            st.markdown(narrative_report)
+        if not any([risks_content, recommendations_content]):
+            st.markdown(str(narrative_report))
     else:
         st.info("종합 분석 보고서가 아직 생성되지 않았습니다.")
 
@@ -2347,57 +2308,7 @@ def display_report_with_sticky_nav(contract_id: str, uploaded_data: dict):
         contract_id: 계약서 ID
         uploaded_data: 업로드된 계약서 데이터
     """
-    # Sticky navigation CSS
-    st.markdown("""
-        <style>
-        /* Sticky navigation 스타일 */
-        .sticky-nav {
-            position: sticky;
-            top: 2rem;
-            height: fit-content;
-            max-height: calc(100vh - 4rem);
-            overflow-y: auto;
-            padding: 1rem;
-            background: #1E1F22;
-            border-radius: 8px;
-            border: 1px solid #3d3d4d;
-        }
-        
-        .sticky-nav h3 {
-            font-size: 1rem !important;
-            margin-bottom: 0.75rem !important;
-            color: #9ca3af;
-        }
-        
-        .sticky-nav-item {
-            display: block;
-            padding: 0.5rem 0.75rem;
-            margin-bottom: 0.25rem;
-            color: #d1d5db;
-            text-decoration: none;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .sticky-nav-item:hover {
-            background: #2A2C2E;
-            color: #ffffff;
-        }
-        
-        .sticky-nav-item.active {
-            background: #3b82f6;
-            color: #ffffff;
-            font-weight: 600;
-        }
-        
-        /* 섹션 앵커 스타일 */
-        .section-anchor {
-            scroll-margin-top: 2rem;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+
     
     # 보고서 데이터 로드
     try:
@@ -2410,69 +2321,42 @@ def display_report_with_sticky_nav(contract_id: str, uploaded_data: dict):
         
         report = response.json()
         
-        # 레이아웃: 메인 컨텐츠 (75%) + Sticky Nav (25%)
-        col_main, col_nav = st.columns([3, 1])
+        # 메인 컨텐츠: 모든 섹션을 순서대로 표시
         
-        with col_nav:
-            # Sticky Navigation
-            st.markdown('<div class="sticky-nav">', unsafe_allow_html=True)
-            st.markdown("### 📑 목차")
-            
-            # 네비게이션 링크들
-            nav_items = [
-                ("user-contract", "📄 사용자 계약서"),
-                ("satisfied", "✅ 충족된 기준"),
-                ("insufficient", "⚠️ 불충분한 요소"),
-                ("risks", "🔍 실무적 리스크"),
-                ("recommendations", "💡 개선 권고사항"),
-                ("overall", "📋 종합 판단")
-            ]
-            
-            for anchor, label in nav_items:
-                st.markdown(
-                    f'<a href="#{anchor}" class="sticky-nav-item">{label}</a>',
-                    unsafe_allow_html=True
-                )
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+        # 1. 사용자 계약서 내용
+        st.markdown('<div id="user-contract" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## 📄 사용자 계약서 내용")
+        render_main_user_contract_section(report)
+        st.markdown("---")
         
-        with col_main:
-            # 메인 컨텐츠: 모든 섹션을 순서대로 표시
-            
-            # 1. 사용자 계약서 내용
-            st.markdown('<div id="user-contract" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## 📄 사용자 계약서 내용")
-            render_main_user_contract_section(report)
-            st.markdown("---")
-            
-            # 2. 충족된 기준
-            st.markdown('<div id="satisfied" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## ✅ 충족된 기준")
-            render_main_satisfied_criteria_section(report)
-            st.markdown("---")
-            
-            # 3. 불충분한 요소
-            st.markdown('<div id="insufficient" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## ⚠️ 불충분한 요소")
-            render_main_insufficient_elements_section(report)
-            st.markdown("---")
-            
-            # 4. 실무적 리스크
-            st.markdown('<div id="risks" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## 🔍 실무적 리스크")
-            render_main_practical_risks_section(report)
-            st.markdown("---")
-            
-            # 5. 개선 권고사항
-            st.markdown('<div id="recommendations" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## 💡 개선 권고사항")
-            render_main_improvement_recommendations_section(report)
-            st.markdown("---")
-            
-            # 6. 종합 판단
-            st.markdown('<div id="overall" class="section-anchor"></div>', unsafe_allow_html=True)
-            st.markdown("## 📋 종합 판단")
-            render_main_overall_assessment_section(report)
+        # 2. 충족된 기준
+        st.markdown('<div id="satisfied" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## ✅ 충족된 기준")
+        render_main_satisfied_criteria_section(report)
+        st.markdown("---")
+        
+        # 3. 불충분한 요소
+        st.markdown('<div id="insufficient" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## ⚠️ 불충분한 요소")
+        render_main_insufficient_elements_section(report)
+        st.markdown("---")
+        
+        # 4. 실무적 리스크
+        st.markdown('<div id="risks" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## 🔍 실무적 리스크")
+        render_main_practical_risks_section(report)
+        st.markdown("---")
+        
+        # 5. 개선 권고사항
+        st.markdown('<div id="recommendations" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## 💡 개선 권고사항")
+        render_main_improvement_recommendations_section(report)
+        st.markdown("---")
+        
+        # 6. 종합 판단
+        st.markdown('<div id="overall" class="section-anchor"></div>', unsafe_allow_html=True)
+        st.markdown("## 📋 종합 판단")
+        render_main_overall_assessment_section(report)
     
     except Exception as e:
         st.error(f"보고서 로딩 중 오류 발생: {str(e)}")

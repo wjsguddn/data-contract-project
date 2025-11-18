@@ -136,6 +136,16 @@ class ReportAgent:
             self._save_final_report(db, contract_id, final_report)
             logger.info(f"⏱️ [저장] 최종 보고서 저장 완료 ({time.time() - step_start:.1f}초)")
             
+            # 조마다 7개 섹션 생성 및 저장
+            step_start = time.time()
+            self._generate_and_save_article_sections(
+                contract_id=contract_id,
+                final_report=final_report,
+                user_contract_data=input_data['user_contract_data'],
+                contract_type=input_data['contract_type']
+            )
+            logger.info(f"⏱️ [저장] 조별 보고서 섹션 저장 완료 ({time.time() - step_start:.1f}초)")
+            
             total_elapsed = time.time() - total_start_time
             logger.info(f"✅ 보고서 생성 완료: {contract_id} | 총 소요 시간: {total_elapsed:.1f}초 ({total_elapsed/60:.1f}분)")
             return final_report
@@ -334,3 +344,68 @@ class ReportAgent:
         
         logger.info("Azure OpenAI 클라이언트 초기화 완료")
         return client
+    
+    def _generate_and_save_article_sections(
+        self,
+        contract_id: str,
+        final_report: Dict[str, Any],
+        user_contract_data: Dict[str, Any],
+        contract_type: str
+    ):
+        """
+        narrative_report (JSON 형식)를 DB에 저장
+        
+        🔥 narrative_report는 이미 JSON 문자열 형식입니다!
+        Step5에서 _convert_narrative_to_json()으로 변환되었으므로
+        파싱할 필요 없이 바로 저장하면 됩니다.
+        """
+        import json
+        from backend.report_agent.report_section_saver import save_all_article_sections
+        
+        user_articles = final_report.get("user_articles", [])
+        if not user_articles:
+            return
+        
+        # 모든 조의 보고서 저장
+        all_article_reports = {}
+        for article in user_articles:
+            article_no = article.get("user_article_no")
+            narrative_json = article.get("narrative_report", "")  # 이미 JSON 문자열
+            article_title = article.get("user_article_title", f"제{article_no}조")
+            
+            # 🔥 narrative_json은 이미 JSON 문자열이므로 바로 파싱
+            if narrative_json and len(narrative_json.strip()) > 10:
+                try:
+                    sections = json.loads(narrative_json)
+                    logger.info(f"✅ [{article_no}] JSON 파싱 성공: {len(sections)}개 섹션")
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ [{article_no}] JSON 파싱 실패: {e}")
+                    sections = {
+                        "section_1_overview": "[데이터 없음]",
+                        "section_2_fulfilled_criteria": "[데이터 없음]",
+                        "section_3_insufficient_elements": "[데이터 없음]",
+                        "section_4_missing_core_elements": "[데이터 없음]",
+                        "section_5_practical_risks": "[데이터 없음]",
+                        "section_6_improvement_recommendations": "[데이터 없음]",
+                        "section_7_comprehensive_judgment": "[데이터 없음]"
+                    }
+            else:
+                sections = {
+                    "section_1_overview": "[데이터 없음]",
+                    "section_2_fulfilled_criteria": "[데이터 없음]",
+                    "section_3_insufficient_elements": "[데이터 없음]",
+                    "section_4_missing_core_elements": "[데이터 없음]",
+                    "section_5_practical_risks": "[데이터 없음]",
+                    "section_6_improvement_recommendations": "[데이터 없음]",
+                    "section_7_comprehensive_judgment": "[데이터 없음]"
+                }
+            
+            all_article_reports[article_no] = {
+                "article_title": article_title,
+                "sections": sections
+            }
+        
+        # DB에 저장
+        if all_article_reports:
+            save_all_article_sections(contract_id, all_article_reports)
+            logger.info(f"✅ 조별 보고서 저장: {len(all_article_reports)}개 조")
