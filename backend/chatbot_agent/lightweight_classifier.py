@@ -144,12 +144,16 @@ class LightweightClassifier:
             reasons = []
             
             if article_numbers:
-                args["article_numbers"] = article_numbers
-                reasons.append(f"조 번호: {article_numbers}")
+                # 중복 제거 (동일 조항을 여러 번 언급한 경우)
+                unique_articles = sorted(list(set(article_numbers)))
+                args["article_numbers"] = unique_articles
+                reasons.append(f"조 번호: {unique_articles}")
             
             if exhibit_numbers:
-                args["exhibit_numbers"] = exhibit_numbers
-                reasons.append(f"별지 번호: {exhibit_numbers}")
+                # 중복 제거 (동일 별지를 여러 번 언급한 경우)
+                unique_exhibits = sorted(list(set(exhibit_numbers)))
+                args["exhibit_numbers"] = unique_exhibits
+                reasons.append(f"별지 번호: {unique_exhibits}")
             
             reasoning = ", ".join(reasons) + " 명시됨"
             

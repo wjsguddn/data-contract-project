@@ -192,11 +192,11 @@ class ChatbotResponse(BaseModel):
 # ============================================
 class ValidationResult(BaseModel):
     """검증 결과"""
-    is_valid: bool = Field(description="검증 통과 여부")
-    reason: Optional[str] = Field(None, description="검증 실패 이유")
+    is_contract_related: bool = Field(description="계약서 관련 질문 여부")
+    need_previous_context: bool = Field(description="이전 대화 참조 필요 여부")
+    reasoning: Optional[str] = Field(None, description="판단 근거")
     confidence: Optional[float] = Field(None, description="신뢰도 (0.0-1.0)")
     method: Optional[str] = Field(None, description="검증 방법 (rule_based, llm 등)")
-    references_previous_context: Optional[bool] = Field(None, description="이전 대화 참조 여부")
 
 
 # ============================================

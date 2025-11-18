@@ -96,6 +96,12 @@ class ArticleIndexTool(BaseTool):
                     execution_time=time.time() - start_time
                 )
             
+            # 중복 제거 (방어적 프로그래밍)
+            if article_numbers:
+                article_numbers = sorted(list(set(article_numbers)))
+            if exhibit_numbers:
+                exhibit_numbers = sorted(list(set(exhibit_numbers)))
+            
             logger.info(f"[ArticleIndexTool] 조회 시작: {contract_id}, 조={article_numbers}, 별지={exhibit_numbers}")
             
             # DB에서 계약서 로드
