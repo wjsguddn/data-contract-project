@@ -113,24 +113,30 @@ class ChatbotOrchestrator:
             
             logger.info(f"메시지 처리 시작: {contract_id}, session={session_id}")
             
-            # 1. 질문 범위 검증
-            scope_result = self.scope_validator.validate(user_message)
-            if not scope_result.is_valid:
-                logger.warning(f"범위 외 질문: {scope_result.reason}")
+            # 1. 대화 히스토리 로드 (범위 검증 전)
+            conversation_history = self.context_manager.load_history(contract_id, session_id)
+            previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
+            
+            # 2. 질문 범위 검증 + 이전 대화 참조 판단
+            scope_result = self.scope_validator.validate(user_message, previous_turn)
+            if not scope_result.is_contract_related:
+                logger.warning(f"범위 외 질문: {scope_result.reasoning}")
                 return ChatbotResponse(
                     success=False,
                     message="죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서와 관련된 내용에 대해 질문해주세요.",
                     session_id=session_id,
-                    error=scope_result.reason
+                    error=scope_result.reasoning
                 )
             
-            # 2. LangGraph 기반 처리
+            # 3. LangGraph 기반 처리
             if self.use_langgraph:
                 return self._process_with_langgraph(
                     contract_id=contract_id,
                     user_message=user_message,
                     session_id=session_id,
-                    start_time=start_time
+                    start_time=start_time,
+                    previous_turn=previous_turn,
+                    need_previous_context=scope_result.need_previous_context
                 )
             else:
                 # 레거시 처리 (하위 호환성)
@@ -158,7 +164,9 @@ class ChatbotOrchestrator:
         contract_id: str,
         user_message: str,
         session_id: str,
-        start_time: float
+        start_time: float,
+        previous_turn: List[Dict[str, str]] = None,
+        need_previous_context: bool = False
     ) -> ChatbotResponse:
         """
         LangGraph 기반 메시지 처리
@@ -173,18 +181,14 @@ class ChatbotOrchestrator:
             ChatbotResponse
         """
         try:
-            # 대화 히스토리 로드 (직전 1턴만)
-            conversation_history = self.context_manager.load_history(contract_id, session_id)
-            # 직전 대화만 추출 (최근 2개 메시지 = 1턴)
-            previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
-            
             # LangGraph 워크플로우 실행
             logger.info("LangGraph 워크플로우 실행 시작")
             final_state = self.autonomous_agent.run(
                 contract_id=contract_id,
                 user_message=user_message,
                 session_id=session_id,
-                previous_turn=previous_turn
+                previous_turn=previous_turn,
+                need_previous_context=need_previous_context
             )
             
             # 결과 추출
@@ -561,23 +565,23 @@ class ChatbotOrchestrator:
                 
                 logger.info(f"스트리밍 메시지 처리 시작 (LangGraph): {contract_id}, session={session_id}")
                 
-                # 1. 질문 범위 검증
-                scope_result = self.scope_validator.validate(user_message)
-                if not scope_result.is_valid:
-                    logger.warning(f"범위 외 질문: {scope_result.reason}")
+                # 1. 대화 히스토리 로드 (범위 검증 전)
+                conversation_history = self.context_manager.load_history(contract_id, session_id)
+                previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
+                
+                # 2. 질문 범위 검증 + 이전 대화 참조 판단
+                scope_result = self.scope_validator.validate(user_message, previous_turn)
+                if not scope_result.is_contract_related:
+                    logger.warning(f"범위 외 질문: {scope_result.reasoning}")
                     error_msg = "죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서와 관련된 내용에 대해 질문해주세요."
                     for char in error_msg:
                         yield {"type": "token", "content": char}
                     return
                 
-                # 2. 대화 히스토리 로드 (직전 1턴만)
-                conversation_history = self.context_manager.load_history(contract_id, session_id)
-                previous_turn = conversation_history[-2:] if len(conversation_history) >= 2 else []
-                
-                # 3. 이전 대화 참조 여부 추출 (ScopeValidator에서 판단)
-                need_previous_context = scope_result.references_previous_context
+                # 3. 이전 대화 참조 여부 추출
+                need_previous_context = scope_result.need_previous_context
                 if need_previous_context:
-                    logger.info(f"ScopeValidator: 이전 대화 참조 감지")
+                    logger.info(f"ScopeValidator: 이전 대화 참조 필요")
                 
                 # 4. LangGraph 스트리밍 실행
                 full_response = ""
