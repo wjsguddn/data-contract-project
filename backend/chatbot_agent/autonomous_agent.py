@@ -94,10 +94,9 @@ class AutonomousAgent:
         LangGraph 워크플로우 구축
         
         새로운 플로우:
-        1. check_previous_context_needed: 이전 대화 필요성만 판단
-        2. planner: 툴 선택 (툴 불필요 시 빈 리스트 반환 가능)
-        3. [조건] 툴 있으면 executor → evaluator, 없으면 바로 respond
-        4. evaluator: 충분성 평가 후 continue/finish 판단
+        1. planner: 툴 선택 (툴 불필요 시 빈 리스트 반환 가능)
+        2. [조건] 툴 있으면 executor → evaluator, 없으면 바로 respond
+        3. evaluator: 충분성 평가 후 continue/finish 판단
         
         Returns:
             컴파일되지 않은 StateGraph (AgentPersistence에서 컴파일)
@@ -106,7 +105,6 @@ class AutonomousAgent:
         workflow = StateGraph(AgentState)
         
         # 노드 추가
-        workflow.add_node("check_previous_context", self.check_previous_context_needed)
         workflow.add_node("planner", self.plan_next_action)
         workflow.add_node("executor", self.execute_tools)
         workflow.add_node("parallel_executor", self.execute_parallel_tools)
@@ -114,10 +112,7 @@ class AutonomousAgent:
         workflow.add_node("respond", self.generate_response)
         
         # 엣지 연결
-        workflow.set_entry_point("check_previous_context")
-        
-        # check_previous_context → planner (항상)
-        workflow.add_edge("check_previous_context", "planner")
+        workflow.set_entry_point("planner")
         
         # planner → [조건] executor/parallel_executor (툴 있음) or respond/evaluator (툴 없음)
         workflow.add_conditional_edges(
@@ -233,11 +228,7 @@ class AutonomousAgent:
                 if state:
                     # state는 {node_name: node_output} 형식
                     for node_name, node_output in state.items():
-                        if node_name == "check_previous_context":
-                            # check_previous_context_needed 완료 (이벤트 없음)
-                            final_state = node_output
-
-                        elif node_name == "planner":
+                        if node_name == "planner":
                             next_tools = node_output.get("next_tools", [])
 
                             # 툴이 없으면 바로 답변 생성
@@ -377,8 +368,9 @@ class AutonomousAgent:
 현재 질문: {final_state['user_message']}
 
 수집된 정보를 기반으로 답변해 주세요.
-단, 수집된 정보에 질문과 관련 없는 내용이 포함되어 있을 수도 있습니다. 활용할 필요가 없다고 판단되는 내용은 참고하지 않습니다.
-또한 답변은 구조화된 형태일수록 좋습니다."""
+- 단, 수집된 정보에 질문과 관련 없는 내용이 포함되어 있을 수도 있습니다. 활용할 필요가 없다고 판단되는 내용은 참고하지 않습니다.
+- 답변은 구조화된 형태일수록 좋습니다.
+- 계약서와 관련된 내용의 질문이 아니라면 "죄송합니다. 저는 계약서 내용에 대한 질문에만 답변할 수 있습니다. 계약서와 관련된 내용에 대해 질문해주세요." 라고만 답해야한다."""
             
             # 프롬프트 로깅
             # logger.info("=" * 80)
@@ -520,155 +512,7 @@ class AutonomousAgent:
     # ============================================
     # 노드 구현
     # ============================================
-    
-    def check_previous_context_needed(self, state: AgentState) -> AgentState:
-        """
-        이전 대화 필요성 판단 (LLM 기반)
-        
-        이전 대화를 참조하는 질문인지만 판단합니다.
-        툴 필요성은 planner에서 판단합니다.
-        
-        Args:
-            state: 현재 상태
-            
-        Returns:
-            업데이트된 상태 (need_previous_context 설정)
-        """
-        # 이미 설정되어 있으면 즉시 반환 (ScopeValidator에서 미리 판단한 경우)
-        if state.get("need_previous_context") is not None:
-            logger.info(
-                f"[check_previous_context_needed] 이미 설정됨: "
-                f"need_previous_context={state['need_previous_context']} (ScopeValidator)"
-            )
-            return state
-        
-        user_message = state["user_message"]
-        
-        logger.info("[check_previous_context_needed] 이전 대화 필요성 판단 시작")
-        
-        # 직전 대화 컨텍스트 구성
-        context_text = ""
-        messages = state.get("messages", [])
-        has_previous_messages = len(messages) > 1
-        
-        if has_previous_messages:
-            # 현재 질문 제외하고 직전 대화만
-            for msg in messages[:-1]:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                if role == "user":
-                    context_text += f"사용자: {content}\n"
-                elif role == "assistant":
-                    context_text += f"챗봇: {content}\n"
-        
-        # 이전 대화가 없으면 바로 false 반환
-        if not has_previous_messages:
-            state["need_previous_context"] = False
-            
-            decision = DecisionLog(
-                step="check_previous_context",
-                reasoning="이전 대화 없음",
-                action="no_context",
-                confidence=1.0,
-                timestamp=datetime.now().isoformat(),
-                method="rule_based"
-            )
-            state["decision_log"].append(decision.dict())
-            
-            logger.info("[check_previous_context_needed] 이전 대화 없음 → need_previous_context=False")
-            return state
-        
-        # LLM으로 이전 대화 필요성 판단
-        prompt = f"""다음 자료들은 사용자가 계약서 챗봇(계약서를 기반으로 답변하는 챗봇)과 주고받은 대화/질문 내용입니다.
-현재 사용자 질문이 이전 대화를 참조하는지 판단하세요.
 
-이전 대화:
-{context_text}
-
-현재 사용자 질문: {user_message}
-
-판단 기준:
-
-**이전 대화 필요 (need_previous_context=true)**:
-1. 명시적 참조어 사용: "그럼", "그것은", "그거", "위에서", "아까", "방금"
-2. 이전 답변에 대한 요약/정리/재설명 요청
-3. 이전 답변의 특정 부분에 대한 추가 질문
-4. 대명사로 이전 내용 지칭: "이거", "저거", "그게"
-
-**이전 대화 불필요 (need_previous_context=false)**:
-1. 독립적인 새로운 질문 (참조어 없음)
-2. 동일하게 계약서에 대한 내용이더라도 이전 대화와는 독립적인 질문인 경우
-3. 계약서의 다른 부분에 대한 질문
-
-예시:
-- "그거 다시 설명해줘" → true (명시적 참조)
-- "간단히 정리해줘" → true (이전 답변 요약)
-- 이전 질문:"계약 해지 조건이 어떻게 되지?", 현재 질문: "검수 절차가 어떻게 되지?" → false (독립적 질문)
-- 이전 질문:"제3조 내용은?", 현재 질문: "제5조 내용은?" → false (새로운 조항 질문)
-- 이전 질문:"가공서비스의 검수 절차가 어떻게 되지?", 이전 답변:"가공서비스의 검수 절차는 부분 검수, 최종 검수, 수정 및 보완 등의 단계로...", 현재 질문: "부분 검수 과정에 대해 자세히 설명해줘" → true (추가 질문)
-
-응답 형식 (JSON):
-{{
-    "need_previous_context": true/false,
-    "reasoning": "판단 근거 (한 문장)"
-}}
-
-JSON만 응답하세요."""
-        
-        try:
-            system_msg = "당신은 '계약서 챗봇'에 대한 대화 분석 전문가입니다. JSON 형식으로만 응답하세요."
-            
-            response_text = self.runtime.call_llm(
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt}
-                ],
-                model="gpt-4o-mini",
-                temperature=0.1,
-                max_tokens=150,
-                response_format={"type": "json_object"}
-            )
-            
-            result = json.loads(response_text)
-            need_previous_context = result.get("need_previous_context", False)
-            reasoning = result.get("reasoning", "")
-            
-            # 상태에 저장
-            state["need_previous_context"] = need_previous_context
-            
-            decision = DecisionLog(
-                step="check_previous_context",
-                reasoning=reasoning,
-                action="context_needed" if need_previous_context else "no_context",
-                confidence=0.85,
-                timestamp=datetime.now().isoformat(),
-                method="llm"
-            )
-            state["decision_log"].append(decision.dict())
-            
-            logger.info(
-                f"[check_previous_context_needed] "
-                f"need_previous_context={need_previous_context}, "
-                f"reasoning={reasoning}"
-            )
-            
-        except Exception as e:
-            logger.error(f"[check_previous_context_needed] 오류 발생: {e}")
-            # 폴백: 이전 대화 불필요로 판단
-            state["need_previous_context"] = False
-            
-            decision = DecisionLog(
-                step="check_previous_context",
-                reasoning="판단 실패, 기본값 사용",
-                action="no_context",
-                confidence=0.5,
-                timestamp=datetime.now().isoformat(),
-                method="fallback"
-            )
-            state["decision_log"].append(decision.dict())
-        
-        return state
-    
     def plan_next_action(self, state: AgentState) -> AgentState:
         """
         다음 행동 계획 (Function Calling 사용, 여러 툴 동시 선택 지원)
