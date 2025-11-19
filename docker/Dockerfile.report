@@ -23,5 +23,5 @@ COPY backend/report_agent/ ./backend/report_agent/
 COPY backend/shared/ ./backend/shared/
 COPY data/ ./data/
 
-# Celery 워커 실행
-CMD ["python", "-m", "celery", "-A", "backend.shared.core.celery_app:celery_app", "worker", "-Q", "report_generation", "-l", "info"]
+# Celery 워커 실행 (병렬 처리를 위한 concurrency 설정)
+CMD ["python", "-m", "celery", "-A", "backend.shared.core.celery_app:celery_app", "worker", "-Q", "report_generation", "-l", "info", "--concurrency=4"]
