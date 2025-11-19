@@ -147,7 +147,40 @@ class ReportAgent:
             logger.info(f"⏱️ [저장] 조별 보고서 섹션 저장 완료 ({time.time() - step_start:.1f}초)")
             
             total_elapsed = time.time() - total_start_time
-            logger.info(f"✅ 보고서 생성 완료: {contract_id} | 총 소요 시간: {total_elapsed:.1f}초 ({total_elapsed/60:.1f}분)")
+            
+            # 검증 완료 시간 기록
+            from datetime import datetime
+            validation_result = db.query(ValidationResult).filter(
+                ValidationResult.contract_id == contract_id
+            ).first()
+            
+            if validation_result and validation_result.validation_timing:
+                timing = validation_result.validation_timing
+                start_time = timing.get('start_time')
+                
+                if start_time:
+                    end_time = time.time()
+                    total_validation_time = end_time - start_time
+                    
+                    # 검증 타이밍 업데이트
+                    timing['end_time'] = end_time
+                    timing['end_datetime'] = datetime.now().isoformat()
+                    timing['total_duration_seconds'] = round(total_validation_time, 2)
+                    timing['total_duration_minutes'] = round(total_validation_time / 60, 2)
+                    timing['report_generation_seconds'] = round(total_elapsed, 2)
+                    
+                    validation_result.validation_timing = timing
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(validation_result, 'validation_timing')
+                    db.commit()
+                    
+                    logger.info(f"⏱️ 보고서 생성 소요: {total_elapsed:.1f}초 ({total_elapsed/60:.1f}분)")
+                    logger.info(f"⏱️ 전체 검증 소요 (검증 시작 → 보고서 완료): {total_validation_time:.1f}초 ({total_validation_time/60:.1f}분)")
+                else:
+                    logger.info(f"✅ 보고서 생성 완료: {contract_id} | 소요 시간: {total_elapsed:.1f}초")
+            else:
+                logger.info(f"✅ 보고서 생성 완료: {contract_id} | 소요 시간: {total_elapsed:.1f}초")
+            
             return final_report
             
         except Exception as e:
