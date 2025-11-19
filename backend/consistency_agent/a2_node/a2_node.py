@@ -51,20 +51,19 @@ class ChecklistCheckNode:
         self.db = db_session
         self.kb_loader = kb_loader or KnowledgeBaseLoader()
         
-        # A2 전용 OpenAI 클라이언트 생성
-        # 환경변수 우선순위: OPENAI_API_KEY_A2 > OPENAI_API_KEY
-        a2_api_key = os.getenv('OPENAI_API_KEY_A2') or os.getenv('OPENAI_API_KEY')
+        # OpenAI 클라이언트 생성 (챗봇과 동일한 키 사용)
+        openai_api_key = os.getenv('OPENAI_API_KEY')
         
-        if a2_api_key:
+        if openai_api_key:
             # OpenAI API 사용 (개인 키)
-            self.llm_client = OpenAI(api_key=a2_api_key)
-            logger.info("A2 노드: OpenAI API 사용 (개인 키)")
+            self.llm_client = OpenAI(api_key=openai_api_key)
+            logger.info("A2 노드: OpenAI API 사용 (OPENAI_API_KEY)")
         elif llm_client:
             # 전달받은 Azure 클라이언트 사용 (폴백)
             self.llm_client = llm_client
             logger.info("A2 노드: Azure OpenAI 사용 (폴백)")
         else:
-            raise ValueError("A2 노드: OpenAI API 키 또는 Azure 클라이언트가 필요합니다")
+            raise ValueError("A2 노드: OPENAI_API_KEY 환경 변수 또는 Azure 클라이언트가 필요합니다")
         
         # 컴포넌트 초기화
         self.checklist_loader = ChecklistLoader()

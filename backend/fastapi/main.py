@@ -841,9 +841,14 @@ async def chatbot_message(
             from openai import OpenAI
             import os
 
-            openai_client = OpenAI(
-                api_key=os.getenv('OPENAI_API_KEY')
-            )
+            openai_api_key = os.getenv('OPENAI_API_KEY')
+            if not openai_api_key:
+                logger.error("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다")
+                yield f"data: {json.dumps({'error': 'OPENAI_API_KEY 환경 변수가 설정되지 않았습니다'})}\n\n"
+                return
+            
+            logger.info(f"OPENAI_API_KEY 로드 완료 (길이: {len(openai_api_key)})")
+            openai_client = OpenAI(api_key=openai_api_key)
 
             orchestrator = ChatbotOrchestrator(openai_client=openai_client)
             
@@ -1154,6 +1159,68 @@ async def get_report(contract_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.exception(f"보고서 조회 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/report/{contract_id}/download/markdown")
+async def download_report_markdown(contract_id: str, db: Session = Depends(get_db)):
+    """
+    최종 보고서를 마크다운 파일로 다운로드
+    
+    Args:
+        contract_id: 계약서 ID
+        db: 데이터베이스 세션
+        
+    Returns:
+        마크다운 파일 (text/markdown)
+    """
+    from fastapi.responses import Response
+    
+    try:
+        # ValidationResult 조회
+        validation = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계약서를 찾을 수 없습니다: {contract_id}"
+            )
+        
+        # 최종 보고서 확인
+        if not validation.final_report:
+            raise HTTPException(
+                status_code=404,
+                detail="보고서가 아직 생성되지 않았습니다"
+            )
+        
+        # 마크다운 변환
+        from backend.report_agent.report_formatter import ReportFormatter
+        
+        formatter = ReportFormatter()
+        markdown_content = formatter.to_markdown(validation.final_report)
+        
+        # 파일명 생성 (계약서명 사용)
+        contract = db.query(ContractDocument).filter(
+            ContractDocument.contract_id == contract_id
+        ).first()
+        
+        filename = f"검증보고서_{contract.filename if contract else contract_id}.md"
+        
+        # 마크다운 파일 반환
+        return Response(
+            content=markdown_content.encode('utf-8'),
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"마크다운 다운로드 중 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1652,7 +1719,7 @@ async def generate_article_revision(
         # 요청 데이터 추출
         article_number = request.get("article_number")
         
-        if not article_number:
+        if article_number is None:
             raise HTTPException(status_code=400, detail="article_number is required")
         
         # DB에서 ValidationResult 조회
@@ -1665,12 +1732,18 @@ async def generate_article_revision(
         
         # article_reports에서 해당 조항 데이터 가져오기
         article_reports = validation.article_reports or {}
-        article_key = str(article_number)
+        
+        # 서문(article_number=0)은 "preamble" 키로 저장됨
+        if article_number == 0:
+            article_key = "preamble"
+        else:
+            article_key = str(article_number)
         
         logger.info(f"[REVISION DEBUG] article_reports keys: {list(article_reports.keys())}")
+        logger.info(f"[REVISION DEBUG] 찾는 키: {article_key}")
         
         if article_key not in article_reports:
-            raise HTTPException(status_code=404, detail=f"제{article_number}조 보고서를 찾을 수 없습니다")
+            raise HTTPException(status_code=404, detail=f"{'서문' if article_number == 0 else f'제{article_number}조'} 보고서를 찾을 수 없습니다")
         
         article_data = article_reports[article_key]
         sections_data = article_data.get("sections", {})
@@ -1691,18 +1764,22 @@ async def generate_article_revision(
         
         # user_articles에서 제목 가져오기
         user_articles = final_report.get("user_articles", [])
-        article_title = f"제{article_number}조"
+        article_title = "서문" if article_number == 0 else f"제{article_number}조"
         for article in user_articles:
             if article.get("user_article_no") == article_number:
-                article_title = article.get("user_article_title", f"제{article_number}조")
+                article_title = article.get("user_article_title", article_title)
                 break
         
-        # all_clause_contents["user_articles"]에서 user_article_{번호} 키로 접근
+        # all_clause_contents에서 내용 가져오기
         all_clause_contents = final_report.get("all_clause_contents", {})
-        user_articles_contents = all_clause_contents.get("user_articles", {})
         
-        user_article_key = f"user_article_{article_number}"
-        user_content_data = user_articles_contents.get(user_article_key, {})
+        # 서문은 "preamble" 키로, 일반 조항은 "user_articles" 아래에 저장됨
+        if article_number == 0:
+            user_content_data = all_clause_contents.get("preamble", {})
+        else:
+            user_articles_contents = all_clause_contents.get("user_articles", {})
+            user_article_key = f"user_article_{article_number}"
+            user_content_data = user_articles_contents.get(user_article_key, {})
         
         # content 추출
         original_content = ""
@@ -1726,13 +1803,14 @@ async def generate_article_revision(
                     original_content = str(content)
         
         if not original_content:
-            raise HTTPException(status_code=404, detail=f"제{article_number}조 내용을 찾을 수 없습니다")
+            raise HTTPException(status_code=404, detail=f"{'서문' if article_number == 0 else f'제{article_number}조'} 내용을 찾을 수 없습니다")
         
         # 리스크와 권고사항
         risks = sections.get("section_5_practical_risks", "")
         recommendations = sections.get("section_6_improvement_recommendations", "")
         
-        logger.info(f"[REVISION] 제{article_number}조: 원본={len(original_content)}자, 리스크={len(risks)}자, 권고={len(recommendations)}자")
+        article_label = "서문" if article_number == 0 else f"제{article_number}조"
+        logger.info(f"[REVISION] {article_label}: 원본={len(original_content)}자, 리스크={len(risks)}자, 권고={len(recommendations)}자")
         
         # Azure OpenAI 클라이언트 초기화
         api_key = os.getenv('AZURE_OPENAI_API_KEY')
@@ -1775,7 +1853,7 @@ async def generate_article_revision(
 ────────────────────────────────────
 
 【원본 조항】
-제{article_number}조
+{article_label}
 {original_content}
 
 【실무적 리스크】

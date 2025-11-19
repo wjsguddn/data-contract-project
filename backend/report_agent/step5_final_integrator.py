@@ -231,11 +231,16 @@ class Step5FinalIntegrator:
             # 체크리스트 결과 추가
             article["checklist_results"] = checklist_items
             
+            # A3 fidelity_level 추가 (이미 있으면 유지)
+            if "fidelity_level" not in article:
+                article["fidelity_level"] = "unknown"
+            
             logger.debug(f"사용자 조항 {user_article_no}: "
                         f"매칭 {len(article['matched_standard_articles'])}개, "
                         f"불충분 {len(article['insufficient_items'])}개, "
                         f"누락 {len(article['missing_items'])}개, "
-                        f"체크리스트 {len(checklist_items)}개")
+                        f"체크리스트 {len(checklist_items)}개, "
+                        f"fidelity_level: {article.get('fidelity_level', 'unknown')}")
         
         return user_articles
     

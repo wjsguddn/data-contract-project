@@ -2,6 +2,11 @@ import streamlit as st
 import time
 import requests
 import json
+from datetime import datetime
+from io import BytesIO
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 st.set_page_config(
@@ -372,6 +377,15 @@ def _format_contract_type(contract_type: str) -> str:
     return type_map.get(contract_type, contract_type)
 
 
+def _remove_urn_id(text: str) -> str:
+    """
+    텍스트에서 URN ID 제거
+    예: "제3조 제2항 (urn:std:provide:art:003:cla:002)" -> "제3조 제2항"
+    """
+    import re
+    return re.sub(r'\s*\(urn:[^)]+\)', '', text)
+
+
 def show_validation_results_page(contract_id: str):
     """
     검증 결과 페이지 표시 (탭 구조)
@@ -600,11 +614,10 @@ def render_satisfied_criteria_section(report: dict):
             if a1_matches:
                 st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
                 for m in a1_matches:
-                    std_clause_title = m.get('std_clause_title', '')
-                    std_clause_id = m.get('std_clause_id', '')
+                    std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                     analysis = m.get('analysis', '')
                     
-                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                    st.markdown(f"- **{std_clause_title}**")
                     if analysis and analysis != "표준 조항과 매칭됨":
                         st.markdown(f"> {analysis}")
             
@@ -612,10 +625,9 @@ def render_satisfied_criteria_section(report: dict):
             if a3_matches:
                 st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
                 for m in a3_matches:
-                    std_clause_title = m.get('std_clause_title', '')
-                    std_clause_id = m.get('std_clause_id', '')
+                    std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                     
-                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                    st.markdown(f"- **{std_clause_title}**")
 
 
 def render_insufficient_elements_section(report: dict):
@@ -653,11 +665,10 @@ def render_insufficient_elements_section(report: dict):
         
         with st.expander(f"⚠️ {article_header}", expanded=False):
             for item in insufficient:
-                std_clause_title = item.get('std_clause_title', '')
-                std_clause_id = item.get('std_clause_id', '')
+                std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
                 analysis = item.get('analysis', '')
                 
-                st.markdown(f"**{std_clause_title}** (`{std_clause_id}`)")
+                st.markdown(f"**{std_clause_title}**")
                 if analysis:
                     st.markdown(f"> {analysis}")
                 st.markdown("---")
@@ -1013,11 +1024,10 @@ def display_final_report_tab(contract_id: str):
                                 if a1_matches:
                                     st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
                                     for m in a1_matches:
-                                        std_clause_title = m.get('std_clause_title', '')
-                                        std_clause_id = m.get('std_clause_id', '')
+                                        std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                                         analysis = m.get('analysis', '')
                                         
-                                        st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                        st.markdown(f"- **{std_clause_title}**")
                                         if analysis and analysis != "표준 조항과 매칭됨":
                                             st.markdown(f"> {analysis}")
                                 
@@ -1025,10 +1035,9 @@ def display_final_report_tab(contract_id: str):
                                 if a3_matches:
                                     st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
                                     for m in a3_matches:
-                                        std_clause_title = m.get('std_clause_title', '')
-                                        std_clause_id = m.get('std_clause_id', '')
+                                        std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                                         
-                                        st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                        st.markdown(f"- **{std_clause_title}**")
                             
                             # 체크리스트 결과 표시
                             if checklist_results:
@@ -1062,11 +1071,10 @@ def display_final_report_tab(contract_id: str):
                             if a1_matches:
                                 st.markdown("**✅ 매칭된 표준 조항 (조 단위):**")
                                 for m in a1_matches:
-                                    std_clause_title = m.get('std_clause_title', '')
-                                    std_clause_id = m.get('std_clause_id', '')
+                                    std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                                     analysis = m.get('analysis', '')
                                     
-                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                    st.markdown(f"- **{std_clause_title}**")
                                     if analysis and analysis != "표준 조항과 매칭됨":
                                         st.markdown(f"> {analysis}")
                             
@@ -1074,20 +1082,18 @@ def display_final_report_tab(contract_id: str):
                             if a3_matches:
                                 st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
                                 for m in a3_matches:
-                                    std_clause_title = m.get('std_clause_title', '')
-                                    std_clause_id = m.get('std_clause_id', '')
+                                    std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                                     
-                                    st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                    st.markdown(f"- **{std_clause_title}**")
                         
                         # 불충분한 조항
                         if insufficient:
                             st.markdown("**⚠️ 불충분한 조항:**")
                             for item in insufficient:
-                                std_clause_title = item.get('std_clause_title', '')
-                                std_clause_id = item.get('std_clause_id', '')
+                                std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
                                 analysis = item.get('analysis', '')
                                 
-                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                st.markdown(f"- **{std_clause_title}**")
                                 if analysis:
                                     # 들여쓰기를 위해 > 사용
                                     st.markdown(f"> {analysis}")
@@ -1096,11 +1102,10 @@ def display_final_report_tab(contract_id: str):
                         if missing:
                             st.markdown("**❌ 누락된 조항:**")
                             for item in missing:
-                                std_clause_title = item.get('std_clause_title', '')
-                                std_clause_id = item.get('std_clause_id', '')
+                                std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
                                 analysis = item.get('analysis', '')
                                 
-                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                st.markdown(f"- **{std_clause_title}**")
                                 if analysis:
                                     # 들여쓰기를 위해 > 사용
                                     st.markdown(f"> {analysis}")
@@ -1145,10 +1150,9 @@ def display_final_report_tab(contract_id: str):
                         if a3_matches:
                             st.markdown("**✅ 매칭된 표준 조항 (항/호 단위 - A3 상세 분석):**")
                             for m in a3_matches:
-                                std_clause_title = m.get('std_clause_title', '')
-                                std_clause_id = m.get('std_clause_id', '')
+                                std_clause_title = _remove_urn_id(m.get('std_clause_title', ''))
                                 
-                                st.markdown(f"- **{std_clause_title}** (`{std_clause_id}`)")
+                                st.markdown(f"- **{std_clause_title}**")
                         
                         # 🔥 체크리스트 결과 (디버그용)
                         if checklist_results:
@@ -1186,7 +1190,7 @@ def display_final_report_tab(contract_id: str):
             
             for item in overall_missing:
                 std_clause_id = item.get('std_clause_id', '')
-                std_clause_title = item.get('std_clause_title', '')
+                std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
                 analysis = item.get('analysis', '')
                 
                 # 조 단위 ID 추출 (예: "urn:std:provide:art:013:cla:001" → "제13조")
@@ -1202,7 +1206,7 @@ def display_final_report_tab(contract_id: str):
                             detailed_info = detail
                             break
                 
-                with st.expander(f"🔴 {std_clause_title} ({std_clause_id})"):
+                with st.expander(f"🔴 {std_clause_title}"):
                     # 상세 정보가 있으면 서술형 보고서 표시
                     if detailed_info and detailed_info.get('narrative_report'):
                         st.markdown(detailed_info.get('narrative_report'))
@@ -1886,6 +1890,7 @@ def display_article_tabs_with_analysis(contract_id: str, uploaded_data: dict):
         
         user_articles = report.get('user_articles', [])
         all_contents = report.get('all_clause_contents', {})
+        overall_missing_detailed = report.get('overall_missing_clauses_detailed', [])
         
         if not user_articles:
             st.info("조항 정보가 없습니다.")
@@ -1932,21 +1937,31 @@ def display_article_tabs_with_analysis(contract_id: str, uploaded_data: dict):
             </style>
         """, unsafe_allow_html=True)
         
-        # 탭 레이블 생성
+        # 탭 레이블 생성 (A3 기반 아이콘)
         tab_labels = []
         for article in user_articles:
             article_no = article.get('user_article_no', 0)
             
-            # 상태 아이콘
-            insufficient = article.get('insufficient_items', article.get('insufficient', []))
-            missing = article.get('missing_items', article.get('missing', []))
+            # A3 fidelity_level 기반 아이콘
+            fidelity_level = article.get('fidelity_level', 'unknown')
             
-            if missing:
-                icon = "❌"
-            elif insufficient:
-                icon = "⚠️"
+            if fidelity_level == 'low':
+                icon = "🔴"  # 개선 필요
+            elif fidelity_level == 'medium':
+                icon = "🟡"  # 개선 권장
+            elif fidelity_level == 'high':
+                icon = "🟢"  # 충족
             else:
-                icon = "✅"
+                # fidelity_level이 없으면 기존 로직 사용
+                insufficient = article.get('insufficient_items', article.get('insufficient', []))
+                missing = article.get('missing_items', article.get('missing', []))
+                
+                if missing:
+                    icon = "🔴"
+                elif insufficient:
+                    icon = "🟡"
+                else:
+                    icon = "🟢"
             
             if article_no == 0:
                 label = f"{icon} 서문"
@@ -1961,7 +1976,7 @@ def display_article_tabs_with_analysis(contract_id: str, uploaded_data: dict):
         # 각 탭에 내용 표시
         for idx, (tab, article) in enumerate(zip(tabs, user_articles)):
             with tab:
-                display_single_article_content(article, all_contents, contract_id)
+                display_single_article_content(article, all_contents, contract_id, overall_missing_detailed)
     
     except Exception as e:
         st.error(f"조항별 분석 표시 중 오류 발생: {str(e)}")
@@ -2022,7 +2037,327 @@ def parse_narrative_to_sections(narrative_text: str) -> dict:
     return sections
 
 
-def display_single_article_content(article: dict, all_contents: dict, contract_id: str):
+def generate_article_docx(article: dict, all_contents: dict, overall_missing_detailed: list = None) -> BytesIO:
+    """
+    단일 조항의 DOCX 보고서 생성
+    
+    Args:
+        article: 조항 데이터
+        all_contents: 전체 조항 내용
+        overall_missing_detailed: 전체 누락된 조항 상세 정보 (선택)
+        
+    Returns:
+        DOCX 파일의 BytesIO 객체
+    """
+    article_no = article.get('user_article_no', 0)
+    article_title = article.get('user_article_title', '')
+    narrative_report = article.get('narrative_report', '')
+    
+    doc = Document()
+    
+    # 제목
+    if article_no == 0:
+        title = doc.add_heading('서문 분석 보고서', 0)
+    else:
+        title = doc.add_heading(f'{article_title} 분석 보고서', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # 사용자 계약서 원문
+    doc.add_heading('📄 사용자 계약서 원문', level=1)
+    
+    user_article_key = f"user_article_{article_no}"
+    user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
+    
+    if user_content:
+        if article_no == 0:
+            content = user_content.get('text', '')
+        else:
+            content = user_content.get('content', '')
+        
+        if isinstance(content, list):
+            content_text = '\n'.join(str(item) for item in content if item)
+        else:
+            content_text = str(content) if content else ''
+        
+        p = doc.add_paragraph(content_text)
+        p.style = 'Normal'
+    
+    # AI가 판단할 수 없는 항목
+    checklist_results = article.get('checklist_results', [])
+    manual_check_items = [
+        item for item in checklist_results
+        if item.get('result') == 'MANUAL_CHECK_REQUIRED'
+    ]
+    
+    if manual_check_items:
+        doc.add_heading('🔍 사용자 확인이 필요한 항목', level=1)
+        for idx, item in enumerate(manual_check_items, 1):
+            check_text = item.get('check_text', '')
+            manual_check_reason = item.get('manual_check_reason', '')
+            doc.add_paragraph(f"{idx}. {check_text}", style='Heading 3')
+            doc.add_paragraph(manual_check_reason)
+    
+    # 종합 분석 (7개 섹션)
+    if narrative_report:
+        doc.add_heading('📝 종합 분석', level=1)
+        
+        sections = {}
+        try:
+            if isinstance(narrative_report, str):
+                narrative_data = json.loads(narrative_report)
+                if 'sections' in narrative_data:
+                    sections = narrative_data.get('sections', {})
+                else:
+                    sections = narrative_data
+            elif isinstance(narrative_report, dict):
+                if 'sections' in narrative_report:
+                    sections = narrative_report.get('sections', {})
+                else:
+                    sections = narrative_report
+        except (json.JSONDecodeError, TypeError):
+            pass
+        
+        section_titles = [
+            ('1_검토개요', 'section_1_overview', '1. 검토 개요'),
+            ('2_충족된기준', 'section_2_fulfilled_criteria', '2. 충족된 기준'),
+            ('3_불충분한요소', 'section_3_insufficient_elements', '3. 불충분한 요소'),
+            ('4_누락된핵심요소', 'section_4_missing_core_elements', '4. 누락된 핵심 요소'),
+            ('5_실무적리스크', 'section_5_practical_risks', '5. 실무적 리스크'),
+            ('6_개선권고사항', 'section_6_improvement_recommendations', '6. 개선 권고사항'),
+            ('7_종합판단', 'section_7_comprehensive_judgment', '7. 종합 판단')
+        ]
+        
+        for key1, key2, title in section_titles:
+            content = sections.get(key1) or sections.get(key2)
+            if content:
+                doc.add_heading(title, level=2)
+                doc.add_paragraph(content)
+    
+    # 전체 계약서에서 누락된 조항 (조 단위)
+    if overall_missing_detailed:
+        doc.add_page_break()
+        doc.add_heading('❌ 전체 계약서에서 누락된 조항', level=1)
+        doc.add_paragraph(f'사용자 계약서 전체에서 찾을 수 없는 표준 조항입니다. ({len(overall_missing_detailed)}개)')
+        doc.add_paragraph('이 조항들은 계약서 어디에도 포함되지 않았으므로 추가를 검토해야 합니다.')
+        doc.add_paragraph('')
+        
+        for missing_article in overall_missing_detailed:
+            std_article_id = missing_article.get('std_article_id', '')
+            narrative_report_missing = missing_article.get('narrative_report', {})
+            
+            # 조 제목
+            doc.add_heading(f'🔴 {std_article_id}', level=2)
+            
+            # section_1_overview 추출
+            if isinstance(narrative_report_missing, dict):
+                sections_missing = narrative_report_missing.get('sections', narrative_report_missing)
+                overview = sections_missing.get('section_1_overview', '')
+                if overview:
+                    doc.add_paragraph(overview)
+                else:
+                    doc.add_paragraph('상세 분석 정보가 없습니다.')
+            elif isinstance(narrative_report_missing, str):
+                try:
+                    narrative_data = json.loads(narrative_report_missing)
+                    sections_missing = narrative_data.get('sections', narrative_data)
+                    overview = sections_missing.get('section_1_overview', '')
+                    if overview:
+                        doc.add_paragraph(overview)
+                    else:
+                        doc.add_paragraph('상세 분석 정보가 없습니다.')
+                except:
+                    doc.add_paragraph(narrative_report_missing if narrative_report_missing else '상세 분석 정보가 없습니다.')
+            
+            doc.add_paragraph('')  # 조 사이 간격
+    
+    # BytesIO로 저장
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_article_markdown(article: dict, all_contents: dict) -> str:
+    """
+    단일 조항의 마크다운 보고서 생성
+    
+    Args:
+        article: 조항 데이터
+        all_contents: 전체 조항 내용
+        
+    Returns:
+        마크다운 형식의 조항 분석 보고서
+    """
+    article_no = article.get('user_article_no', 0)
+    article_title = article.get('user_article_title', '')
+    narrative_report = article.get('narrative_report', '')
+    
+    lines = []
+    
+    # 헤더
+    if article_no == 0:
+        lines.append("# 서문 분석 보고서")
+    else:
+        lines.append(f"# {article_title} 분석 보고서")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # 사용자 계약서 원문
+    lines.append("## 📄 사용자 계약서 원문")
+    lines.append("")
+    
+    user_article_key = f"user_article_{article_no}"
+    user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
+    
+    if user_content:
+        if article_no == 0:
+            content = user_content.get('text', '')
+        else:
+            content = user_content.get('content', '')
+        
+        if isinstance(content, list):
+            content_text = '\n'.join(str(item) for item in content if item)
+        else:
+            content_text = str(content) if content else ''
+        
+        lines.append(content_text)
+    else:
+        lines.append("*조항 원문을 불러올 수 없습니다.*")
+    
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # 불충분한 요소
+    insufficient_items = article.get('insufficient_items', article.get('insufficient', []))
+    if insufficient_items:
+        lines.append("## ⚠️ 불충분한 요소")
+        lines.append("")
+        for item in insufficient_items:
+            std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
+            analysis = item.get('analysis', '')
+            lines.append(f"**{std_clause_title}**")
+            if analysis:
+                lines.append(analysis)
+            lines.append("")
+    
+    # 누락된 요소
+    missing_items = article.get('missing_items', article.get('missing', []))
+    if missing_items:
+        lines.append("## ❌ 누락된 요소")
+        lines.append("")
+        for item in missing_items:
+            std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
+            analysis = item.get('analysis', '')
+            lines.append(f"**{std_clause_title}**")
+            if analysis:
+                lines.append(analysis)
+            lines.append("")
+    
+    # AI가 판단할 수 없는 항목
+    checklist_results = article.get('checklist_results', [])
+    manual_check_items = [
+        item for item in checklist_results
+        if item.get('result') == 'MANUAL_CHECK_REQUIRED'
+    ]
+    
+    if manual_check_items:
+        lines.append("## 🔍 사용자 확인이 필요한 항목")
+        lines.append("")
+        for idx, item in enumerate(manual_check_items, 1):
+            check_text = item.get('check_text', '')
+            manual_check_reason = item.get('manual_check_reason', '')
+            lines.append(f"**{idx}. {check_text}**")
+            lines.append(manual_check_reason)
+            lines.append("")
+    
+    # 종합 분석 (7개 섹션 전체)
+    if narrative_report:
+        lines.append("## 📝 종합 분석")
+        lines.append("")
+        
+        # narrative_report 파싱
+        sections = {}
+        try:
+            if isinstance(narrative_report, str):
+                narrative_data = json.loads(narrative_report)
+                if 'sections' in narrative_data:
+                    sections = narrative_data.get('sections', {})
+                else:
+                    sections = narrative_data
+            elif isinstance(narrative_report, dict):
+                if 'sections' in narrative_report:
+                    sections = narrative_report.get('sections', {})
+                else:
+                    sections = narrative_report
+        except (json.JSONDecodeError, TypeError):
+            sections = parse_narrative_to_sections(narrative_report)
+        
+        # 1. 검토 개요
+        overview = sections.get('1_검토개요') or sections.get('section_1_overview')
+        if overview:
+            lines.append("### 1. 검토 개요")
+            lines.append("")
+            lines.append(overview)
+            lines.append("")
+        
+        # 2. 충족된 기준
+        fulfilled = sections.get('2_충족된기준') or sections.get('section_2_fulfilled_criteria')
+        if fulfilled:
+            lines.append("### 2. 충족된 기준")
+            lines.append("")
+            lines.append(fulfilled)
+            lines.append("")
+        
+        # 3. 불충분한 요소
+        insufficient = sections.get('3_불충분한요소') or sections.get('section_3_insufficient_elements')
+        if insufficient:
+            lines.append("### 3. 불충분한 요소")
+            lines.append("")
+            lines.append(insufficient)
+            lines.append("")
+        
+        # 4. 누락된 핵심 요소
+        missing = sections.get('4_누락된핵심요소') or sections.get('section_4_missing_core_elements')
+        if missing:
+            lines.append("### 4. 누락된 핵심 요소")
+            lines.append("")
+            lines.append(missing)
+            lines.append("")
+        
+        # 5. 실무적 리스크
+        risks = sections.get('5_실무적리스크') or sections.get('section_5_practical_risks')
+        if risks:
+            lines.append("### 5. 실무적 리스크")
+            lines.append("")
+            lines.append(risks)
+            lines.append("")
+        
+        # 6. 개선 권고사항
+        recommendations = sections.get('6_개선권고사항') or sections.get('section_6_improvement_recommendations')
+        if recommendations:
+            lines.append("### 6. 개선 권고사항")
+            lines.append("")
+            lines.append(recommendations)
+            lines.append("")
+        
+        # 7. 종합 판단
+        judgment = sections.get('7_종합판단') or sections.get('section_7_comprehensive_judgment')
+        if judgment:
+            lines.append("### 7. 종합 판단")
+            lines.append("")
+            lines.append(judgment)
+            lines.append("")
+    
+    lines.append("---")
+    lines.append("")
+    lines.append(f"*보고서 생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    
+    return "\n".join(lines)
+
+
+def display_single_article_content(article: dict, all_contents: dict, contract_id: str, overall_missing_detailed: list = None):
     """
     단일 조항 컨텐츠 표시 (sticky nav 없이)
     
@@ -2030,13 +2365,35 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
         article: 조항 데이터
         all_contents: 전체 조항 내용
         contract_id: 계약서 ID
+        overall_missing_detailed: 전체 누락된 조항 상세 정보 (선택)
     """
     article_no = article.get('user_article_no', 0)
     article_title = article.get('user_article_title', '')
     narrative_report = article.get('narrative_report', '')
     
-    # 사용자 계약서 원문
-    st.markdown("## 📄 사용자 계약서 원문")
+    # 사용자 계약서 원문 + 다운로드 버튼
+    col_title, col_download = st.columns([3, 1])
+    
+    with col_title:
+        st.markdown("## 📄 사용자 계약서 원문")
+    
+    with col_download:
+        # 파일명 설정
+        if article_no == 0:
+            docx_filename = f"서문_분석보고서.docx"
+            docx_label = "📥 보고서 다운로드"
+        else:
+            docx_filename = f"제{article_no}조_분석보고서.docx"
+            docx_label = "📥 보고서 다운로드"
+        
+        st.download_button(
+            label=docx_label,
+            data=generate_article_docx(article, all_contents, overall_missing_detailed),
+            file_name=docx_filename,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+            key=f"download_docx_{article_no}"
+        )
     
     user_article_key = f"user_article_{article_no}"
     user_content = all_contents.get("user_articles", {}).get(user_article_key, {}).get("content", {})
@@ -2089,11 +2446,10 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
         st.markdown("본 조항에 포함되어 있으나 내용이 불충분한 요소들입니다.")
         
         for item in insufficient_items:
-            std_clause_title = item.get('std_clause_title', '')
-            std_clause_id = item.get('std_clause_id', '')
+            std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
             analysis = item.get('analysis', '')
             
-            st.markdown(f"**⚠️ {std_clause_title}** (`{std_clause_id}`)")
+            st.markdown(f"**⚠️ {std_clause_title}**")
             if analysis:
                 st.markdown(analysis)
             st.markdown("---")
@@ -2105,11 +2461,10 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
         st.markdown("본 조항에서 누락된 핵심 요소들입니다.")
         
         for item in missing_items:
-            std_clause_title = item.get('std_clause_title', '')
-            std_clause_id = item.get('std_clause_id', '')
+            std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
             analysis = item.get('analysis', '')
             
-            st.markdown(f"**❌ {std_clause_title}** (`{std_clause_id}`)")
+            st.markdown(f"**❌ {std_clause_title}**")
             if analysis:
                 st.markdown(analysis)
             st.markdown("---")
@@ -2185,18 +2540,47 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
     else:
         st.info("종합 분석 보고서가 아직 생성되지 않았습니다.")
     
-    # 🆕 수정본 생성 버튼 (제일 아래)
-    st.markdown("---")
-    st.markdown("## 📝 리스크+권고사항 반영 수정본 생성")
+    # AI가 판단할 수 없는 항목 (체크리스트)
+    checklist_results = article.get('checklist_results', [])
+    manual_check_items = [
+        item for item in checklist_results
+        if item.get('result') == 'MANUAL_CHECK_REQUIRED'
+    ]
     
-    # 버튼 텍스트 (서문은 "서문", 일반 조항은 "제n조")
+    if manual_check_items:
+        st.markdown("---")
+        st.markdown("## 🔍 사용자 확인이 필요한 항목")
+        st.info("AI가 자동으로 검증할 수 없어 사용자의 직접 확인이 필요한 체크리스트 항목입니다.")
+        
+        for idx, item in enumerate(manual_check_items, 1):
+            check_text = item.get('check_text', '')
+            manual_check_reason = item.get('manual_check_reason', '')
+            
+            # 질문과 이유를 함께 표시
+            st.markdown(f"**{idx}. {check_text}**")
+            st.markdown(manual_check_reason)
+            if idx < len(manual_check_items):  # 마지막 항목이 아니면 구분선
+                st.markdown("---")
+    
+    # 수정본 생성 섹션 (페이지 제일 아래)
+    st.markdown("---")
+    st.markdown("""
+    <div class="report-card card-success">
+        <div class="report-card-header">📝 리스크+권고사항 반영 수정본 생성</div>
+        <div class="report-card-content">
+            각 조항별로 리스크와 권고사항을 반영한 수정본을 생성할 수 있습니다.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 버튼 텍스트
     if article_no == 0:
-        button_text = "✏️ 서문 수정본 생성"
+        revision_label = "✏️ 서문 수정본 생성"
     else:
-        button_text = f"✏️ 제{article_no}조 수정본 생성"
+        revision_label = f"✏️ 제{article_no}조 수정본 생성"
     
     if st.button(
-        button_text,
+        revision_label,
         use_container_width=True,
         key=f"generate_revision_single_{article_no}"
     ):
@@ -2321,11 +2705,10 @@ def render_main_insufficient_elements_section(report: dict):
         
         with st.expander(f"⚠️ {article_header}", expanded=False):
             for item in insufficient:
-                std_clause_title = item.get('std_clause_title', '')
-                std_clause_id = item.get('std_clause_id', '')
+                std_clause_title = _remove_urn_id(item.get('std_clause_title', ''))
                 analysis = item.get('analysis', '')
                 
-                st.markdown(f"**{std_clause_title}** (`{std_clause_id}`)")
+                st.markdown(f"**{std_clause_title}**")
                 if analysis:
                     st.markdown(f"> {analysis}")
                 st.markdown("---")

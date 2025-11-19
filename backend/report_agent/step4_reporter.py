@@ -1020,17 +1020,6 @@ class Step4Reporter:
             for clause in clauses[:5]  # 최대 5개 항
         ])
         
-        # 후보 정보
-        candidate_info = ""
-        if best_candidate:
-            candidate_info = f"""
-## 가장 유사한 사용자 조항
-- **조항**: {best_candidate.get('user_article_title', 'N/A')}
-- **유사도**: {best_candidate.get('confidence', 0):.0%}
-- **매칭 유형**: {best_candidate.get('match_type', 'N/A')}
-- **분석**: {best_candidate.get('reasoning', 'N/A')}
-"""
-        
         prompt = f"""당신은 데이터 계약서 검증 전문가입니다. 사용자 계약서에 누락된 표준 조항에 대한 서술형 보고서를 작성해주세요.
 
 ## 누락된 표준 조항
@@ -1038,8 +1027,6 @@ class Step4Reporter:
 
 ## 표준계약서 내용
 {std_text}
-
-{candidate_info}
 
 ## 위험성 평가
 {risk_assessment if risk_assessment else "N/A"}
@@ -1056,8 +1043,7 @@ class Step4Reporter:
 1. 누락 사실 설명: 귀하의 계약서에 {article_id}의 내용이 포함되어 있지 않다는 점을 자연스럽게 전달합니다.
 2. 내용 요약: {article_id}가 일반적으로 어떤 역할을 하는 조항인지 2~3문장으로 간결하게 설명합니다.
 3. 위험성 설명: 이 내용이 없을 경우 발생할 수 있는 실무적·운영상 문제를 현실적인 수준에서 설명합니다.
-4. 유사 조항 분석(후보가 있는 경우): 위에 제공된 "가장 유사한 사용자 조항" 정보를 바탕으로, 해당 조항이 왜 관련된 조항으로 판단되는지 자연스럽게 설명합니다. 유사도 수치는 언급하지 않습니다.
-5. 실질적 권고: 조항을 어디에, 어떤 방식으로 보완하면 좋은지 실무 중심으로 조언합니다. 조문 초안은 작성하지 않습니다.
+4. 실질적 권고: 조항을 어디에, 어떤 방식으로 보완하면 좋은지 실무 중심으로 조언합니다. 조문 초안은 작성하지 않습니다.
 
 ### 작성 규칙
 - 법무팀이 작성한 정식 검토 보고서 문체를 사용합니다.
