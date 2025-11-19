@@ -88,10 +88,11 @@ class ScopeValidator:
             }
             
         처리 로직:
-        1. 이전 대화 없음 + contract_indicators ✅ → LLM 스킵
+        1. 이전 대화 없음 + contract_indicators ✅ + out_of_scope ❌ → LLM 스킵
         2. 이전 대화 없음 + contract_indicators ❌ → LLM (범위만 판단)
-        3. 이전 대화 있음 + 둘 다 ✅ → LLM 스킵
-        4. 이전 대화 있음 + 하나라도 ❌ → LLM (통합 판단)
+        3. 이전 대화 있음 + contract_indicators ✅ + reference_indicators ✅ + out_of_scope ❌ → LLM 스킵
+        4. 이전 대화 있음 + contract_indicators ✅ + out_of_scope ❌ → is_contract_related=true 확정, need_previous_context만 LLM 판단 (신규)
+        5. 이전 대화 있음 + 나머지 → LLM 통합 판단
         """
         has_previous = previous_turn and len(previous_turn) > 0
         message_lower = user_message.lower()
@@ -139,14 +140,20 @@ class ScopeValidator:
                 method="rule_based"
             )
         
-        # 케이스 3-1: 이전 대화 있음 + 둘 다 ✅ + out_of_scope ✅
-        if has_previous and has_contract_keyword and has_reference_keyword and has_out_of_scope_keyword:
-            logger.info("범위 검증: 이전 대화 있음 + 둘 다 매칭 + 범위 외 키워드 존재 → LLM 판단")
+        # 케이스 3-1: 이전 대화 있음 + contract_indicators ✅ + out_of_scope ❌ (신규)
+        # → is_contract_related=true 확정, need_previous_context만 LLM 판단
+        if has_previous and has_contract_keyword and not has_out_of_scope_keyword:
+            logger.info("범위 검증: 이전 대화 있음 + 계약서 키워드 존재 + 범위 외 키워드 없음 → is_contract_related=true 확정, need_previous_context만 LLM 판단")
+            return self._llm_validate_context_only(user_message, previous_turn)
+        
+        # 케이스 4: 이전 대화 있음 + contract_indicators ✅ + out_of_scope ✅
+        if has_previous and has_contract_keyword and has_out_of_scope_keyword:
+            logger.info("범위 검증: 이전 대화 있음 + 계약서 키워드 + 범위 외 키워드 동시 존재 → LLM 통합 판단")
             return self._llm_validate_integrated(user_message, previous_turn)
         
-        # 케이스 4: 이전 대화 있음 + 나머지
+        # 케이스 5: 이전 대화 있음 + 나머지
         if has_previous:
-            logger.info("범위 검증: 이전 대화 있음 + 기타 케이스 → LLM (통합 판단)")
+            logger.info("범위 검증: 이전 대화 있음 + 기타 케이스 → LLM 통합 판단")
             return self._llm_validate_integrated(user_message, previous_turn)
         
         # 폴백 (도달하지 않아야 함)
@@ -177,7 +184,7 @@ class ScopeValidator:
 - 계약 조항 내용 관련 질문 → true
 - 계약 당사자, 기간, 대가 등에 대한 질문 → true
 - 계약서에 명시된 권리, 의무, 책임에 대한 질문 → true
-- 표준계약서에 관한 질문 → true
+- 그냥 계약에 대한 질문 대부분 → true
 
 계약서와 무관한 질문의 예:
 - 일반 상식, 뉴스, 날씨 등 → false
@@ -228,6 +235,99 @@ JSON만 응답하세요."""
                 method="fallback"
             )
     
+    def _llm_validate_context_only(
+        self,
+        user_message: str,
+        previous_turn: List[Dict[str, str]]
+    ) -> ValidationResult:
+        """
+        LLM 기반 이전 대화 참조 판단만 수행 (is_contract_related=true 확정)
+        
+        Args:
+            user_message: 사용자 질문
+            previous_turn: 이전 대화
+            
+        Returns:
+            ValidationResult (is_contract_related=true 고정)
+        """
+        # 이전 대화 컨텍스트 구성
+        context_text = ""
+        for msg in previous_turn:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                context_text += f"사용자: {content}\n"
+            elif role == "assistant":
+                context_text += f"챗봇: {content}\n"
+        
+        prompt = f"""다음은 계약서 챗봇과의 대화 내역입니다.
+현재 질문이 이전 대화를 참조하는지만 판단하세요.
+
+이전 대화:
+{context_text}
+
+현재 질문: {user_message}
+
+**판단 기준**:
+
+참조함 (true):
+- 참조어 사용: "그럼", "그거", "그것", "이거", "위에서", "아까", "방금"
+- 이전 답변 요청: "요약해줘", "정리해줘", "간단히", "자세히", "뭐라고?"
+- 이전 답변의 특정 부분 추가 질문
+
+참조 안 함 (false):
+- 독립적인 새 질문 (참조어 없음)
+- 이전 대화와 전혀 무관한 질문
+
+예시:
+- "요약해줘", "상세화해줘" 등 → true
+- 어조상 단독문이 아닌 이전 대화가 존재하는 것 처럼 표현한다면 → true
+- 이전 대화에서 계약의 만료나 해지에 대해서 이야기했고, 현재 질문에서는 계약의 목적을 물어본다거나 하는 독립된 주제인 경우 → false
+
+응답 형식 (JSON):
+{{
+    "need_previous_context": true/false,
+    "reasoning": "판단 근거 (한 문장)"
+}}
+
+JSON만 응답하세요."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=100,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+            
+            need_previous_context = result.get("need_previous_context", False)
+            reasoning = result.get("reasoning", "")
+            
+            logger.info(f"LLM 컨텍스트 검증 (참조만): need_previous_context={need_previous_context}")
+            
+            return ValidationResult(
+                is_contract_related=True,  # 고정
+                need_previous_context=need_previous_context,
+                reasoning=reasoning,
+                confidence=0.9,
+                method="llm_context_only"
+            )
+            
+        except Exception as e:
+            logger.error(f"LLM 컨텍스트 검증 실패: {e}")
+            # 에러 시 일단 허용
+            return ValidationResult(
+                is_contract_related=True,
+                need_previous_context=False,
+                reasoning="LLM 판단 실패, 기본값 사용",
+                confidence=0.3,
+                method="fallback"
+            )
+    
     def _llm_validate_integrated(
         self, 
         user_message: str, 
@@ -253,60 +353,67 @@ JSON만 응답하세요."""
             elif role == "assistant":
                 context_text += f"챗봇: {content}\n"
         
-        prompt = f"""다음 자료들은 사용자가 계약서 챗봇(계약서를 기반으로 답변하는 챗봇)과 주고받은 대화/질문 내용입니다.
+        prompt = f"""다음은 "데이터 계약서 챗봇"과의 대화 내역입니다.
 현재 사용자 질문에 대해 두 가지를 판단하세요.
-
-**판단 순서 (반드시 이 순서대로 판단하세요)**:
-1단계: 현재 사용자 질문이 이전 대화 내용을 참조하는지 판단 (need_previous_context)
-2단계: 그 다음 계약서 관련성을 판단 (is_contract_related)
 
 이전 대화:
 {context_text}
 
-현재 사용자 질문: {user_message}
+현재 질문: {user_message}
 
-판단 기준:
+**판단 순서 (반드시 이 순서대로)**:
 
-**1단계: 이전 대화 참조 (need_previous_context)**
+1단계: 이전 대화 참조 여부 (need_previous_context)
+2단계: 계약서 관련성 (is_contract_related)
 
-**참조함 (need_previous_context=true)**:
-- 현재 사용자 질문에 답변하는데에 이전 대화가 정보로써 필요한 경우
-- 명시적 참조어 사용: "그럼", "그것은", "그거", "위에서", "아까", "방금"
-- 이전 답변에 대한 요약/정리/재설명 요청: "요약해줘", "정리해줘", "간단히", "자세히"
-- 이전 답변의 특정 부분에 대한 추가 질문
-- 대명사로 이전 내용 지칭: "이거", "저거", "그게"
+---
 
-**참조 안 함 (need_previous_context=false)**:
-- 독립적인 새로운 질문 (참조어 없음)
-- 동일하게 계약서에 대한 내용이더라도 이전 대화와는 완전히 독립적인 질문인 경우
+**1단계: need_previous_context 판단**
 
-need_previous_context 예시:
-- "요약해줘" → need_previous_context=true (이전 답변 요약)
-- "뭐라고?" 또는 "뭐?" → need_previous_context=true (목적은 애매하지만 이전 답변을 참조해야함)
-- 이전:"계약 해지 조건이 어떻게 되지?", 현재:"검수 절차가 어떻게 되지?" → need_previous_context=false (독립적 질문)
-- 이전:"제3조 내용은?", 현재:"제5조 내용은?" → need_previous_context=false (새로운 조항 질문)
-- 이전 질문:"가공서비스의 검수 절차가 어떻게 되지?", 이전 답변:"가공서비스의 검수 절차는 부분 검수, 최종 검수...", 현재 질문: "부분 검수 과정에 대해 설명해줘" → true (연계 질문)
+참조함 (true):
+- 참조어 사용: "그럼", "그거", "그것", "이거", "위에서", "아까", "방금" 등
+- 이전 답변 요청: "요약해줘", "정리해줘", "간단히", "자세히", "뭐라고?" 등
+- 이전 대화의 특정 부분 추가 질문
+- 이전 대화의 주제와 동일/유사한 주제에 대한 질문
 
-**2단계: 계약서 관련성 (is_contract_related)**
+참조 안 함 (false):
+- 독립적인 새 질문 (참조어 없음)
+- 계약서 관련이더라도 이전 대화와 무관한 질문
 
-**관련 있음 (is_contract_related=true)**:
-- 계약 조항, 내용, 조건, 작성에 대한 질문
-- 계약 당사자, 기간, 대가, 권리, 의무에 대한 질문
-- **또는** 1단계에서 need_previous_context=true로 판단했고, 이전 대화가 계약서 관련 내용인 경우
-  (예: 이전 대화에서 계약서 조항을 설명했고, 현재 "요약해줘"라고 요청한 경우)
+예시:
+- "요약해줘" → true
+- "계약서에 청약철회 내용이 있나?" → false (독립적 질문)
+- "제3조는?" → false (새 조항 질문)
 
-**관련 없음 (is_contract_related=false)**:
-- 일반 상식, 뉴스, 날씨 등
-- 일반적인 인사, 감사 표현
+---
+
+**2단계: is_contract_related 판단**
+
+**중요: 현재 질문 자체의 내용을 먼저 판단하세요**
+
+관련 있음 (true):
+- 계약, 조항, 조건, 내용, 당사자, 기간, 대가, 권리, 의무 관련 질문
+- 계약에 특정 내용이 있는지 묻는 질문
+- 데이터 계약 관련 질문
+- **또는** need_previous_context=true이고 이전 대화가 계약서 관련인 경우
+
+관련 없음 (false):
+- 일반 상식, 뉴스, 날씨
+- 인사, 감사 표현
 - 계약서와 무관한 개인적 질문
-- **단, 이전 대화를 참조하지 않는 경우에만** (need_previous_context=false인 경우)
 
 **핵심 규칙**:
-- "요약해줘", "정리해줘" 같은 질문은 need_previous_context=true
-- need_previous_context=true이고 이전 대화가 계약서 관련이면 → is_contract_related=true (자동)
-**중요**: 현재 질문 자체는 계약서와 무관해 보여도, 이전 계약서 대화를 참조하면 계약서 관련으로 판단
+1. 질문에 "계약", "조항", "청약철회", "해지", "대가지급", "면책" 등 계약 키워드가 있으면 → true
+2. need_previous_context=true + 이전 대화가 계약서 관련 → true
+3. 둘 다 아니면 → false
 
-응답 형식 (JSON, 판단 순서대로):
+예시:
+- "계약서에 청약철회 내용이 있나?" → true (계약서 키워드)
+- "제5조 내용은?" → true (조항 질문)
+- "요약해줘" (이전: 계약 조항 설명) → true (이전 대화 참조)
+- "날씨 어때?" → false
+
+응답 형식 (JSON):
 {{
     "need_previous_context": true/false,
     "is_contract_related": true/false,
