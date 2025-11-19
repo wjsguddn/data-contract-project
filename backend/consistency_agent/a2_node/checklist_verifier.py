@@ -38,7 +38,7 @@ class ChecklistVerifier:
             azure_client: Azure OpenAI 클라이언트
             model: 사용할 모델명 (기본: gpt-4o-mini)
         """
-        self.azure_client = azure_client
+        self.client = azure_client  # 🔥 self.client로 저장 (메서드에서 사용)
         self.model = model
         
         logger.info(f"ChecklistVerifier 초기화 완료 (model={model})")
@@ -108,7 +108,7 @@ JSON 형식:
 }}"""
         
         try:
-            response = self.azure_client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
@@ -351,7 +351,7 @@ JSON 배열 형식으로 답변:
   ]
 }}"""
         
-        response = self.azure_client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {
@@ -470,7 +470,7 @@ JSON 형식으로 답변:
 }}"""
         
         try:
-            response = self.azure_client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
