@@ -976,13 +976,21 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
 
         logger.info(f"[PARALLEL] [1/2] A1-Stage1 완료")
 
-        # Step 2: A1-Stage2, A2, A3 병렬 실행 (직접 함수 호출)
+        # Step 2: A1-Stage2, A2, A3 병렬 실행 (ThreadPoolExecutor 사용)
         logger.info(f"[PARALLEL] [2/2] A1-Stage2, A2, A3 병렬 실행 중...")
 
-        # 3개 태스크를 동시에 실행 (같은 worker 내에서 순차 실행되지만 DB 작업은 병렬)
-        a1_stage2_result = check_missing_articles_task(contract_id, text_weight, title_weight, dense_weight)
-        a2_result = check_checklist_task(contract_id, ["primary"])
-        a3_result = analyze_content_task(contract_id, ["primary"], text_weight, title_weight, dense_weight)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # 3개 태스크를 진짜 병렬로 실행
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_a1_stage2 = executor.submit(check_missing_articles_task, contract_id, text_weight, title_weight, dense_weight)
+            future_a2 = executor.submit(check_checklist_task, contract_id, ["primary"])
+            future_a3 = executor.submit(analyze_content_task, contract_id, ["primary"], text_weight, title_weight, dense_weight)
+            
+            # 결과 수집
+            a1_stage2_result = future_a1_stage2.result()
+            a2_result = future_a2.result()
+            a3_result = future_a3.result()
 
         logger.info(f"[PARALLEL] [2/2] batch1 병렬 실행 완료")
 
@@ -1006,8 +1014,12 @@ def validate_contract_parallel_task(self, contract_id: str, text_weight: float =
             
             try:
                 # batch2: A2, A3 병렬 실행 (recovered 매칭)
-                batch2_a2_result = check_checklist_task(contract_id, ["recovered"])
-                batch2_a3_result = analyze_content_task(contract_id, ["recovered"], text_weight, title_weight, dense_weight)
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    future_batch2_a2 = executor.submit(check_checklist_task, contract_id, ["recovered"])
+                    future_batch2_a3 = executor.submit(analyze_content_task, contract_id, ["recovered"], text_weight, title_weight, dense_weight)
+                    
+                    batch2_a2_result = future_batch2_a2.result()
+                    batch2_a3_result = future_batch2_a3.result()
                 
                 logger.info(f"[PARALLEL] batch2 완료: A2={batch2_a2_result.get('status')}, A3={batch2_a3_result.get('status')}")
             
