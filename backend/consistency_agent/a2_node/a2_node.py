@@ -160,7 +160,6 @@ class ChecklistCheckNode:
         
         # 5. 표준 조항 기준으로 검증
         logger.info("5. 표준 조항별 체크리스트 검증 시작...")
-        std_article_results = []
         
         # 디버그: 매칭 교집합 확인
         matched_std_ids = set(std_to_user_map.keys())
@@ -174,51 +173,83 @@ class ChecklistCheckNode:
             logger.warning(f"  - 매칭 조항 샘플: {list(matched_std_ids)[:3]}")
             logger.warning(f"  - 체크리스트 조항 샘플: {list(checklist_std_ids)[:3]}")
         
-        for idx, (std_global_id, checklist_items) in enumerate(checklist_by_std.items(), 1):
-            # 매칭된 사용자 조항들
-            matched_users = std_to_user_map.get(std_global_id, [])
+        # 병렬 체크리스트 검증
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # 검증 대상 필터링 (매칭된 조항만)
+        items_to_verify = [
+            (std_global_id, checklist_items)
+            for std_global_id, checklist_items in checklist_by_std.items()
+            if std_to_user_map.get(std_global_id)
+        ]
+        
+        logger.info(f"🚀 A2 체크리스트 검증 병렬 처리 시작: {len(items_to_verify)}개 표준 조항 (max_workers=5)")
+        
+        def process_single_std_article(item_data):
+            """단일 표준 조항 체크리스트 검증"""
+            std_global_id, checklist_items = item_data
             
-            if not matched_users:
-                logger.debug(f"  [{idx}/{len(checklist_by_std)}] {std_global_id}: 매칭 없음, 건너뜀")
-                continue
+            try:
+                # 매칭된 사용자 조항들
+                matched_users = std_to_user_map.get(std_global_id, [])
+                
+                logger.info(f"  {std_global_id} 검증 중...")
+                logger.info(f"    - 매칭된 사용자 조항: {len(matched_users)}개")
+                logger.info(f"    - 체크리스트 항목: {len(checklist_items)}개")
+                
+                # 사용자 조항 텍스트 합치기
+                combined_text = self._combine_user_article_texts(contract_id, matched_users)
+                
+                if not combined_text:
+                    logger.warning(f"    사용자 조항 텍스트를 로드할 수 없음, 건너뜀")
+                    return None
+                
+                # LLM 검증
+                checklist_results = self.verifier.verify_batch(
+                    combined_text,
+                    checklist_items
+                )
+                
+                logger.info(f"    검증 완료: {len(checklist_results)}개 결과")
+                
+                # 표준 조항 정보 추출
+                std_article_title = checklist_items[0].get('reference', '') if checklist_items else ''
+                std_article_number = std_article_title  # "제3조" 형식
+                
+                # 조항별 통계 계산
+                article_stats = self._calculate_article_statistics(checklist_results)
+                
+                logger.info("--------------------------------------------------------------------------------")
+                
+                # 결과 반환
+                return {
+                    "std_article_id": std_global_id,
+                    "std_article_title": std_article_title,
+                    "std_article_number": std_article_number,
+                    "matched_user_articles": matched_users,
+                    "checklist_results": checklist_results,
+                    "statistics": article_stats
+                }
+            except Exception as e:
+                logger.error(f"  {std_global_id} 검증 실패: {e}")
+                logger.info("--------------------------------------------------------------------------------")
+                return None
+        
+        # 병렬 실행
+        std_article_results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_item = {
+                executor.submit(process_single_std_article, item): item
+                for item in items_to_verify
+            }
             
-            logger.info(f"  [{idx}/{len(checklist_by_std)}] {std_global_id} 검증 중...")
-            logger.info(f"    - 매칭된 사용자 조항: {len(matched_users)}개")
-            logger.info(f"    - 체크리스트 항목: {len(checklist_items)}개")
-            
-            # 사용자 조항 텍스트 합치기
-            combined_text = self._combine_user_article_texts(contract_id, matched_users)
-            
-            if not combined_text:
-                logger.warning(f"    사용자 조항 텍스트를 로드할 수 없음, 건너뜀")
-                continue
-            
-            # LLM 검증
-            checklist_results = self.verifier.verify_batch(
-                combined_text,
-                checklist_items
-            )
-            
-            logger.info(f"    검증 완료: {len(checklist_results)}개 결과")
-            
-            # 표준 조항 정보 추출
-            std_article_title = checklist_items[0].get('reference', '') if checklist_items else ''
-            std_article_number = std_article_title  # "제3조" 형식
-            
-            # 조항별 통계 계산
-            article_stats = self._calculate_article_statistics(checklist_results)
-            
-            # 결과 수집
-            std_article_results.append({
-                "std_article_id": std_global_id,
-                "std_article_title": std_article_title,
-                "std_article_number": std_article_number,
-                "matched_user_articles": matched_users,
-                "checklist_results": checklist_results,
-                "statistics": article_stats
-            })
-            
-            logger.info("--------------------------------------------------------------------------------")
+            for future in as_completed(future_to_item):
+                result = future.result()
+                
+                if result:
+                    std_article_results.append(result)
+        
+        logger.info(f"✨ A2 체크리스트 검증 병렬 처리 완료")
         
         # 6. 전체 통계 계산
         logger.info("6. 전체 통계 계산 중...")
