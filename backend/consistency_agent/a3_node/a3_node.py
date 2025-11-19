@@ -110,8 +110,13 @@ class ContentAnalysisNode:
 
         logger.info(f"  A1 매칭 결과 로드 완료: {len(a1_results_by_article)}개 조항")
 
-        # 각 조항 분석
-        for article in articles:
+        # 병렬 조항 분석
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        logger.info(f"🚀 A3 조항 분석 병렬 처리 시작: {len(articles)}개 조항 (max_workers=4)")
+        
+        def process_single_article(article):
+            """단일 조항 분석"""
             try:
                 article_no = article.get('number')
                 a1_result = a1_results_by_article.get(article_no)
@@ -122,19 +127,32 @@ class ContentAnalysisNode:
                     contract_id,
                     a1_matching_result=a1_result
                 )
-                result.article_analysis.append(analysis)
-
-                if analysis.matched:
-                    result.analyzed_articles += 1
-                if analysis.is_special:
-                    result.special_articles += 1
-
+                logger.info("--------------------------------------------------------------------------------")
+                return analysis
             except Exception as e:
                 logger.error(f"  조항 분석 실패 (제{article.get('number')}조): {e}")
-                continue
-            finally:
-                # 조항별 내용 검증 완료 구분선
                 logger.info("--------------------------------------------------------------------------------")
+                return None
+        
+        # 병렬 실행
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_article = {
+                executor.submit(process_single_article, article): article
+                for article in articles
+            }
+            
+            for future in as_completed(future_to_article):
+                analysis = future.result()
+                
+                if analysis:
+                    result.article_analysis.append(analysis)
+                    
+                    if analysis.matched:
+                        result.analyzed_articles += 1
+                    if analysis.is_special:
+                        result.special_articles += 1
+        
+        logger.info(f"✨ A3 조항 분석 병렬 처리 완료")
 
         # 처리 시간 기록
         result.processing_time = time.time() - start_time
