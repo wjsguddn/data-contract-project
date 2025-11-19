@@ -294,6 +294,31 @@ st.markdown(
         height: auto !important;
     }
 
+    /* 챗봇 사용자 메시지 좌측 정렬 - 다양한 선택자 시도 */
+    [data-testid="stChatMessageContent"] {
+        text-align: left !important;
+    }
+    
+    .stChatMessage p {
+        text-align: left !important;
+    }
+    
+    .stChatMessage div {
+        text-align: left !important;
+    }
+    
+    [data-testid="stChatMessage"] p,
+    [data-testid="stChatMessage"] div,
+    [data-testid="stChatMessage"] span {
+        text-align: left !important;
+    }
+    
+    /* 마크다운 컨텐츠 좌측 정렬 */
+    .stChatMessage .stMarkdown,
+    .stChatMessage .stMarkdown p {
+        text-align: left !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -357,10 +382,22 @@ def show_validation_results_page(contract_id: str):
     # 뒤로 가기 버튼
     if st.button("← 메인으로 돌아가기"):
         st.session_state.show_validation_results = False
+        st.session_state.page_transitioning = True  # 페이지 전환 플래그
         st.rerun()
     
     st.markdown("# 📊 계약서 검증 결과")
     st.markdown("---")
+    
+    # 보고서 데이터 미리 로드 (캐싱)
+    with st.spinner("보고서 로딩 중..."):
+        try:
+            report = fetch_report_data(contract_id)
+            if report is None:
+                st.error("보고서를 불러올 수 없습니다.")
+                return
+        except Exception as e:
+            st.error(f"보고서 로딩 중 오류: {str(e)}")
+            return
     
     # 탭 생성
     tab1, tab2 = st.tabs(["📄 최종 보고서", "🔍 기술 검증 상세"])
@@ -759,7 +796,13 @@ def generate_article_revision(contract_id: str, article_no: int):
         article_no: 조 번호
     """
     try:
-        with st.spinner(f"제{article_no}조 수정본을 생성 중입니다..."):
+        # 스피너 메시지 (서문은 "서문", 일반 조항은 "제n조")
+        if article_no == 0:
+            spinner_msg = "서문 수정본을 생성 중입니다..."
+        else:
+            spinner_msg = f"제{article_no}조 수정본을 생성 중입니다..."
+        
+        with st.spinner(spinner_msg):
             revision_url = f"http://localhost:8000/api/report/{contract_id}/generate-article-revision"
             
             response = requests.post(
@@ -776,11 +819,6 @@ def generate_article_revision(contract_id: str, article_no: int):
             
             # 수정본 표시
             st.markdown("---")
-            st.markdown("""
-            <div class="report-card card-success">
-                <div class="report-card-header">✏️ 수정본 (리스크+권고사항 반영)</div>
-            </div>
-            """, unsafe_allow_html=True)
             
             # 수정본 표시 (변경된 부분 굵게)
             import difflib
@@ -813,7 +851,7 @@ def generate_article_revision(contract_id: str, article_no: int):
             # 항 번호(①②③) 앞에 줄바꿈 추가
             highlighted_html = re.sub(r'([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮])', r'<br>\1', highlighted_html)
             
-            st.markdown("**✏️ 개선된 조항** (변경된 부분은 굵게 표시)")
+            st.markdown("**✏️ 개선된 조항**")
             st.markdown(
                 f"""
                 <div style="background-color: #1e1e1e; padding: 20px; border-radius: 8px; border-left: 4px solid #4CAF50; max-height: 600px; overflow-y: auto;">
@@ -881,17 +919,13 @@ def display_final_report_tab(contract_id: str):
     """
     최종 보고서 탭 표시
     """
-    # 보고서 로딩
+    # 캐싱된 보고서 데이터 사용
     try:
-        report_url = f"http://localhost:8000/api/report/{contract_id}"
-        response = requests.get(report_url, timeout=60)
+        report = fetch_report_data(contract_id)
         
-        if response.status_code != 200:
-            st.error(f"보고서를 불러올 수 없습니다. (HTTP {response.status_code})")
-            st.write(f"응답: {response.text[:500]}")
+        if report is None:
+            st.error("보고서를 불러올 수 없습니다.")
             return
-        
-        report = response.json()
         
         # 상태 확인
         if report.get('status') == 'generating':
@@ -1218,8 +1252,20 @@ def main() -> None:
     if st.session_state.get('show_validation_results', False):
         contract_id = st.session_state.get('contract_id')
         if contract_id:
+            # 페이지 전환 시 로딩 상태 표시
+            if st.session_state.get('page_transitioning', False):
+                with st.spinner("페이지 로딩 중..."):
+                    time.sleep(0.5)
+                st.session_state.page_transitioning = False
+            
             show_validation_results_page(contract_id)
             return
+    
+    # 메인 페이지 전환 시 로딩 상태 표시
+    if st.session_state.get('page_transitioning', False):
+        with st.spinner("페이지 로딩 중..."):
+            time.sleep(0.3)
+        st.session_state.page_transitioning = False
     
     # 세션 상태 초기화 (가중치)
     if 'text_weight' not in st.session_state:
@@ -1527,47 +1573,83 @@ def main() -> None:
 
         # 검증 작업 진행 중 스피너 (placeholder에 표시)
         # 검증이 완료되지 않았고, 검증이 시작된 경우에만 폴링
-        if st.session_state.get('validation_started', False) and not st.session_state.get('validation_completed', False):
+        # 중요: 현재 로드된 계약서 ID와 일치하는지 확인
+        validation_contract_id = st.session_state.get('validating_contract_id')
+        if (st.session_state.get('validation_started', False) and 
+            not st.session_state.get('validation_completed', False) and
+            validation_contract_id == contract_id):
             with validation_spinner_placeholder:
-                with st.spinner("검증 작업이 진행 중입니다..."):
+                # 검증 단계별 메시지 표시
+                validation_phase = st.session_state.get('validation_phase', 'consistency')
+                
+                if validation_phase == 'consistency':
+                    spinner_msg = "검증 작업이 진행 중입니다..."
+                elif validation_phase == 'report':
+                    spinner_msg = "검증 보고서 생성 중입니다... (조항별 분석 및 종합 평가)"
+                else:
+                    spinner_msg = "검증 작업이 진행 중입니다..."
+                
+                with st.spinner(spinner_msg):
                     success, result = poll_validation_result(contract_id)
 
                 if success:
                     # 검증 완료 - Report 생성 대기
                     st.session_state.validation_result_data = result  # 결과 저장
+                    st.session_state.validation_phase = 'report'  # 단계 변경
                     
-                    # Report 생성 완료 확인
-                    try:
-                        report_status_url = f"http://localhost:8000/api/report/{contract_id}/status"
-                        report_resp = requests.get(report_status_url, timeout=10)
+                    # Report 생성 완료 확인 (스피너 유지)
+                    with st.spinner("검증 보고서 생성 중입니다... (조항별 분석 및 종합 평가)"):
+                        report_completed = False
+                        max_report_attempts = 200  # 최대 10분 대기 (3초 간격)
                         
-                        if report_resp.status_code == 200:
-                            report_status = report_resp.json()
-                            
-                            if report_status.get('status') == 'completed':
-                                # Report 완료 - 검증 완료 처리
-                                st.session_state.validation_completed = True
-                                st.session_state.validation_started = False
-                                st.rerun()
-                            else:
-                                # Report 생성 중 - 계속 대기
-                                time.sleep(2)
-                                st.rerun()
-                        else:
-                            # Report 상태 확인 실패 - 일단 검증 완료 처리
-                            st.session_state.validation_completed = True
-                            st.session_state.validation_started = False
-                            st.rerun()
-                    except Exception as e:
-                        # Report 확인 실패 - 일단 검증 완료 처리
+                        for _ in range(max_report_attempts):
+                            try:
+                                report_status_url = f"http://localhost:8000/api/report/{contract_id}/status"
+                                report_resp = requests.get(report_status_url, timeout=10)
+                                
+                                if report_resp.status_code == 200:
+                                    report_status = report_resp.json()
+                                    
+                                    if report_status.get('status') == 'completed':
+                                        # Report 완료
+                                        report_completed = True
+                                        break
+                                    else:
+                                        # Report 생성 중 - 계속 대기
+                                        time.sleep(3)
+                                        continue
+                                else:
+                                    # Report 상태 확인 실패 - 일단 완료 처리
+                                    report_completed = True
+                                    break
+                            except Exception as e:
+                                # Report 확인 실패 - 일단 완료 처리
+                                report_completed = True
+                                break
+                        
+                        # Report 완료 또는 타임아웃 - 검증 완료 처리
                         st.session_state.validation_completed = True
                         st.session_state.validation_started = False
+                        
+                        # 검증 완료 알림 표시
+                        filename = uploaded_data.get('filename', '계약서')
+                        st.toast(f"✅ {filename} 검증이 완료되었습니다!", icon="✅")
+                        
+                        if 'validating_contract_id' in st.session_state:
+                            del st.session_state.validating_contract_id
+                        if 'validation_phase' in st.session_state:
+                            del st.session_state.validation_phase
+                        st.session_state.page_transitioning = True  # 페이지 전환 플래그
                         st.rerun()
                 else:
                     # 검증 실패
                     st.error(f"검증 실패: {result.get('error', '알 수 없는 오류')}")
                     st.session_state.validation_started = False
                     st.session_state.validation_completed = False  # 실패 시 완료 상태도 False로
+                    if 'validating_contract_id' in st.session_state:
+                        del st.session_state.validating_contract_id
+                    if 'validation_phase' in st.session_state:
+                        del st.session_state.validation_phase
         else:
             # 검증 진행 중이 아닐 때만 selectbox와 나머지 UI 표시
             # 검증 완료 상태가 아닐 때만 계약서 유형과 구조 미리보기 표시
@@ -1684,8 +1766,16 @@ def main() -> None:
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     if st.button("📊 검증 결과 보기", type="primary", use_container_width=True):
+                        # 보고서 데이터 미리 캐싱 (백그라운드)
+                        with st.spinner("보고서 준비 중..."):
+                            try:
+                                fetch_report_data(contract_id)
+                            except:
+                                pass
+                        
                         st.session_state.show_validation_results = True
                         st.session_state.contract_id = contract_id  # contract_id 저장
+                        st.session_state.page_transitioning = True  # 페이지 전환 플래그
                         st.rerun()
                 with col2:
                     if st.button("🔄 재생성", use_container_width=True):
@@ -1976,14 +2066,14 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
         
         st.markdown(
             f"""
-            <div class="card">
-                <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #3b82f6;">
-                    {article_title}
-                </div>
-                <div style="white-space: pre-wrap; line-height: 2.0; color: #e5e7eb; font-size: 0.95rem;">
-                    {content_formatted}
-                </div>
-            </div>
+<div class="card">
+    <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #3b82f6;">
+        {article_title}
+    </div>
+    <div style="white-space: pre-line; line-height: 2.0; color: #e5e7eb; font-size: 0.95rem;">
+{content_formatted}
+    </div>
+</div>
             """,
             unsafe_allow_html=True
         )
@@ -2079,7 +2169,7 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
         risks_content = next((sections.get(key) for key in section_keys['risks'] if key in sections), None)
         if risks_content:
             st.markdown('<div id="risks"></div>', unsafe_allow_html=True)
-            with st.expander("� 실무 적 리스크", expanded=(expanded_section == "risks")):
+            with st.expander("🔍 실무적 리스크", expanded=(expanded_section == "risks")):
                 st.markdown(risks_content)
         
         # 6. 개선 권고사항
@@ -2099,8 +2189,14 @@ def display_single_article_content(article: dict, all_contents: dict, contract_i
     st.markdown("---")
     st.markdown("## 📝 리스크+권고사항 반영 수정본 생성")
     
+    # 버튼 텍스트 (서문은 "서문", 일반 조항은 "제n조")
+    if article_no == 0:
+        button_text = "✏️ 서문 수정본 생성"
+    else:
+        button_text = f"✏️ 제{article_no}조 수정본 생성"
+    
     if st.button(
-        f"✏️ 제{article_no}조 수정본 생성",
+        button_text,
         use_container_width=True,
         key=f"generate_revision_single_{article_no}"
     ):
@@ -2953,6 +3049,9 @@ def start_validation(contract_id: str):
     try:
         print(f"[DEBUG] start_validation 호출됨: contract_id={contract_id}")
         
+        # 검증 중인 계약서 ID 저장 (중요!)
+        st.session_state.validating_contract_id = contract_id
+        
         # API 호출 (기본 가중치 사용)
         response = requests.post(
             f"http://localhost:8000/api/validation/{contract_id}/start",
@@ -2972,12 +3071,16 @@ def start_validation(contract_id: str):
             st.error(f"검증 시작 실패: {error_detail}")
             # 실패 시 상태 초기화
             st.session_state.validation_started = False
+            if 'validating_contract_id' in st.session_state:
+                del st.session_state.validating_contract_id
 
     except Exception as e:
         print(f"[DEBUG] 예외 발생: {str(e)}")
         st.error(f"검증 시작 중 오류: {str(e)}")
         # 오류 시 상태 초기화
         st.session_state.validation_started = False
+        if 'validating_contract_id' in st.session_state:
+            del st.session_state.validating_contract_id
 
 
 def poll_validation_result(contract_id: str, max_attempts: int = 600, interval: int = 3):
@@ -3625,7 +3728,7 @@ def _format_matching_info(user_article_no, reference: str) -> str:
     
     # 사용자 조항 참조 생성
     if user_article_no == 0 or user_article_no == "preamble":
-        user_ref = "사용자 서문 (제0조)"
+        user_ref = "사용자 서문"
     else:
         user_ref = f"사용자 제{user_article_no}조"
     
@@ -4037,9 +4140,13 @@ def display_contract_history_sidebar():
                 
                 with col2:
                     if st.button("열기", key=f"load_{contract_id}", type="primary"):
-                        # 해당 계약서 로드
-                        load_contract_from_history(contract_id)
-                        st.rerun()
+                        # 로딩 스피너 표시
+                        with st.spinner("계약서 불러오는 중..."):
+                            # 해당 계약서 로드
+                            if load_contract_from_history(contract_id):
+                                # 로딩 완료 후 리렌더링
+                                time.sleep(0.3)  # 짧은 지연으로 UI 업데이트 보장
+                                st.rerun()
                 
                 with col3:
                     if st.button("🗑️", key=f"delete_{contract_id}"):
@@ -4065,69 +4172,85 @@ def load_contract_from_history(contract_id: str):
     Args:
         contract_id: 계약서 ID
     """
-    # 로딩 스피너 표시
-    with st.spinner(f"계약서 불러오는 중..."):
-        try:
-            # 계약서 정보 + 분류 + 검증 결과를 한 번에 조회
-            contract_url = f"http://localhost:8000/api/contracts/{contract_id}"
-            response = requests.get(
-                contract_url,
-                params={
-                    "include_classification": True,
-                    "include_validation": True
-                },
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # 세션 상태 업데이트
-                st.session_state.uploaded_contract_data = {
-                    'contract_id': contract_id,
-                    'filename': data.get('filename'),
-                    'file_size': 0,
-                    'parsed_metadata': data.get('parsed_metadata', {}),
-                    'structured_data': data.get('parsed_data', {})
-                }
-                
-                # 분류 결과 처리
-                classification = data.get('classification')
-                if classification:
-                    st.session_state.classification_done = True
-                    st.session_state.predicted_type = classification.get('predicted_type')
-                    st.session_state.confidence = classification.get('confidence', 0)
-                    st.session_state.user_modified = classification.get('user_override') is not None
-                else:
-                    st.session_state.classification_done = False
-                
-                # 검증 결과 처리
-                validation = data.get('validation')
-                if validation and validation.get('has_report'):
-                    st.session_state.validation_completed = True
-                    # 상세 검증 결과는 필요 시 별도 조회
-                else:
-                    st.session_state.validation_completed = False
-                    st.session_state.validation_started = False
-                
-                # 챗봇 세션 설정 (계약서별)
-                if contract_id not in st.session_state.contract_sessions:
-                    st.session_state.contract_sessions[contract_id] = f"{contract_id}_session"
-                
-                # 세션 ID를 임시로 다른 값으로 설정 (display_chatbot_sidebar에서 변경 감지하도록)
-                st.session_state.chatbot_session_id = "temp_loading"
-                st.session_state.chatbot_messages = []  # 임시로 비움 (사이드바에서 로드됨)
-                
-                st.success(f"✅ {data.get('filename')} 불러오기 완료!")
-            else:
-                st.error("계약서를 불러올 수 없습니다.")
+    try:
+        # 계약서 정보 + 분류 + 검증 결과를 한 번에 조회
+        contract_url = f"http://localhost:8000/api/contracts/{contract_id}"
+        response = requests.get(
+            contract_url,
+            params={
+                "include_classification": True,
+                "include_validation": True
+            },
+            timeout=30
+        )
         
-        except requests.exceptions.Timeout:
-            st.error("⏳ 서버 응답 시간 초과. 잠시 후 다시 시도해주세요.")
-        except requests.exceptions.ConnectionError:
-            st.error("❌ 서버 연결 실패. FastAPI 서버가 실행 중인지 확인해주세요.")
-        except Exception as e:
-            st.error(f"계약서 로딩 중 오류: {str(e)}")
+        if response.status_code == 200:
+            data = response.json()
+            
+            # 세션 상태 업데이트
+            st.session_state.uploaded_contract_data = {
+                'contract_id': contract_id,
+                'filename': data.get('filename'),
+                'file_size': 0,
+                'parsed_metadata': data.get('parsed_metadata', {}),
+                'structured_data': data.get('parsed_data', {})
+            }
+            
+            # 분류 결과 처리
+            classification = data.get('classification')
+            if classification:
+                st.session_state.classification_done = True
+                st.session_state.predicted_type = classification.get('predicted_type')
+                st.session_state.confidence = classification.get('confidence', 0)
+                st.session_state.user_modified = classification.get('user_override') is not None
+            else:
+                st.session_state.classification_done = False
+            
+            # 검증 관련 모든 상태 초기화 (중요!)
+            st.session_state.validation_started = False
+            st.session_state.validation_completed = False
+            st.session_state.validation_start_requested = False
+            
+            # 검증 결과 데이터 삭제
+            if 'validation_result_data' in st.session_state:
+                del st.session_state.validation_result_data
+            if 'validation_task_id' in st.session_state:
+                del st.session_state.validation_task_id
+            if 'validating_contract_id' in st.session_state:
+                del st.session_state.validating_contract_id
+            
+            # 검증 결과 처리
+            validation = data.get('validation')
+            if validation and validation.get('has_report'):
+                st.session_state.validation_completed = True
+                # 상세 검증 결과는 필요 시 별도 조회
+            
+            # 챗봇 세션 설정 (계약서별)
+            if contract_id not in st.session_state.contract_sessions:
+                st.session_state.contract_sessions[contract_id] = f"{contract_id}_session"
+            
+            # 세션 ID를 임시로 다른 값으로 설정 (display_chatbot_sidebar에서 변경 감지하도록)
+            st.session_state.chatbot_session_id = "temp_loading"
+            st.session_state.chatbot_messages = []  # 임시로 비움 (사이드바에서 로드됨)
+            
+            # 검증 결과 페이지 플래그 초기화 (메인 페이지로 돌아가도록)
+            st.session_state.show_validation_results = False
+            st.session_state.page_transitioning = True  # 페이지 전환 플래그
+            
+            return True
+        else:
+            st.error("계약서를 불러올 수 없습니다.")
+            return False
+    
+    except requests.exceptions.Timeout:
+        st.error("⏳ 서버 응답 시간 초과. 잠시 후 다시 시도해주세요.")
+        return False
+    except requests.exceptions.ConnectionError:
+        st.error("❌ 서버 연결 실패. FastAPI 서버가 실행 중인지 확인해주세요.")
+        return False
+    except Exception as e:
+        st.error(f"계약서 로딩 중 오류: {str(e)}")
+        return False
 
 
 def delete_contract(contract_id: str):
