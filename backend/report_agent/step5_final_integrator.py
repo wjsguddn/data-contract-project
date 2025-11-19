@@ -380,14 +380,14 @@ class Step5FinalIntegrator:
                     article["narrative_report"] = self._generate_fallback_narrative(article)
                     return article
         
-        # 병렬 실행 (최대 5개 동시)
-        logger.info(f"🚀 서술형 보고서 병렬 생성 시작: {len(user_articles)}개 조항 (max_workers=5)")
+        # 병렬 실행 (최대 8개 동시)
+        logger.info(f"🚀 서술형 보고서 병렬 생성 시작: {len(user_articles)}개 조항 (max_workers=8)")
         start_time = time.time()
         
         # 조항 인덱스와 함께 처리 (순서 추적용)
         article_with_index = list(enumerate(user_articles))
         
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             # 모든 조항을 병렬로 제출
             future_to_article = {
                 executor.submit(process_single_article, idx, article): (idx, article)
