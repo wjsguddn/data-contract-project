@@ -254,9 +254,11 @@ JSON만 응답하세요."""
                 context_text += f"챗봇: {content}\n"
         
         prompt = f"""다음 자료들은 사용자가 계약서 챗봇(계약서를 기반으로 답변하는 챗봇)과 주고받은 대화/질문 내용입니다.
-현재 사용자 질문에 대해 두 가지를 판단하세요:
-1. 계약서 관련 질문인지
-2. 이전 대화를 참조하는지
+현재 사용자 질문에 대해 두 가지를 판단하세요.
+
+**판단 순서 (반드시 이 순서대로 판단하세요)**:
+1단계: 현재 사용자 질문이 이전 대화 내용을 참조하는지 판단 (need_previous_context)
+2단계: 그 다음 계약서 관련성을 판단 (is_contract_related)
 
 이전 대화:
 {context_text}
@@ -265,41 +267,49 @@ JSON만 응답하세요."""
 
 판단 기준:
 
-**계약서 관련 (is_contract_related=true)**:
-- 계약 조항, 내용, 조건, 작성에 대한 질문
-- 계약 당사자, 기간, 대가, 권리, 의무에 대한 질문
-- 현재 사용자 질문 자체에서는 계약서 관련성을 찾을 수 없지만, 계약서와 관련있는 이전 대화를 참조하는 경우
+**1단계: 이전 대화 참조 (need_previous_context)**
 
-**계약서 무관 (is_contract_related=false)**:
-- 일반 상식, 뉴스, 날씨 등
-- 일반적인 인사, 감사 표현
-- 계약서와 무관한 개인적 질문
-
-**이전 대화 참조 (need_previous_context=true)**:
+**참조함 (need_previous_context=true)**:
 - 현재 사용자 질문에 답변하는데에 이전 대화가 정보로써 필요한 경우
 - 명시적 참조어 사용: "그럼", "그것은", "그거", "위에서", "아까", "방금"
-- 이전 답변에 대한 요약/정리/재설명 요청
+- 이전 답변에 대한 요약/정리/재설명 요청: "요약해줘", "정리해줘", "간단히", "자세히"
 - 이전 답변의 특정 부분에 대한 추가 질문
 - 대명사로 이전 내용 지칭: "이거", "저거", "그게"
 
-**이전 대화 불필요 (need_previous_context=false)**:
+**참조 안 함 (need_previous_context=false)**:
 - 독립적인 새로운 질문 (참조어 없음)
-- 동일하게 계약서에 대한 내용이더라도 이전 대화와는 독립적인 질문인 경우
-- 계약서의 다른 부분에 대한 질문
+- 동일하게 계약서에 대한 내용이더라도 이전 대화와는 완전히 독립적인 질문인 경우
 
 need_previous_context 예시:
-- "간단히 정리해줘" → need_previous_context=true (이전 답변 요약)
+- "요약해줘" → need_previous_context=true (이전 답변 요약)
 - "뭐라고?" 또는 "뭐?" → need_previous_context=true (목적은 애매하지만 이전 답변을 참조해야함)
 - 이전:"계약 해지 조건이 어떻게 되지?", 현재:"검수 절차가 어떻게 되지?" → need_previous_context=false (독립적 질문)
 - 이전:"제3조 내용은?", 현재:"제5조 내용은?" → need_previous_context=false (새로운 조항 질문)
 - 이전 질문:"가공서비스의 검수 절차가 어떻게 되지?", 이전 답변:"가공서비스의 검수 절차는 부분 검수, 최종 검수...", 현재 질문: "부분 검수 과정에 대해 설명해줘" → true (연계 질문)
 
-**중요**: 현재 사용자 질문 자체는 계약서와 관련이 없더라도, 이전 대화를 참조하고 있고 이전 대화가 계약서에 관한 내용이라면 is_contract_related=true
+**2단계: 계약서 관련성 (is_contract_related)**
 
-응답 형식 (JSON):
+**관련 있음 (is_contract_related=true)**:
+- 계약 조항, 내용, 조건, 작성에 대한 질문
+- 계약 당사자, 기간, 대가, 권리, 의무에 대한 질문
+- **또는** 1단계에서 need_previous_context=true로 판단했고, 이전 대화가 계약서 관련 내용인 경우
+  (예: 이전 대화에서 계약서 조항을 설명했고, 현재 "요약해줘"라고 요청한 경우)
+
+**관련 없음 (is_contract_related=false)**:
+- 일반 상식, 뉴스, 날씨 등
+- 일반적인 인사, 감사 표현
+- 계약서와 무관한 개인적 질문
+- **단, 이전 대화를 참조하지 않는 경우에만** (need_previous_context=false인 경우)
+
+**핵심 규칙**:
+- "요약해줘", "정리해줘" 같은 질문은 need_previous_context=true
+- need_previous_context=true이고 이전 대화가 계약서 관련이면 → is_contract_related=true (자동)
+**중오**: 현재 질문 자체는 계약서와 무관해 보여도, 이전 계약서 대화를 참조하면 계약서 관련으로 판단
+
+응답 형식 (JSON, 판단 순서대로):
 {{
-    "is_contract_related": true/false,
     "need_previous_context": true/false,
+    "is_contract_related": true/false,
     "reasoning": "판단 근거 (한 문장)"
 }}
 
