@@ -816,8 +816,8 @@ def generate_article_revision(contract_id: str, article_no: int):
             st.markdown("**✏️ 개선된 조항** (변경된 부분은 굵게 표시)")
             st.markdown(
                 f"""
-                <div style="background-color: #1e1e1e; padding: 20px; border-radius: 8px; border-left: 4px solid #4CAF50;">
-                    <div style="line-height: 1.8; color: #e5e7eb; font-size: 0.95rem;">
+                <div style="background-color: #1e1e1e; padding: 20px; border-radius: 8px; border-left: 4px solid #4CAF50; max-height: 600px; overflow-y: auto;">
+                    <div style="line-height: 1.8; color: #e5e7eb; font-size: 0.95rem; white-space: pre-wrap; word-wrap: break-word;">
                         {highlighted_html}
                     </div>
                 </div>

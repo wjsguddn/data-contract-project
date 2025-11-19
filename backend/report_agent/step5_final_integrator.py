@@ -653,22 +653,35 @@ class Step5FinalIntegrator:
    - JSON 바깥에 어떤 텍스트도 추가해서는 안 된다.
    - 코드블록(```json)도 사용하지 않는다.
 
+⚠️ 중요: JSON 키는 반드시 아래의 영어 키를 정확히 사용해야 한다. 한글 키나 다른 형식은 절대 사용하지 말 것.
+
 {
   "article_title": "{user_article_title}",
   "sections": {
-    "1_검토개요": "...",
-    "2_충족된기준": "...",
-    "3_불충분한요소": "...",
-    "4_누락된핵심요소": "...",
-    "5_실무적리스크": "...",
-    "6_개선권고사항": "...",
-    "7_종합판단": "..."
+    "section_1_overview": "...",
+    "section_2_fulfilled_criteria": "...",
+    "section_3_insufficient_elements": "...",
+    "section_4_missing_core_elements": "...",
+    "section_5_practical_risks": "...",
+    "section_6_improvement_recommendations": "...",
+    "section_7_comprehensive_judgment": "..."
   }
 }
 
 4) 각 섹션 값은 반드시 여러 문장으로 구성된 자연어 단락이어야 한다.
    - 단락 수와 문장 수를 임의로 줄이거나 요약하지 않는다.
-   - 섹션 구조(1~7)는 반드시 유지해야 한다."""
+   - 섹션 구조(1~7)는 반드시 유지해야 한다.
+
+5) JSON 키 규칙 (매우 중요):
+   - "section_1_overview" (O) / "1_검토개요" (X)
+   - "section_2_fulfilled_criteria" (O) / "2_충족된기준" (X)
+   - "section_3_insufficient_elements" (O) / "3_불충분한요소" (X)
+   - "section_4_missing_core_elements" (O) / "4_누락된핵심요소" (X)
+   - "section_5_practical_risks" (O) / "5_실무적리스크" (X)
+   - "section_6_improvement_recommendations" (O) / "6_개선권고사항" (X)
+   - "section_7_comprehensive_judgment" (O) / "7_종합판단" (X)
+   
+   반드시 영어 키만 사용하고, 한글 키는 절대 사용하지 말 것."""
 
         response = self.client.chat.completions.create(
             model="gpt-4o",
@@ -710,17 +723,17 @@ class Step5FinalIntegrator:
         passed_count = sum(1 for c in checklist_results if c.get('result') == 'YES')
         failed_count = sum(1 for c in checklist_results if c.get('result') == 'NO')
         
-        # 폴백 JSON 구조
+        # 폴백 JSON 구조 (영어 키 사용)
         fallback_json = {
             "article_title": user_article_title,
             "sections": {
-                "1_검토개요": f"본 조항에 대한 검토를 수행했습니다. {matched_count}개의 표준 조항과 매칭되었으며, 체크리스트 {passed_count}개 항목을 충족하고 있습니다.",
-                "2_충족된기준": f"체크리스트 {passed_count}개 항목이 충족되었습니다." if passed_count > 0 else "충족된 항목이 없습니다.",
-                "3_불충분한요소": f"{insufficient_count}개의 불충분한 항목이 확인되었습니다." if insufficient_count > 0 else "불충분한 요소가 없습니다.",
-                "4_누락된핵심요소": f"{missing_count}개의 누락된 항목이 확인되었습니다." if missing_count > 0 else "누락된 내용이 없습니다.",
-                "5_실무적리스크": f"{failed_count}개의 미충족 체크리스트가 확인되었습니다." if failed_count > 0 else "특별한 리스크가 없습니다.",
-                "6_개선권고사항": "상세 내용은 구조화된 데이터를 참조하시기 바랍니다.",
-                "7_종합판단": "LLM 호출 실패로 인해 기본 폴백 보고서가 생성되었습니다. 상세 분석을 위해 재시도를 권장합니다."
+                "section_1_overview": f"본 조항에 대한 검토를 수행했습니다. {matched_count}개의 표준 조항과 매칭되었으며, 체크리스트 {passed_count}개 항목을 충족하고 있습니다.",
+                "section_2_fulfilled_criteria": f"체크리스트 {passed_count}개 항목이 충족되었습니다." if passed_count > 0 else "충족된 항목이 없습니다.",
+                "section_3_insufficient_elements": f"{insufficient_count}개의 불충분한 항목이 확인되었습니다." if insufficient_count > 0 else "불충분한 요소가 없습니다.",
+                "section_4_missing_core_elements": f"{missing_count}개의 누락된 항목이 확인되었습니다." if missing_count > 0 else "누락된 내용이 없습니다.",
+                "section_5_practical_risks": f"{failed_count}개의 미충족 체크리스트가 확인되었습니다." if failed_count > 0 else "특별한 리스크가 없습니다.",
+                "section_6_improvement_recommendations": "상세 내용은 구조화된 데이터를 참조하시기 바랍니다.",
+                "section_7_comprehensive_judgment": "LLM 호출 실패로 인해 기본 폴백 보고서가 생성되었습니다. 상세 분석을 위해 재시도를 권장합니다."
             }
         }
         

@@ -1635,9 +1635,17 @@ async def generate_article_revision(
             raise HTTPException(status_code=404, detail=f"제{article_number}조 보고서를 찾을 수 없습니다")
         
         article_data = article_reports[article_key]
-        sections = article_data.get("sections", {})
+        sections_data = article_data.get("sections", {})
         
-        logger.info(f"[REVISION DEBUG] sections keys: {list(sections.keys())}")
+        logger.info(f"[REVISION DEBUG] sections_data keys: {list(sections_data.keys())}")
+        
+        # sections_data가 {"article_title": "...", "sections": {...}} 구조인 경우
+        # 실제 섹션 데이터는 sections_data["sections"]에 있음
+        if "sections" in sections_data and isinstance(sections_data["sections"], dict):
+            sections = sections_data["sections"]
+            logger.info(f"[REVISION DEBUG] 중첩 구조 감지, 내부 sections keys: {list(sections.keys())}")
+        else:
+            sections = sections_data
         
         # 사용자 조항 내용, 리스크, 권고사항 추출
         # final_report에서 사용자 조항 내용 가져오기

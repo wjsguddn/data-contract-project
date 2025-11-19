@@ -34,7 +34,7 @@ class ChecklistCheckNode:
     def __init__(
         self,
         db_session: Session,
-        llm_client: AzureOpenAI,
+        llm_client: AzureOpenAI = None,
         kb_loader: Optional[KnowledgeBaseLoader] = None
     ):
         """
@@ -42,16 +42,33 @@ class ChecklistCheckNode:
         
         Args:
             db_session: 데이터베이스 세션
-            llm_client: Azure OpenAI 클라이언트
+            llm_client: Azure OpenAI 클라이언트 (선택적, A2 전용 클라이언트 생성 가능)
             kb_loader: 지식베이스 로더 (표준 조항 로드용, 선택적)
         """
+        import os
+        from openai import OpenAI
+        
         self.db = db_session
-        self.llm_client = llm_client
         self.kb_loader = kb_loader or KnowledgeBaseLoader()
+        
+        # A2 전용 OpenAI 클라이언트 생성
+        # 환경변수 우선순위: OPENAI_API_KEY_A2 > OPENAI_API_KEY
+        a2_api_key = os.getenv('OPENAI_API_KEY_A2') or os.getenv('OPENAI_API_KEY')
+        
+        if a2_api_key:
+            # OpenAI API 사용 (개인 키)
+            self.llm_client = OpenAI(api_key=a2_api_key)
+            logger.info("A2 노드: OpenAI API 사용 (개인 키)")
+        elif llm_client:
+            # 전달받은 Azure 클라이언트 사용 (폴백)
+            self.llm_client = llm_client
+            logger.info("A2 노드: Azure OpenAI 사용 (폴백)")
+        else:
+            raise ValueError("A2 노드: OpenAI API 키 또는 Azure 클라이언트가 필요합니다")
         
         # 컴포넌트 초기화
         self.checklist_loader = ChecklistLoader()
-        self.verifier = ChecklistVerifier(llm_client, model="gpt-4o")  # 체크리스트는 gpt-4o 사용 (품질 중요)
+        self.verifier = ChecklistVerifier(self.llm_client, model="gpt-4o-mini")  # A2는 gpt-4o-mini 사용
         
         # 개발 중: 캐시 초기화 (코드 변경 반영 위해)
         self.checklist_loader.clear_cache()
