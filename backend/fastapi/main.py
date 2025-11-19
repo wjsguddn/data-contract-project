@@ -454,8 +454,46 @@ async def start_validation(
             )
             message = "검증이 시작되었습니다 (순차 처리)"
 
-        logger.info(f"검증 작업 시작 ({'병렬' if use_parallel else '순차'}): {contract_id}, "
-                   f"task_id: {task.id}, weights: text={text_weight}, title={title_weight}, dense={dense_weight}")
+        # 검증 시작 시간 기록
+        import time
+        from datetime import datetime
+        validation_start_time = time.time()
+        
+        # ValidationResult에 시작 시간 저장
+        validation_result = db.query(ValidationResult).filter(
+            ValidationResult.contract_id == contract_id
+        ).first()
+        
+        if not validation_result:
+            validation_result = ValidationResult(
+                contract_id=contract_id,
+                contract_type=classification.confirmed_type or classification.predicted_type,
+                validation_timing={
+                    'start_time': validation_start_time,
+                    'start_datetime': datetime.now().isoformat(),
+                    'mode': 'parallel' if use_parallel else 'sequential'
+                },
+                completeness_check={},
+                checklist_validation={},
+                content_analysis={},
+                overall_score=0.0,
+                recommendations=[]
+            )
+            db.add(validation_result)
+        else:
+            # 기존 결과가 있으면 시작 시간만 업데이트
+            validation_result.validation_timing = {
+                'start_time': validation_start_time,
+                'start_datetime': datetime.now().isoformat(),
+                'mode': 'parallel' if use_parallel else 'sequential'
+            }
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(validation_result, 'validation_timing')
+        
+        db.commit()
+        
+        logger.info(f"⏱️ 검증 시작: {contract_id} ({'병렬' if use_parallel else '순차'}), "
+                   f"task_id: {task.id}")
 
         return {
             "message": message,
