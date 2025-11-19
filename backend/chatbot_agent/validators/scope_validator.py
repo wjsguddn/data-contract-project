@@ -304,7 +304,7 @@ need_previous_context 예시:
 **핵심 규칙**:
 - "요약해줘", "정리해줘" 같은 질문은 need_previous_context=true
 - need_previous_context=true이고 이전 대화가 계약서 관련이면 → is_contract_related=true (자동)
-**중오**: 현재 질문 자체는 계약서와 무관해 보여도, 이전 계약서 대화를 참조하면 계약서 관련으로 판단
+**중요**: 현재 질문 자체는 계약서와 무관해 보여도, 이전 계약서 대화를 참조하면 계약서 관련으로 판단
 
 응답 형식 (JSON, 판단 순서대로):
 {{
