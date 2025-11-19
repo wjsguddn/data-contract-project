@@ -127,12 +127,17 @@ class CompletenessCheckNode:
 
         logger.info(f"[A1-S1] 사용자 조문: {total_user_articles}개, 표준 조문: {total_standard_articles}개")
 
-        # 1단계: 모든 사용자 조문과 표준 조문 매칭 수행
+        # 1단계: 모든 사용자 조문과 표준 조문 매칭 수행 (병렬 처리)
         matched_standard_articles: Set[str] = set()  # 매칭된 표준 조문 ID
         matched_user_articles: Set[int] = set()  # 매칭된 사용자조문 번호
         matching_details: List[Dict] = []
 
-        for article in user_articles:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        logger.info(f"[A1-S1] 🚀 조항 매칭 병렬 처리 시작: {len(user_articles)}개 조항 (max_workers=5)")
+        
+        def process_single_article(article):
+            """단일 조항 처리"""
             try:
                 article_result = self._check_article(
                     article,
@@ -142,21 +147,33 @@ class CompletenessCheckNode:
                     title_weight,
                     dense_weight
                 )
-
-                matching_details.append(article_result)
-
-                # 매칭 성공 시 추적
-                if article_result['matched'] and article_result['matched_articles']:
-                    matched_user_articles.add(article.get('number'))
-                    for matched_std_id in article_result['matched_articles']:
-                        matched_standard_articles.add(matched_std_id)
-
+                logger.info("----------------------------------------[A1-S1]----------------------------------------")
+                return article_result
             except Exception as e:
                 logger.error(f"[A1-S1] 조항 검증 실패 (제{article.get('number')}조): {e}")
-                continue
-            finally:
-                # 조항별 매칭 검증 완료 구분선
                 logger.info("----------------------------------------[A1-S1]----------------------------------------")
+                return None
+        
+        # 병렬 실행
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_article = {
+                executor.submit(process_single_article, article): article
+                for article in user_articles
+            }
+            
+            for future in as_completed(future_to_article):
+                article_result = future.result()
+                
+                if article_result:
+                    matching_details.append(article_result)
+                    
+                    # 매칭 성공 시 추적
+                    if article_result['matched'] and article_result['matched_articles']:
+                        matched_user_articles.add(article_result['user_article_no'])
+                        for matched_std_id in article_result['matched_articles']:
+                            matched_standard_articles.add(matched_std_id)
+        
+        logger.info(f"[A1-S1] ✨ 조항 매칭 병렬 처리 완료")
 
         # 2단계: 누락된 표준 조문 식별 (재검증은 하지 않음)
         missing_articles = [
