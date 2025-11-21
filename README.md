@@ -10,7 +10,7 @@ AI 기반 한국어 데이터 계약서 분석 및 검증 시스템. 5종 표준
 - **Phase 1 (완료)**: 계약서 분류 시스템
 - **Phase 2 (완료)**: 정합성 검증 시스템 (A1, A2, A3 노드)
 - **Phase 2 (완료)**: 챗봇 질의응답 시스템
-- **Phase 3 (계획)**: 보고서 생성 및 고도화 기능
+- **Phase 3 (완료)**: 검증 결과 보완 및 보고서 생성
 
 ### 지원 형식
 - 구조화된 DOCX 파일 ("제n조" 형식)
@@ -562,7 +562,7 @@ GET /api/knowledge-base/status
 │   ├── Dockerfile.chatbot          # 챗봇 에이전트 컨테이너
 │   ├── Dockerfile.classification   # 분류 에이전트 컨테이너
 │   ├── Dockerfile.consistency      # 정합성 에이전트 컨테이너
-│   ├── Dockerfile.report           # 보고서 에이전트 컨테이너 (계획)
+│   ├── Dockerfile.report           # 보고서 에이전트 컨테이너
 │   └── Dockerfile.ingestion        # 문서 처리 컨테이너
 │
 ├── docs/                            # 상세 문서
@@ -609,7 +609,7 @@ RAG 기반 계약서 분류 시스템. 주요 조항 추출, 하이브리드 검
 #### Chatbot Agent
 LangGraph 기반 대화형 질의응답 시스템. Function Calling을 통해 4가지 도구를 유기적으로 선택하여 사용자 질문에 답변함.
 
-#### Report Agent (계획)
+#### Report Agent
 검증 결과를 통합하여 상세 분석 보고서를 생성하는 시스템. 5단계 파이프라인을 통해 조별 보고서를 생성하고 최종 통합함.
 
 #### Ingestion Pipeline
@@ -782,15 +782,3 @@ docker-compose -f docker/docker-compose.yml up -d --build
 ### 지식베이스 및 검색
 - [KNOWLEDGE_BASE_SUMMARY.md](docs/KNOWLEDGE_BASE_SUMMARY.md) - 지식베이스 요약
 - [RRF_FUSION.md](docs/RRF_FUSION.md) - Reciprocal Rank Fusion 알고리즘
-
-## 라이선스
-
-본 프로젝트의 라이선스 정보는 별도로 명시되지 않았습니다.
-
-## 기여
-
-기여 가이드라인은 별도로 명시되지 않았습니다.
-
-## 문의
-
-프로젝트 관련 문의사항은 이슈 트래커를 통해 제출해 주시기 바랍니다.
