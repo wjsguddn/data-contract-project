@@ -387,6 +387,6 @@ graph TB
 
 ## 관련 문서
 - [A1 노드 상세 플로우](./A1_FLOW_DIAGRAMS.md)
-- [A1 검색 매칭 로직](./A1_SEARCH_MATCHING_FLOW.md)
+- [A1 하이브리드 검색](./CONSISTENCY_A1_HYBRID_SEARCH.md)
 - [시스템 아키텍처](./SYSTEM_ARCHITECTURE.md)
 - [Consistency Agent 요약](./CONSISTENCY_A1_SUMMARY.md)

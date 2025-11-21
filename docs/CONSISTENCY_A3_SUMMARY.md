@@ -821,19 +821,19 @@ urn:std:provide:art:003:sub:003: 3. 제공 주기: [주기 명시]
 
 ```mermaid
 graph LR
-    subgraph INPUT["📥 입력"]
+    subgraph INPUT["입력"]
         CONTRACT_ID[contract_id]
         USER_CONTRACT[user_contract<br/>파싱 데이터]
         CONTRACT_TYPE[contract_type<br/>예: provide]
     end
     
-    subgraph A3_MAIN["🎯 ContentAnalysisNode.analyze_contract"]
+    subgraph A3_MAIN["ContentAnalysisNode.analyze_contract"]
         INIT[초기화<br/>ContentAnalysisResult]
         LOAD_A1[A1 매칭 결과 로드<br/>_load_a1_matching_results]
         LOOP[조항별 반복<br/>for article in articles]
     end
     
-    subgraph A3_ARTICLE["📋 analyze_article (조항별)"]
+    subgraph A3_ARTICLE["analyze_article (조항별)"]
         GET_A1[A1 매칭 정보 조회<br/>a1_results_by_article]
         CHECK_MATCH{매칭<br/>여부?}
         LOAD_CHUNKS[표준 조항 청크 로드<br/>_load_standard_article_chunks]
@@ -841,32 +841,32 @@ graph LR
         FORMAT_USER[사용자 조항 포맷팅<br/>_format_user_article]
     end
     
-    subgraph COMPARATOR["🔍 ContentComparator.compare_articles"]
+    subgraph COMPARATOR["ContentComparator.compare_articles"]
         CHECK_COUNT{매칭<br/>조항 수?}
         SINGLE[단일 조항 비교<br/>_compare_single_article]
         MULTI[다중 조항 비교<br/>_compare_multiple_selected_articles]
     end
     
-    subgraph LLM_PROCESS["🤖 LLM 처리"]
+    subgraph LLM_PROCESS["LLM 처리"]
         BUILD_PROMPT[프롬프트 생성<br/>_build_*_prompt]
         CALL_LLM[Azure OpenAI<br/>GPT-4o 호출]
         PARSE[응답 파싱<br/>_parse_llm_response]
         LOG_TOKEN[토큰 로깅<br/>_log_token_usage]
     end
     
-    subgraph SUGGESTION["💡 개선 제안 생성"]
+    subgraph SUGGESTION["개선 제안 생성"]
         CHECK_ISSUE{문제<br/>있음?}
         CALC_SEVERITY[심각도 계산<br/>high/medium/low]
         CREATE_SUGGEST[제안 객체 생성<br/>missing/insufficient]
         POSITIVE[긍정적 분석<br/>severity=info]
     end
     
-    subgraph OUTPUT["📤 출력"]
+    subgraph OUTPUT["출력"]
         ARTICLE_RESULT[ArticleAnalysis<br/>조항별 결과]
         FINAL_RESULT[ContentAnalysisResult<br/>전체 결과]
     end
     
-    subgraph EXTERNAL["🗄️ 외부 의존성"]
+    subgraph EXTERNAL["외부 의존성"]
         DB[(ValidationResult<br/>A1 매칭 결과)]
         KB[KnowledgeBaseLoader<br/>표준 조항 청크]
         OPENAI[Azure OpenAI<br/>GPT-4o API]
@@ -928,29 +928,29 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph INPUT_COMP["📥 입력"]
+    subgraph INPUT_COMP["입력"]
         USER_ART[user_article<br/>사용자 조항]
         STD_CHUNKS[standard_chunks_list<br/>표준 조항 청크들]
         TYPE[contract_type]
     end
     
-    subgraph FORMAT["📝 포맷팅"]
+    subgraph FORMAT["포맷팅"]
         FMT_USER[_format_user_article<br/>제목 + content 결합]
         FMT_STD[_format_standard_article<br/>parent_id + chunks]
     end
     
-    subgraph ROUTE["🔀 라우팅"]
+    subgraph ROUTE["라우팅"]
         CHECK{청크 리스트<br/>개수?}
     end
     
-    subgraph SINGLE_PATH["1️⃣ 단일 조항 비교"]
+    subgraph SINGLE_PATH["단일 조항 비교"]
         S_PROMPT[_build_single_comparison_prompt<br/>단일 비교 프롬프트]
         S_SYSTEM[System Prompt<br/>맥락 기반 검증 원칙]
         S_LLM[GPT-4o 호출<br/>temperature=0.3]
         S_PARSE[_parse_llm_response<br/>문제/누락/불충분 추출]
     end
     
-    subgraph MULTI_PATH["2️⃣ 다중 조항 비교"]
+    subgraph MULTI_PATH["다중 조항 비교"]
         M_CONCAT[조항들 결합<br/>모든 표준 조항 종합]
         M_PROMPT[_build_multi_comparison_prompt<br/>다중 비교 프롬프트]
         M_SYSTEM[System Prompt<br/>맥락 기반 검증 원칙]
@@ -958,7 +958,7 @@ graph LR
         M_PARSE[_parse_llm_response<br/>문제/누락/불충분 추출]
     end
     
-    subgraph PARSE_DETAIL["🔍 응답 파싱 상세"]
+    subgraph PARSE_DETAIL["응답 파싱 상세"]
         FIND_ISSUE[문제 여부 추출<br/>있음/없음]
         FIND_MISSING[누락된 내용 추출<br/>- 항목들]
         FIND_INSUFF[불충분한 내용 추출<br/>- 항목들]
@@ -966,7 +966,7 @@ graph LR
         VALIDATE{리스트<br/>비어있음?}
     end
     
-    subgraph OUTPUT_COMP["📤 출력"]
+    subgraph OUTPUT_COMP["출력"]
         RESULT[비교 결과<br/>has_issues<br/>missing_items<br/>insufficient_items<br/>analysis<br/>selected_articles<br/>tokens]
     end
     
@@ -1010,16 +1010,16 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph INPUT_SUG["📥 입력"]
+    subgraph INPUT_SUG["입력"]
         COMP_RESULT[ContentComparator<br/>비교 결과]
         STD_IDS[selected_articles<br/>표준 조항 ID들]
     end
     
-    subgraph CHECK["🔍 문제 확인"]
+    subgraph CHECK["문제 확인"]
         HAS_ISSUE{has_issues<br/>= true?}
     end
     
-    subgraph SEVERITY_CALC["📊 심각도 계산"]
+    subgraph SEVERITY_CALC["심각도 계산"]
         COUNT_MISSING[missing_items<br/>개수 세기]
         COUNT_INSUFF[insufficient_items<br/>개수 세기]
         CALC{조건 판정}
@@ -1028,12 +1028,12 @@ graph LR
         LOW[severity = low<br/>그 외]
     end
     
-    subgraph POSITIVE_PATH["✅ 긍정적 분석"]
+    subgraph POSITIVE_PATH["긍정적 분석"]
         INFO[severity = info<br/>문제 없음]
         EMPTY_LISTS[missing_items = []<br/>insufficient_items = []]
     end
     
-    subgraph CREATE["💡 제안 객체 생성"]
+    subgraph CREATE["제안 객체 생성"]
         BUILD_OBJ[suggestion 딕셔너리<br/>생성]
         ADD_STD[selected_standard_articles<br/>추가]
         ADD_TYPE[issue_type = content<br/>추가]
@@ -1042,7 +1042,7 @@ graph LR
         ADD_SEVERITY[severity<br/>추가]
     end
     
-    subgraph OUTPUT_SUG["📤 출력"]
+    subgraph OUTPUT_SUG["출력"]
         SUGGESTION[suggestion 객체<br/>ArticleAnalysis에 추가]
     end
     
